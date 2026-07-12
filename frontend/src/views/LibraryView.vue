@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import AppPagination from '@/components/AppPagination.vue'
 import MediaGrid from '@/components/MediaGrid.vue'
 import SkeletonGrid from '@/components/SkeletonGrid.vue'
 import {
@@ -15,6 +16,12 @@ import {
 } from '@/api/media'
 import type { Library, MediaListItem, MediaSort, ScanJob } from '@/api/types'
 import { loadMediaSort, MEDIA_SORT_OPTIONS, saveMediaSort } from '@/utils/mediaSort'
+import {
+  DEFAULT_PAGE_SIZE,
+  pageQueryPatch,
+  parsePage,
+  scrollListTop,
+} from '@/utils/pageQuery'
 
 const route = useRoute()
 const router = useRouter()
@@ -22,8 +29,9 @@ const router = useRouter()
 const items = ref<MediaListItem[]>([])
 const libraries = ref<Library[]>([])
 const total = ref(0)
-const page = ref(1)
+const page = ref(parsePage(route.query))
 const sort = ref<MediaSort>(loadMediaSort())
+const PAGE_SIZE = DEFAULT_PAGE_SIZE
 const loading = ref(false)
 const scanningId = ref<number | null>(null)
 const scanProgress = ref<ScanJob | null>(null)
@@ -114,7 +122,7 @@ async function loadMedia(opts?: { quiet?: boolean }) {
   try {
     const data = await listMedia({
       page: page.value,
-      page_size: 48,
+      page_size: PAGE_SIZE,
       library_id: currentLibraryId.value,
       sort: sort.value,
     })
@@ -200,19 +208,36 @@ async function load() {
   }
 }
 
+function syncPageQuery(nextPage: number, extra: Record<string, string | undefined> = {}) {
+  page.value = nextPage
+  router.replace({
+    query: {
+      ...route.query,
+      ...extra,
+      ...pageQueryPatch(nextPage),
+    },
+  })
+}
+
 function selectLibrary(id: number) {
   currentLibraryId.value = id
-  page.value = 1
   const lib = libraries.value.find((l) => l.id === id) || null
   syncIntervalForm(lib)
-  router.replace({ query: { ...route.query, library: String(id) } })
+  syncPageQuery(1, { library: String(id) })
   void loadMedia()
 }
 
 function onSortChange(v: MediaSort) {
   sort.value = v
   saveMediaSort(v)
-  page.value = 1
+  syncPageQuery(1)
+  void loadMedia()
+}
+
+function onPageChange(p: number) {
+  if (p === page.value) return
+  syncPageQuery(p)
+  scrollListTop()
   void loadMedia()
 }
 
@@ -337,7 +362,19 @@ watch(
   },
 )
 
+watch(
+  () => route.query.page,
+  (v) => {
+    const p = parsePage({ page: v })
+    if (p !== page.value) {
+      page.value = p
+      void loadMedia()
+    }
+  },
+)
+
 onMounted(() => {
+  page.value = parsePage(route.query)
   void load()
   startSoftRefresh()
 })
@@ -434,16 +471,7 @@ onBeforeUnmount(stopSoftRefresh)
     <SkeletonGrid v-if="loading && !items.length" />
     <MediaGrid v-else :items="items" />
 
-    <div v-if="total > 48" class="pager">
-      <el-pagination
-        background
-        layout="prev, pager, next"
-        :total="total"
-        :page-size="48"
-        v-model:current-page="page"
-        @current-change="() => loadMedia()"
-      />
-    </div>
+    <AppPagination :total="total" :page="page" :page-size="PAGE_SIZE" @update:page="onPageChange" />
 
     <el-dialog v-model="showCreate" title="添加媒体库" width="440px">
       <el-form label-width="100px">
@@ -592,11 +620,6 @@ onBeforeUnmount(stopSoftRefresh)
 }
 .hint {
   margin-bottom: 18px;
-}
-.pager {
-  margin-top: 22px;
-  display: flex;
-  justify-content: center;
 }
 code {
   color: var(--accent);

@@ -1,20 +1,43 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import AppPagination from '@/components/AppPagination.vue'
 import MediaGrid from '@/components/MediaGrid.vue'
 import SkeletonGrid from '@/components/SkeletonGrid.vue'
 import { getActor, listActorMedia, rescrapeActorImage } from '@/api/media'
 import type { Actor, MediaListItem, MediaSort } from '@/api/types'
 import { monogramChar, monogramStyle } from '@/utils/monogram'
 import { loadMediaSort, MEDIA_SORT_OPTIONS, saveMediaSort } from '@/utils/mediaSort'
+import {
+  DEFAULT_PAGE_SIZE,
+  pageQueryPatch,
+  parsePage,
+  scrollListTop,
+} from '@/utils/pageQuery'
 
 const props = defineProps<{ id: string }>()
+const route = useRoute()
+const router = useRouter()
 const actor = ref<Actor | null>(null)
 const items = ref<MediaListItem[]>([])
+const total = ref(0)
+const page = ref(parsePage(route.query))
 const sort = ref<MediaSort>(loadMediaSort())
 const loading = ref(false)
 const imgLoading = ref(false)
 const imgFailed = ref(false)
+const PAGE_SIZE = DEFAULT_PAGE_SIZE
+
+function syncPageQuery(nextPage: number) {
+  page.value = nextPage
+  router.replace({
+    query: {
+      ...route.query,
+      ...pageQueryPatch(nextPage),
+    },
+  })
+}
 
 async function load() {
   loading.value = true
@@ -22,11 +45,12 @@ async function load() {
   try {
     actor.value = await getActor(Number(props.id))
     const data = await listActorMedia(Number(props.id), {
-      page: 1,
-      page_size: 96,
+      page: page.value,
+      page_size: PAGE_SIZE,
       sort: sort.value,
     })
     items.value = data.items
+    total.value = data.total
   } catch {
     ElMessage.error('加载演员详情失败')
   } finally {
@@ -37,6 +61,14 @@ async function load() {
 function onSortChange(v: MediaSort) {
   sort.value = v
   saveMediaSort(v)
+  syncPageQuery(1)
+  void load()
+}
+
+function onPageChange(p: number) {
+  if (p === page.value) return
+  syncPageQuery(p)
+  scrollListTop()
   void load()
 }
 
@@ -55,8 +87,29 @@ async function onRescrapeImage() {
   }
 }
 
-onMounted(load)
-watch(() => props.id, load)
+watch(
+  () => props.id,
+  () => {
+    syncPageQuery(1)
+    void load()
+  },
+)
+
+watch(
+  () => route.query.page,
+  (v) => {
+    const p = parsePage({ page: v })
+    if (p !== page.value) {
+      page.value = p
+      void load()
+    }
+  },
+)
+
+onMounted(() => {
+  page.value = parsePage(route.query)
+  void load()
+})
 </script>
 
 <template>
@@ -74,7 +127,7 @@ watch(() => props.id, load)
       </div>
       <div class="info">
         <h1 class="page-title">{{ actor.name }}</h1>
-        <p class="muted">{{ actor.media_count ?? items.length }} 部作品</p>
+        <p class="muted">{{ actor.media_count ?? total }} 部作品</p>
         <div class="hero-actions">
           <el-select :model-value="sort" size="small" style="width: 168px" @change="onSortChange">
             <el-option
@@ -92,6 +145,7 @@ watch(() => props.id, load)
     </div>
     <SkeletonGrid v-if="loading && !items.length" />
     <MediaGrid v-else :items="items" />
+    <AppPagination :total="total" :page="page" :page-size="PAGE_SIZE" @update:page="onPageChange" />
   </div>
 </template>
 

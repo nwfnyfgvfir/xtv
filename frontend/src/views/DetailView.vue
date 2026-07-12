@@ -114,6 +114,15 @@ async function onToggleFav() {
   }
 }
 
+/** Prefer history back so list ?page= is preserved; fallback to library home. */
+function goBack() {
+  if (typeof window !== 'undefined' && window.history.length > 1) {
+    router.back()
+    return
+  }
+  router.replace({ path: '/' })
+}
+
 onMounted(() => {
   void load()
   void loadProviders()
@@ -123,6 +132,9 @@ watch(() => props.id, load)
 
 <template>
   <div class="page">
+    <div class="top-actions">
+      <el-button text type="primary" @click="goBack">← 返回</el-button>
+    </div>
     <div v-if="loading && !item" class="muted">加载中…</div>
     <div v-else-if="item" class="detail">
       <div class="left">
@@ -213,6 +225,9 @@ watch(() => props.id, load)
 </template>
 
 <style scoped>
+.top-actions {
+  margin: -4px 0 12px;
+}
 .detail {
   display: grid;
   grid-template-columns: minmax(180px, 260px) 1fr;
