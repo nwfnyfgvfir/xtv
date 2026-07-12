@@ -1,0 +1,42 @@
+# Optional local dependencies. MetaTube is remote — not included.
+# App image (after GHCR publish):
+#   image: ghcr.io/<owner>/<repo>:latest
+
+services:
+  tv:
+    build: .
+    container_name: tv-app
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      MEDIA_ROOT: /media
+      DATABASE_URL: sqlite:////data/app.db
+    volumes:
+      - ./media:/media
+      - ./data:/data
+    restart: unless-stopped
+
+  alist:
+    image: xhofe/alist:latest
+    container_name: tv-alist
+    profiles: ["full"]
+    ports:
+      - "5244:5244"
+    volumes:
+      - ./data/alist:/opt/alist/data
+      - ./media/local:/local
+    restart: unless-stopped
+
+  autofilm:
+    image: akimio/autofilm:latest
+    container_name: tv-autofilm
+    profiles: ["full"]
+    volumes:
+      - ./config/autofilm:/config
+      - ./media:/media
+      - ./data/autofilm-logs:/logs
+    depends_on:
+      - alist
+    restart: unless-stopped

@@ -1,0 +1,35 @@
+# Copy to config.yaml and fill credentials when using compose profile "full".
+# AutoFilm generates .strm under /media/strm for this app to scan.
+
+alist:
+  - id: main
+    base_url: http://alist:5244
+    public_url:
+    username: admin
+    password: ""
+    token: ""
+    wait_time: 0.2
+
+media_servers: []
+
+alist2strm_tasks:
+  - id: jav-cloud
+    cron: "0 0 3 * * *"
+    alist: main
+    source_dir: /cloud/jav
+    target_dir: /media/strm/jav
+    mode: AlistPath
+    flatten_mode: false
+    overwrite: false
+    concurrency: 20
+    download:
+      enable: false
+    sync:
+      enabled: true
+      smart_protection:
+        enabled: true
+        threshold: 100
+        grace_scans: 3
+
+ani2alist_tasks: []
+library_poster_tasks: []
