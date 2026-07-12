@@ -56,23 +56,29 @@ onMounted(() => {
 <template>
   <div class="page">
     <h1 class="page-title">设置</h1>
+    <p class="muted intro">MetaTube 刮削与 Alist 播放凭证</p>
 
     <el-card class="card" shadow="never">
-      <template #header>MetaTube 连通性</template>
+      <template #header>
+        <span class="card-title">MetaTube 连通性</span>
+      </template>
       <p v-if="health?.metatube?.ok" class="ok">
         已连接：{{ JSON.stringify(health.metatube.data) }}
       </p>
       <p v-else class="err">
         未连接：{{ health?.metatube?.error || '未知' }}
       </p>
-      <p class="muted">MEDIA_ROOT: {{ settings?.media_root }}</p>
-      <p class="muted">
+      <p class="muted line">MEDIA_ROOT: {{ settings?.media_root }}</p>
+      <p class="muted line">
         Token 状态：MetaTube {{ settings?.metatube_token_set ? '已配置' : '未配置' }} · Alist
         {{ settings?.alist_token_set ? '已配置' : '未配置' }}
       </p>
     </el-card>
 
     <el-card class="card" shadow="never">
+      <template #header>
+        <span class="card-title">连接配置</span>
+      </template>
       <el-form label-width="140px" label-position="left">
         <el-form-item label="MetaTube URL">
           <el-input v-model="form.metatube_base_url" />
@@ -111,16 +117,29 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.intro {
+  margin: -8px 0 18px;
+  font-size: 13px;
+}
 .card {
   background: var(--panel);
   border: 1px solid var(--border);
   margin-bottom: 16px;
   max-width: 720px;
+  border-radius: 14px;
+}
+.card-title {
+  font-weight: 600;
+  letter-spacing: 0.04em;
 }
 .ok {
-  color: #67c23a;
+  color: var(--ok);
 }
 .err {
-  color: #f56c6c;
+  color: var(--danger);
+}
+.line {
+  margin: 6px 0;
+  font-size: 13px;
 }
 </style>

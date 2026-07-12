@@ -29,7 +29,7 @@ async function load() {
     const data = await listMedia({ page: page.value, page_size: 48 })
     items.value = data.items
     total.value = data.total
-  } catch (e: unknown) {
+  } catch {
     ElMessage.error('加载失败，请确认后端已启动')
   } finally {
     loading.value = false
@@ -88,7 +88,10 @@ onMounted(load)
 <template>
   <div class="page" v-loading="loading || scanning">
     <div class="head">
-      <h1 class="page-title">媒体库</h1>
+      <div>
+        <h1 class="page-title">媒体库</h1>
+        <p class="muted intro">本地影片与 strm 直链，刮削封面经 MetaTube 代理展示</p>
+      </div>
       <div class="actions">
         <el-button type="primary" @click="showCreate = true">添加媒体库</el-button>
       </div>
@@ -106,7 +109,9 @@ onMounted(load)
         </div>
       </div>
     </div>
-    <p v-else class="muted">尚未添加媒体库。路径可填相对 MEDIA_ROOT 的路径，例如 <code>local</code> 或 <code>strm</code>。</p>
+    <p v-else class="muted hint">
+      尚未添加媒体库。路径可填相对 MEDIA_ROOT 的路径，例如 <code>local</code> 或 <code>strm</code>。
+    </p>
 
     <MediaGrid :items="items" />
     <div v-if="total > 48" class="pager">
@@ -147,12 +152,17 @@ onMounted(load)
 <style scoped>
 .head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+  margin-bottom: 8px;
+}
+.intro {
+  margin: -8px 0 16px;
+  font-size: 13px;
 }
 .libs {
-  margin-bottom: 18px;
+  margin-bottom: 20px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -162,17 +172,21 @@ onMounted(load)
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  padding: 10px 12px;
+  padding: 12px 14px;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
 }
 .lib-actions {
   display: flex;
   gap: 8px;
 }
+.hint {
+  margin-bottom: 18px;
+}
 .pager {
-  margin-top: 20px;
+  margin-top: 22px;
   display: flex;
   justify-content: center;
 }

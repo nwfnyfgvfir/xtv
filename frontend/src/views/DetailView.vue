@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import VideoPlayer from '@/components/VideoPlayer.vue'
+import CoverPlaceholder from '@/components/CoverPlaceholder.vue'
 import { getMedia, playMedia, rescrapeMedia } from '@/api/media'
 import type { MediaDetail, PlayInfo } from '@/api/types'
 
@@ -10,6 +11,7 @@ const item = ref<MediaDetail | null>(null)
 const play = ref<PlayInfo | null>(null)
 const loading = ref(false)
 const playing = ref(false)
+const imgFailed = ref(false)
 
 const tags = computed(() => {
   if (!item.value?.tags_json) return [] as string[]
@@ -21,8 +23,12 @@ const tags = computed(() => {
   }
 })
 
+const cover = computed(() => item.value?.cover_url || item.value?.thumb_url || '')
+const showImage = computed(() => Boolean(cover.value) && !imgFailed.value)
+
 async function load() {
   loading.value = true
+  imgFailed.value = false
   try {
     item.value = await getMedia(Number(props.id))
   } catch {
@@ -45,6 +51,7 @@ async function onPlay() {
 async function onRescrape() {
   try {
     item.value = await rescrapeMedia(Number(props.id))
+    imgFailed.value = false
     ElMessage.success('刮削完成')
   } catch (e: unknown) {
     const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -60,13 +67,25 @@ watch(() => props.id, load)
   <div class="page" v-loading="loading">
     <div v-if="item" class="detail">
       <div class="left">
-        <img v-if="item.cover_url" class="cover" :src="item.cover_url" :alt="item.title || ''" />
-        <div v-else class="cover-placeholder big">No Cover</div>
+        <img
+          v-if="showImage"
+          class="cover"
+          :src="cover"
+          :alt="item.title || ''"
+          @error="imgFailed = true"
+        />
+        <CoverPlaceholder
+          v-else
+          size="lg"
+          :number="item.number"
+          :title="item.title"
+          :filename="item.filename"
+        />
       </div>
       <div class="right">
         <div class="number">{{ item.number || '未知番号' }}</div>
         <h1>{{ item.title || item.filename }}</h1>
-        <p class="muted">
+        <p class="muted meta-line">
           <span v-if="item.provider">{{ item.provider }}</span>
           <span v-if="item.release_date"> · {{ item.release_date }}</span>
           <span v-if="item.studio"> · {{ item.studio }}</span>
@@ -100,8 +119,9 @@ watch(() => props.id, load)
 <style scoped>
 .detail {
   display: grid;
-  grid-template-columns: 240px 1fr;
-  gap: 24px;
+  grid-template-columns: 260px 1fr;
+  gap: 28px;
+  align-items: start;
 }
 @media (max-width: 720px) {
   .detail {
@@ -110,42 +130,52 @@ watch(() => props.id, load)
 }
 .cover {
   width: 100%;
-  border-radius: 12px;
+  border-radius: 14px;
   border: 1px solid var(--border);
-}
-.big {
-  min-height: 320px;
-  border-radius: 12px;
+  box-shadow: var(--shadow-card);
+  display: block;
+  background: #0a0c10;
 }
 .number {
+  font-family: var(--font-display);
   color: var(--accent);
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  font-size: 22px;
+  letter-spacing: 0.08em;
+  text-shadow: 0 0 20px var(--accent-glow);
 }
 h1 {
-  margin: 6px 0 8px;
-  font-size: 24px;
+  margin: 8px 0 10px;
+  font-size: 26px;
   line-height: 1.3;
+  font-weight: 600;
+}
+.meta-line {
+  margin: 0;
 }
 .btns {
   display: flex;
   gap: 10px;
-  margin: 14px 0;
+  margin: 16px 0;
 }
 .tags {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 .plot {
   white-space: pre-wrap;
-  line-height: 1.6;
-  color: #cfd3da;
+  line-height: 1.7;
+  color: #d4cfc4;
+  margin: 0;
 }
 .actors h3 {
-  margin: 16px 0 8px;
-  font-size: 15px;
+  margin: 18px 0 10px;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
 }
 .actor-list {
   display: flex;
@@ -153,17 +183,20 @@ h1 {
   gap: 8px;
 }
 .actor {
-  background: #222733;
-  padding: 4px 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  padding: 5px 12px;
   border-radius: 999px;
   font-size: 13px;
 }
 .path {
-  margin-top: 16px;
+  margin-top: 18px;
   font-size: 12px;
   word-break: break-all;
 }
 .player-wrap {
-  margin-top: 28px;
+  margin-top: 32px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
 }
 </style>

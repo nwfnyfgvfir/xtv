@@ -7,9 +7,24 @@ from sqlalchemy.orm import Session, joinedload
 from app.db import get_db
 from app.models import MediaItem
 from app.schemas import MediaDetail, MediaListItem, PaginatedMedia
+from app.services.metatube import MetaTubeClient
 from app.services.scrape import scrape_media_item
 
 router = APIRouter()
+
+
+def _with_proxied_images(item: MediaItem, *, detail: bool = False) -> MediaListItem | MediaDetail:
+    """Serialize media and rewrite legacy source CDN URLs via MetaTube proxy."""
+    model = MediaDetail if detail else MediaListItem
+    data = model.model_validate(item)
+    client = MetaTubeClient()
+    provider = item.provider
+    provider_id = item.provider_id
+    data.cover_url = client.proxied_image_url(provider, provider_id, data.cover_url)
+    data.thumb_url = client.proxied_image_url(provider, provider_id, data.thumb_url)
+    if detail and isinstance(data, MediaDetail):
+        data.backdrop_url = client.proxied_image_url(provider, provider_id, data.backdrop_url)
+    return data
 
 
 @router.get("", response_model=PaginatedMedia)
@@ -46,7 +61,7 @@ def list_media(
         .all()
     )
     return PaginatedMedia(
-        items=[MediaListItem.model_validate(i) for i in items],
+        items=[_with_proxied_images(i) for i in items],  # type: ignore[list-item]
         total=total,
         page=page,
         page_size=page_size,
@@ -63,7 +78,7 @@ def get_media(media_id: int, db: Session = Depends(get_db)) -> MediaDetail:
     )
     if not item:
         raise HTTPException(404, "media not found")
-    return MediaDetail.model_validate(item)
+    return _with_proxied_images(item, detail=True)  # type: ignore[return-value]
 
 
 @router.post("/{media_id}/rescrape", response_model=MediaDetail)
@@ -89,4 +104,4 @@ async def rescrape_media(media_id: int, db: Session = Depends(get_db)) -> MediaD
         .filter(MediaItem.id == media_id)
         .one()
     )
-    return MediaDetail.model_validate(item)
+    return _with_proxied_images(item, detail=True)  # type: ignore[return-value]

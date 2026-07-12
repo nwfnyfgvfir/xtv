@@ -85,9 +85,15 @@ async def scrape_media_item(db: Session, item: MediaItem, force: bool = False) -
         item.plot = detail.get("summary") or detail.get("plot") or detail.get("description") or item.plot
         item.provider = provider or item.provider
         item.provider_id = provider_id or item.provider_id
-        item.cover_url = detail.get("cover_url") or best.get("cover_url") or item.cover_url
-        item.thumb_url = detail.get("thumb_url") or best.get("thumb_url") or item.thumb_url
-        item.backdrop_url = detail.get("big_cover_url") or detail.get("backdrop_url") or item.backdrop_url
+
+        raw_cover = detail.get("cover_url") or best.get("cover_url") or item.cover_url
+        raw_thumb = detail.get("thumb_url") or best.get("thumb_url") or item.thumb_url
+        raw_backdrop = detail.get("big_cover_url") or detail.get("backdrop_url") or item.backdrop_url
+        # Prefer MetaTube image proxy so clients need not reach source CDNs (e.g. javbus).
+        item.cover_url = client.proxied_image_url(provider, provider_id, raw_cover) or item.cover_url
+        item.thumb_url = client.proxied_image_url(provider, provider_id, raw_thumb) or item.thumb_url
+        item.backdrop_url = client.proxied_image_url(provider, provider_id, raw_backdrop) or item.backdrop_url
+
         item.score = _as_float(detail.get("score") if detail.get("score") is not None else best.get("score"))
         item.studio = _first_str(detail.get("maker") or detail.get("studio") or detail.get("label"))
         item.runtime = _as_int(detail.get("runtime") or detail.get("duration"))

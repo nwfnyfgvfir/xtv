@@ -14,7 +14,10 @@ const active = computed(() => {
 <template>
   <div class="layout">
     <header class="topbar">
-      <div class="brand" @click="router.push('/')">TV</div>
+      <div class="brand" @click="router.push('/')">
+        <span class="brand-mark">TV</span>
+        <span class="brand-sub">CINEMA</span>
+      </div>
       <nav class="nav">
         <button :class="{ on: active === 'library' }" @click="router.push('/')">媒体库</button>
         <button :class="{ on: active === 'search' }" @click="router.push('/search')">搜索</button>
@@ -34,38 +37,58 @@ const active = computed(() => {
 .topbar {
   display: flex;
   align-items: center;
-  gap: 24px;
-  padding: 12px 20px;
+  gap: 28px;
+  padding: 14px 22px;
   border-bottom: 1px solid var(--border);
-  background: rgba(15, 17, 21, 0.92);
+  background: rgba(11, 13, 18, 0.88);
   position: sticky;
   top: 0;
   z-index: 20;
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(14px) saturate(1.2);
 }
 .brand {
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  color: var(--accent);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   cursor: pointer;
-  font-size: 20px;
+  user-select: none;
+}
+.brand-mark {
+  font-family: var(--font-display);
+  font-size: 28px;
+  letter-spacing: 0.12em;
+  color: var(--accent);
+  text-shadow: 0 0 24px var(--accent-glow);
+  line-height: 1;
+}
+.brand-sub {
+  font-size: 11px;
+  letter-spacing: 0.28em;
+  color: var(--muted);
+  font-weight: 600;
 }
 .nav {
   display: flex;
-  gap: 8px;
+  gap: 6px;
 }
 .nav button {
   border: 0;
   background: transparent;
   color: var(--muted);
-  padding: 8px 12px;
-  border-radius: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
   cursor: pointer;
   font-size: 14px;
+  font-weight: 500;
+  transition: background 0.15s ease, color 0.15s ease;
 }
-.nav button.on,
-.nav button:hover {
+.nav button.on {
+  color: #1a1205;
+  background: var(--accent);
+  font-weight: 600;
+}
+.nav button:not(.on):hover {
   color: var(--text);
-  background: #222733;
+  background: var(--accent-soft);
 }
 </style>

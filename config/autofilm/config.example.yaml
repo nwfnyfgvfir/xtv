@@ -1,9 +1,13 @@
 # AutoFilm 配置示例（对接「另机」Alist，为本项目生成 .strm）
 #
-# 启用：
+# ★ 必须复制为运行时文件（镜像只读 /config/config.yaml，不会读本 example）：
 #   cp config/autofilm/config.example.yaml config/autofilm/config.yaml
 #   # 填写下方 base_url / token / source_dir
-#   docker compose --profile autofilm up -d
+#   docker compose --profile autofilm up -d --force-recreate autofilm
+#
+# Schema：本文件使用 AutoFilm 新配置键（alist / alist2strm_tasks / …），
+# 与官方 main 及较新镜像一致。若日志仍「未检测到 Alist2Strm」且已有 config.yaml，
+# 请核对镜像版本是否过旧（旧版顶层键为 Alist2StrmList）。
 #
 # 官方文档：https://github.com/AkimioJR/AutoFilm
 # 说明文档：https://blog.akimio.top/posts/1031/

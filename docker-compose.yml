@@ -6,7 +6,8 @@
 #
 # Optional AutoFilm (remote Alist → .strm under ./media):
 #   cp config/autofilm/config.example.yaml config/autofilm/config.yaml
-#   docker compose --profile autofilm up -d
+#   # fill alist base_url / token / source_dir — image only reads config.yaml
+#   docker compose --profile autofilm up -d --force-recreate autofilm
 
 services:
   tv:

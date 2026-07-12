@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 from typing import Any
 
 import httpx
 
 from app.config import Settings, get_settings
+
+logger = logging.getLogger(__name__)
+
+_RETRYABLE_STATUS = {429, 502, 503, 504}
+_MAX_ATTEMPTS = 3
 
 
 class MetaTubeError(Exception):
@@ -31,22 +38,51 @@ class MetaTubeClient:
     async def _get(self, path: str, params: dict[str, Any] | None = None, auth: bool = True) -> Any:
         url = f"{self.base}{path}"
         timeout = httpx.Timeout(60.0, connect=15.0)
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-            resp = await client.get(url, params=params, headers=self._headers(auth=auth))
-        try:
-            body = resp.json()
-        except Exception as exc:  # noqa: BLE001
-            raise MetaTubeError(f"Invalid JSON from MetaTube ({resp.status_code})", resp.status_code) from exc
-        if not resp.is_success:
-            err = body.get("error") if isinstance(body, dict) else None
-            msg = err.get("message") if isinstance(err, dict) else resp.text
-            raise MetaTubeError(msg or f"HTTP {resp.status_code}", resp.status_code)
-        if isinstance(body, dict) and "error" in body and body["error"]:
-            err = body["error"]
-            raise MetaTubeError(err.get("message", "MetaTube error"), err.get("code"))
-        if isinstance(body, dict) and "data" in body:
-            return body["data"]
-        return body
+        last_exc: Exception | None = None
+
+        for attempt in range(1, _MAX_ATTEMPTS + 1):
+            try:
+                async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+                    resp = await client.get(url, params=params, headers=self._headers(auth=auth))
+            except httpx.HTTPError as exc:
+                last_exc = MetaTubeError(f"MetaTube request failed: {exc}")
+                if attempt < _MAX_ATTEMPTS:
+                    await asyncio.sleep(0.8 * attempt)
+                    continue
+                raise last_exc from exc
+
+            try:
+                body = resp.json()
+            except Exception as exc:  # noqa: BLE001
+                snippet = (resp.text or "")[:200]
+                logger.debug("MetaTube non-JSON body status=%s: %s", resp.status_code, snippet)
+                last_exc = MetaTubeError(
+                    f"Invalid JSON from MetaTube ({resp.status_code})",
+                    resp.status_code,
+                )
+                if resp.status_code in _RETRYABLE_STATUS and attempt < _MAX_ATTEMPTS:
+                    await asyncio.sleep(0.8 * attempt)
+                    continue
+                raise last_exc from exc
+
+            if resp.status_code in _RETRYABLE_STATUS and attempt < _MAX_ATTEMPTS:
+                await asyncio.sleep(0.8 * attempt)
+                continue
+
+            if not resp.is_success:
+                err = body.get("error") if isinstance(body, dict) else None
+                msg = err.get("message") if isinstance(err, dict) else resp.text
+                raise MetaTubeError(msg or f"HTTP {resp.status_code}", resp.status_code)
+            if isinstance(body, dict) and "error" in body and body["error"]:
+                err = body["error"]
+                raise MetaTubeError(err.get("message", "MetaTube error"), err.get("code"))
+            if isinstance(body, dict) and "data" in body:
+                return body["data"]
+            return body
+
+        if last_exc:
+            raise last_exc
+        raise MetaTubeError("MetaTube request failed")
 
     async def ping(self) -> dict[str, Any]:
         data = await self._get("/", auth=False)
@@ -71,5 +107,16 @@ class MetaTubeClient:
     def primary_image_url(self, provider: str, movie_id: str, url: str = "", quality: int = 90) -> str:
         from urllib.parse import quote, urlencode
 
-        qs = urlencode({"url": url, "quality": quality})
-        return f"{self.base}/v1/images/primary/{quote(provider, safe='')}/{quote(movie_id, safe='')}" + (f"?{qs}" if qs else "")
+        qs = urlencode({"url": url, "quality": quality}) if url else urlencode({"quality": quality})
+        path = f"{self.base}/v1/images/primary/{quote(provider, safe='')}/{quote(movie_id, safe='')}"
+        return f"{path}?{qs}" if qs else path
+
+    def proxied_image_url(self, provider: str | None, provider_id: str | None, url: str | None) -> str | None:
+        """Rewrite third-party image URLs through MetaTube primary image proxy."""
+        if not url:
+            return url
+        if "/v1/images/" in url:
+            return url
+        if provider and provider_id:
+            return self.primary_image_url(provider, provider_id, url)
+        return url

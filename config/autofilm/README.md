@@ -25,18 +25,20 @@ docker run -d --name autofilm \
 ## 快速开始
 
 ```bash
-# 1. 配置
+# 1. 配置（缺这一步会启动成功但三个模块都「未检测到」）
 cp config/autofilm/config.example.yaml config/autofilm/config.yaml
-# 编辑：
+# 编辑 config.yaml：
 #   alist[].base_url / token  → 远程 Alist
 #   alist2strm_tasks[].source_dir → 网盘路径
 #   target_dir 保持 /media/strm/... 即可
 
 # 2. 启动（可与 tv 一起）
-docker compose --profile autofilm up -d
+docker compose --profile autofilm up -d --force-recreate autofilm
 
 # 3. 看日志
 docker compose logs -f autofilm
+# 期望：不再出现「未检测到 Alist2Strm 模块配置」
+# 正常：Ani2Alist / LibraryPoster 若保持 [] 仍会 WARNING（本项目可忽略）
 
 # 4. 确认输出
 ls media/strm/jav   # 应出现 *.strm
@@ -124,10 +126,22 @@ Alist 短暂故障时建议保持 `smart_protection.enabled: true`。
 - `media_servers` / `library_poster_tasks`：面向 Jellyfin/Emby，本项目留空  
 - `ani2alist_tasks`：动漫追更写回 Alist，按需自行加  
 
+## 日志对照
+
+| 日志 | 含义 |
+|------|------|
+| `未检测到 Alist2Strm 模块配置` | **异常**：没有可读的 `config.yaml`，或键名/缩进错误，或 `alist2strm_tasks` 为空 |
+| `未检测到 Ani2Alist 模块配置` | **正常**（本项目默认 `ani2alist_tasks: []`） |
+| `未检测到 LibraryPoster 模块配置` | **正常**（本项目默认 `library_poster_tasks: []`，不接 Jellyfin/Emby） |
+
+镜像只加载 **`/config/config.yaml`**。仓库里的 `config.example.yaml` **不会**被自动使用。
+
 ## 排障
 
 | 现象 | 处理 |
 |------|------|
+| 三个模块都未检测到 | `ls config/autofilm/config.yaml`；没有则 `cp` example；改完后 `--force-recreate autofilm` |
+| 仅 Alist2Strm 未检测到 | 检查 `alist2strm_tasks` 是否非空、YAML 缩进、键名是否与镜像 schema 一致 |
 | 容器反复退出 | 是否缺少 `/config/config.yaml`；YAML 缩进 |
 | 连不上 Alist | 从 **AutoFilm 宿主机** `curl` 一下 `base_url`；防火墙/证书 |
 | 有日志无 `.strm` | `source_dir` 是否在 Alist 存在；账号是否可见该路径 |
