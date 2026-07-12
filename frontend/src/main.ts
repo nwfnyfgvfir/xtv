@@ -5,5 +5,9 @@ import 'element-plus/dist/index.css'
 import App from './App.vue'
 import router from './router'
 import './styles/main.css'
+import { useTheme } from './composables/useTheme'
+
+// apply theme before mount to avoid flash
+useTheme()
 
 createApp(App).use(createPinia()).use(router).use(ElementPlus).mount('#app')

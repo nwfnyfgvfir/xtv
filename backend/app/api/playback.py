@@ -5,11 +5,14 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.deps import require_auth
 from app.models import MediaItem, PlaybackProgress
 from app.schemas import PlayInfo, ProgressIn, ProgressOut
 from app.services.alist import AlistClient, AlistError
@@ -43,7 +46,11 @@ def _ensure_path_in_library(item: MediaItem, db: Session) -> Path:
 
 
 @router.get("/media/{media_id}/play", response_model=PlayInfo)
-async def play_info(media_id: int, db: Session = Depends(get_db)) -> PlayInfo:
+async def play_info(
+    media_id: int,
+    _: Annotated[dict, Depends(require_auth)],
+    db: Session = Depends(get_db),
+) -> PlayInfo:
     item = db.get(MediaItem, media_id)
     if not item:
         raise HTTPException(404, "media not found")
@@ -123,7 +130,11 @@ async def stream_media(media_id: int, request: Request, db: Session = Depends(ge
 
 
 @router.get("/media/{media_id}/progress", response_model=ProgressOut)
-def get_progress(media_id: int, db: Session = Depends(get_db)) -> ProgressOut:
+def get_progress(
+    media_id: int,
+    _: Annotated[dict, Depends(require_auth)],
+    db: Session = Depends(get_db),
+) -> ProgressOut:
     item = db.get(MediaItem, media_id)
     if not item:
         raise HTTPException(404, "media not found")
@@ -139,7 +150,12 @@ def get_progress(media_id: int, db: Session = Depends(get_db)) -> ProgressOut:
 
 
 @router.put("/media/{media_id}/progress", response_model=ProgressOut)
-def put_progress(media_id: int, body: ProgressIn, db: Session = Depends(get_db)) -> ProgressOut:
+def put_progress(
+    media_id: int,
+    body: ProgressIn,
+    _: Annotated[dict, Depends(require_auth)],
+    db: Session = Depends(get_db),
+) -> ProgressOut:
     item = db.get(MediaItem, media_id)
     if not item:
         raise HTTPException(404, "media not found")

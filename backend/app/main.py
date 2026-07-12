@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -11,20 +12,32 @@ from fastapi.staticfiles import StaticFiles
 from app.api import api_router
 from app.config import get_settings
 from app.db import init_db
+from app.services.scheduler import shutdown_scheduler, start_scheduler
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_db()
-    # ensure media dirs
     settings = get_settings()
     settings.media_root_path.mkdir(parents=True, exist_ok=True)
     (settings.media_root_path / "local").mkdir(parents=True, exist_ok=True)
     (settings.media_root_path / "strm").mkdir(parents=True, exist_ok=True)
+    if not settings.auth_enabled:
+        logger.warning("ADMIN_PASSWORD empty — API auth is DISABLED (dev mode)")
+    try:
+        start_scheduler()
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to start scheduler")
     yield
+    try:
+        shutdown_scheduler()
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to stop scheduler")
 
 
-app = FastAPI(title="TV", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="TV", version="0.2.0", lifespan=lifespan)
 settings = get_settings()
 
 app.add_middleware(

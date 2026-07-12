@@ -4,6 +4,9 @@ export interface Library {
   path: string
   type: string
   enabled: boolean
+  auto_scan_enabled?: boolean
+  scan_interval_hours?: number | null
+  media_count?: number
   created_at: string
 }
 
@@ -20,6 +23,7 @@ export interface MediaListItem {
   release_date?: string | null
   score?: number | null
   scraped_at?: string | null
+  favorited?: boolean
 }
 
 export interface Actor {
@@ -28,6 +32,7 @@ export interface Actor {
   provider?: string | null
   provider_id?: string | null
   image_url?: string | null
+  media_count?: number
 }
 
 export interface MediaDetail extends MediaListItem {
@@ -54,6 +59,13 @@ export interface PaginatedMedia {
   page_size: number
 }
 
+export interface PaginatedActors {
+  items: Actor[]
+  total: number
+  page: number
+  page_size: number
+}
+
 export interface PlayInfo {
   play_url: string
   kind: 'local' | 'direct' | 'alist'
@@ -70,12 +82,16 @@ export interface Progress {
 export interface Settings {
   metatube_base_url: string
   metatube_token_set: boolean
+  metatube_provider?: string
+  metatube_fallback?: boolean
   alist_base_url: string
   alist_token_set: boolean
   media_root: string
   auto_scrape: boolean
   scan_extensions: string
   cors_origins: string
+  auth_enabled?: boolean
+  movie_providers?: string[]
   extra: Record<string, string>
 }
 
@@ -93,4 +109,17 @@ export interface ScanJob {
 export interface Health {
   status: string
   metatube?: { ok?: boolean; data?: unknown; error?: string } | null
+  auth_enabled?: boolean
+  scheduler?: { running?: boolean; jobs?: { id: string; next_run_time?: string | null }[] } | null
+}
+
+export interface AuthStatus {
+  auth_enabled: boolean
+  authenticated: boolean
+}
+
+export interface LoginResult {
+  access_token: string
+  token_type: string
+  auth_enabled: boolean
 }

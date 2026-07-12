@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.db import get_db
-from app.models import MediaItem
+from app.deps import require_auth
+from app.models import Favorite, MediaItem
 from app.schemas import MediaDetail, MediaListItem, PaginatedMedia
 from app.services.metatube import MetaTubeClient
 from app.services.scrape import scrape_media_item
@@ -13,8 +16,12 @@ from app.services.scrape import scrape_media_item
 router = APIRouter()
 
 
-def _with_proxied_images(item: MediaItem, *, detail: bool = False) -> MediaListItem | MediaDetail:
-    """Serialize media and rewrite legacy source CDN URLs via MetaTube proxy."""
+def _with_proxied_images(
+    item: MediaItem,
+    *,
+    detail: bool = False,
+    favorited: bool | None = None,
+) -> MediaListItem | MediaDetail:
     model = MediaDetail if detail else MediaListItem
     data = model.model_validate(item)
     client = MetaTubeClient()
@@ -24,14 +31,19 @@ def _with_proxied_images(item: MediaItem, *, detail: bool = False) -> MediaListI
     data.thumb_url = client.proxied_image_url(provider, provider_id, data.thumb_url)
     if detail and isinstance(data, MediaDetail):
         data.backdrop_url = client.proxied_image_url(provider, provider_id, data.backdrop_url)
+    if favorited is None:
+        favorited = item.favorite is not None
+    data.favorited = bool(favorited)
     return data
 
 
 @router.get("", response_model=PaginatedMedia)
 def list_media(
+    _: Annotated[dict, Depends(require_auth)],
     q: str | None = None,
     library_id: int | None = None,
     scraped: bool | None = None,
+    favorited: bool | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(40, ge=1, le=200),
     db: Session = Depends(get_db),
@@ -52,10 +64,15 @@ def list_media(
         query = query.filter(MediaItem.scraped_at.isnot(None))
     elif scraped is False:
         query = query.filter(MediaItem.scraped_at.is_(None))
+    if favorited is True:
+        query = query.join(Favorite, Favorite.media_id == MediaItem.id)
+    elif favorited is False:
+        query = query.outerjoin(Favorite, Favorite.media_id == MediaItem.id).filter(Favorite.id.is_(None))
 
     total = query.with_entities(func.count(MediaItem.id)).scalar() or 0
     items = (
-        query.order_by(MediaItem.id.desc())
+        query.options(joinedload(MediaItem.favorite))
+        .order_by(MediaItem.id.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()
@@ -69,10 +86,14 @@ def list_media(
 
 
 @router.get("/{media_id}", response_model=MediaDetail)
-def get_media(media_id: int, db: Session = Depends(get_db)) -> MediaDetail:
+def get_media(
+    media_id: int,
+    _: Annotated[dict, Depends(require_auth)],
+    db: Session = Depends(get_db),
+) -> MediaDetail:
     item = (
         db.query(MediaItem)
-        .options(joinedload(MediaItem.actors))
+        .options(joinedload(MediaItem.actors), joinedload(MediaItem.favorite))
         .filter(MediaItem.id == media_id)
         .one_or_none()
     )
@@ -82,10 +103,14 @@ def get_media(media_id: int, db: Session = Depends(get_db)) -> MediaDetail:
 
 
 @router.post("/{media_id}/rescrape", response_model=MediaDetail)
-async def rescrape_media(media_id: int, db: Session = Depends(get_db)) -> MediaDetail:
+async def rescrape_media(
+    media_id: int,
+    _: Annotated[dict, Depends(require_auth)],
+    db: Session = Depends(get_db),
+) -> MediaDetail:
     item = (
         db.query(MediaItem)
-        .options(joinedload(MediaItem.actors))
+        .options(joinedload(MediaItem.actors), joinedload(MediaItem.favorite))
         .filter(MediaItem.id == media_id)
         .one_or_none()
     )
@@ -97,11 +122,63 @@ async def rescrape_media(media_id: int, db: Session = Depends(get_db)) -> MediaD
     db.refresh(item)
     if not ok and not item.scraped_at:
         raise HTTPException(502, "scrape failed or no results")
-    # re-load actors
     item = (
         db.query(MediaItem)
-        .options(joinedload(MediaItem.actors))
+        .options(joinedload(MediaItem.actors), joinedload(MediaItem.favorite))
         .filter(MediaItem.id == media_id)
         .one()
     )
     return _with_proxied_images(item, detail=True)  # type: ignore[return-value]
+
+
+@router.post("/{media_id}/favorite", response_model=MediaDetail)
+def favorite_media(
+    media_id: int,
+    _: Annotated[dict, Depends(require_auth)],
+    db: Session = Depends(get_db),
+) -> MediaDetail:
+    item = (
+        db.query(MediaItem)
+        .options(joinedload(MediaItem.actors), joinedload(MediaItem.favorite))
+        .filter(MediaItem.id == media_id)
+        .one_or_none()
+    )
+    if not item:
+        raise HTTPException(404, "media not found")
+    if item.favorite is None:
+        db.add(Favorite(media_id=media_id))
+        db.commit()
+        item = (
+            db.query(MediaItem)
+            .options(joinedload(MediaItem.actors), joinedload(MediaItem.favorite))
+            .filter(MediaItem.id == media_id)
+            .one()
+        )
+    return _with_proxied_images(item, detail=True)  # type: ignore[return-value]
+
+
+@router.delete("/{media_id}/favorite", response_model=MediaDetail)
+def unfavorite_media(
+    media_id: int,
+    _: Annotated[dict, Depends(require_auth)],
+    db: Session = Depends(get_db),
+) -> MediaDetail:
+    item = (
+        db.query(MediaItem)
+        .options(joinedload(MediaItem.actors), joinedload(MediaItem.favorite))
+        .filter(MediaItem.id == media_id)
+        .one_or_none()
+    )
+    if not item:
+        raise HTTPException(404, "media not found")
+    fav = db.query(Favorite).filter(Favorite.media_id == media_id).one_or_none()
+    if fav:
+        db.delete(fav)
+        db.commit()
+        item = (
+            db.query(MediaItem)
+            .options(joinedload(MediaItem.actors), joinedload(MediaItem.favorite))
+            .filter(MediaItem.id == media_id)
+            .one()
+        )
+    return _with_proxied_images(item, detail=True, favorited=False)  # type: ignore[return-value]

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Generator
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 class Base(DeclarativeBase):
@@ -18,7 +21,6 @@ def _make_engine():
     connect_args = {}
     if url.startswith("sqlite"):
         connect_args["check_same_thread"] = False
-        # ensure parent dir exists for sqlite file
         if "///" in url:
             from pathlib import Path
 
@@ -49,8 +51,25 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
+def _ensure_column(table: str, column: str, ddl_type: str, default_sql: str | None = None) -> None:
+    insp = inspect(engine)
+    if table not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns(table)}
+    if column in cols:
+        return
+    clause = f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}"
+    if default_sql is not None:
+        clause += f" DEFAULT {default_sql}"
+    logger.info("Migrating schema: %s", clause)
+    with engine.begin() as conn:
+        conn.execute(text(clause))
+
+
 def init_db() -> None:
-    # Import models so metadata is populated
     from app import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+    # Lightweight migrations for existing SQLite DBs
+    _ensure_column("libraries", "auto_scan_enabled", "BOOLEAN", "0")
+    _ensure_column("libraries", "scan_interval_hours", "INTEGER", None)

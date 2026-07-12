@@ -1,17 +1,27 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import VideoPlayer from '@/components/VideoPlayer.vue'
 import CoverPlaceholder from '@/components/CoverPlaceholder.vue'
-import { getMedia, playMedia, rescrapeMedia } from '@/api/media'
+import {
+  favoriteMedia,
+  getMedia,
+  playMedia,
+  rescrapeMedia,
+  unfavoriteMedia,
+} from '@/api/media'
 import type { MediaDetail, PlayInfo } from '@/api/types'
+import { monogramChar, monogramStyle } from '@/utils/monogram'
 
 const props = defineProps<{ id: string }>()
+const router = useRouter()
 const item = ref<MediaDetail | null>(null)
 const play = ref<PlayInfo | null>(null)
 const loading = ref(false)
 const playing = ref(false)
 const imgFailed = ref(false)
+const favLoading = ref(false)
 
 const tags = computed(() => {
   if (!item.value?.tags_json) return [] as string[]
@@ -59,13 +69,28 @@ async function onRescrape() {
   }
 }
 
+async function onToggleFav() {
+  if (!item.value) return
+  favLoading.value = true
+  try {
+    item.value = item.value.favorited
+      ? await unfavoriteMedia(item.value.id)
+      : await favoriteMedia(item.value.id)
+  } catch {
+    ElMessage.error('收藏操作失败')
+  } finally {
+    favLoading.value = false
+  }
+}
+
 onMounted(load)
 watch(() => props.id, load)
 </script>
 
 <template>
-  <div class="page" v-loading="loading">
-    <div v-if="item" class="detail">
+  <div class="page">
+    <div v-if="loading && !item" class="muted">加载中…</div>
+    <div v-else-if="item" class="detail">
       <div class="left">
         <img
           v-if="showImage"
@@ -93,6 +118,9 @@ watch(() => props.id, load)
         </p>
         <div class="btns">
           <el-button type="primary" @click="onPlay">播放</el-button>
+          <el-button :loading="favLoading" @click="onToggleFav">
+            {{ item.favorited ? '取消收藏' : '收藏' }}
+          </el-button>
           <el-button @click="onRescrape" :disabled="!item.number">重新刮削</el-button>
         </div>
         <div v-if="tags.length" class="tags">
@@ -102,7 +130,19 @@ watch(() => props.id, load)
         <div v-if="item.actors?.length" class="actors">
           <h3>演员</h3>
           <div class="actor-list">
-            <span v-for="a in item.actors" :key="a.id" class="actor">{{ a.name }}</span>
+            <button
+              v-for="a in item.actors"
+              :key="a.id"
+              type="button"
+              class="actor"
+              @click="router.push(`/actors/${a.id}`)"
+            >
+              <img v-if="a.image_url" :src="a.image_url" :alt="a.name" />
+              <span v-else class="a-mono" :style="monogramStyle(a.name)">
+                {{ monogramChar({ title: a.name }) }}
+              </span>
+              <span>{{ a.name }}</span>
+            </button>
           </div>
         </div>
         <p class="muted path">{{ item.path }}</p>
@@ -134,7 +174,7 @@ watch(() => props.id, load)
   border: 1px solid var(--border);
   box-shadow: var(--shadow-card);
   display: block;
-  background: #0a0c10;
+  background: var(--bg);
 }
 .number {
   font-family: var(--font-display);
@@ -154,6 +194,7 @@ h1 {
 }
 .btns {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   margin: 16px 0;
 }
@@ -166,8 +207,9 @@ h1 {
 .plot {
   white-space: pre-wrap;
   line-height: 1.7;
-  color: #d4cfc4;
+  color: var(--text);
   margin: 0;
+  opacity: 0.92;
 }
 .actors h3 {
   margin: 18px 0 10px;
@@ -183,11 +225,33 @@ h1 {
   gap: 8px;
 }
 .actor {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   background: var(--panel);
   border: 1px solid var(--border);
-  padding: 5px 12px;
+  padding: 4px 12px 4px 4px;
   border-radius: 999px;
   font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+.actor:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.actor img,
+.a-mono {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-elevated);
+  font-size: 12px;
+  font-family: var(--font-display);
 }
 .path {
   margin-top: 18px;

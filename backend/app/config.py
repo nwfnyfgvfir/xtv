@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     media_root: str = str(ROOT_DIR / "media")
     metatube_base_url: str = "https://openai-proxy.caowxj.eu.org"
     metatube_token: str = ""
+    metatube_provider: str = ""  # empty = auto
+    metatube_fallback: bool = True
     alist_base_url: str = "http://127.0.0.1:5244"
     alist_token: str = ""
     cors_origins: str = "http://127.0.0.1:5173,http://localhost:5173"
@@ -27,6 +29,10 @@ class Settings(BaseSettings):
     port: int = 8000
     scan_extensions: str = "mp4,mkv,avi,wmv,m2ts,ts,mov,strm"
     auto_scrape: bool = True
+    admin_password: str = ""
+    jwt_secret: str = "tv-dev-secret-change-me"
+    jwt_expire_hours: int = 72
+    auth_required: bool = True  # if admin_password empty, auth is effectively off
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -46,7 +52,6 @@ class Settings(BaseSettings):
             rel = url.split("sqlite:///", 1)[-1].lstrip("./")
             return f"sqlite:///{(ROOT_DIR / rel).as_posix()}"
         if url.startswith("sqlite:///") and not url.startswith("sqlite:////"):
-            # sqlite:///relative-or-absolute — if not absolute path, anchor to ROOT_DIR
             raw = url[len("sqlite:///") :]
             p = Path(raw)
             if not p.is_absolute():
@@ -56,6 +61,10 @@ class Settings(BaseSettings):
     @property
     def extension_set(self) -> set[str]:
         return {e.strip().lower().lstrip(".") for e in self.scan_extensions.split(",") if e.strip()}
+
+    @property
+    def auth_enabled(self) -> bool:
+        return bool(self.admin_password.strip()) and self.auth_required
 
 
 @lru_cache

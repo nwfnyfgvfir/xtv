@@ -91,7 +91,7 @@ class MetaTubeClient:
     async def search_movie(self, q: str, provider: str = "", fallback: bool = True) -> list[dict[str, Any]]:
         data = await self._get(
             "/v1/movies/search",
-            params={"q": q, "provider": provider, "fallback": str(fallback).lower()},
+            params={"q": q, "provider": provider or "", "fallback": str(fallback).lower()},
             auth=True,
         )
         return data if isinstance(data, list) else []
@@ -102,6 +102,10 @@ class MetaTubeClient:
             params={"lazy": str(lazy).lower()},
             auth=True,
         )
+        return data if isinstance(data, dict) else {}
+
+    async def list_providers(self) -> dict[str, Any]:
+        data = await self._get("/v1/providers", auth=True)
         return data if isinstance(data, dict) else {}
 
     def primary_image_url(self, provider: str, movie_id: str, url: str = "", quality: int = 90) -> str:

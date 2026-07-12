@@ -7,6 +7,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.models import Actor, MediaItem
 from app.services.metatube import MetaTubeClient, MetaTubeError
 
@@ -63,7 +64,12 @@ async def scrape_media_item(db: Session, item: MediaItem, force: bool = False) -
         return False
 
     try:
-        results = await client.search_movie(item.number, fallback=True)
+        settings = get_settings()
+        results = await client.search_movie(
+            item.number,
+            provider=settings.metatube_provider or "",
+            fallback=settings.metatube_fallback,
+        )
         best = _pick_best(results, item.number)
         if not best:
             logger.info("No MetaTube result for %s", item.number)

@@ -55,16 +55,17 @@ def scan_library_sync(db: Session, lib: Library, job: ScanJob | None = None) -> 
 
     db.commit()
 
+    job.message = f"scanning done scanned={job.scanned} created={job.created}; scraping…"
     if settings.auto_scrape:
-        # scrape items missing metadata
         items = (
             db.query(MediaItem)
             .filter(MediaItem.library_id == lib.id, MediaItem.number.isnot(None), MediaItem.scraped_at.is_(None))
             .all()
         )
-        for item in items:
+        total_scrape = len(items)
+        for idx, item in enumerate(items, start=1):
             try:
-                # run async scrape in new loop for sync context
+                job.message = f"scraping {idx}/{total_scrape}: {item.number}"
                 ok = asyncio.run(scrape_media_item(db, item, force=False))
                 if ok:
                     job.scraped += 1

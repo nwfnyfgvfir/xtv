@@ -1,33 +1,66 @@
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import Library
+from app.deps import require_auth
+from app.models import Library, MediaItem
 from app.schemas import LibraryCreate, LibraryOut, LibraryUpdate, ScanJobOut
 from app.services.jobs import job_store
 from app.services.scanner import run_scan_job
+from app.services.scheduler import reload_library_jobs
 
 router = APIRouter()
 
 
+def _library_out(db: Session, lib: Library) -> LibraryOut:
+    count = db.query(func.count(MediaItem.id)).filter(MediaItem.library_id == lib.id).scalar() or 0
+    data = LibraryOut.model_validate(lib)
+    data.media_count = int(count)
+    return data
+
+
 @router.get("", response_model=list[LibraryOut])
-def list_libraries(db: Session = Depends(get_db)) -> list[Library]:
-    return db.query(Library).order_by(Library.id.asc()).all()
+def list_libraries(
+    _: Annotated[dict, Depends(require_auth)],
+    db: Session = Depends(get_db),
+) -> list[LibraryOut]:
+    libs = db.query(Library).order_by(Library.id.asc()).all()
+    return [_library_out(db, lib) for lib in libs]
 
 
 @router.post("", response_model=LibraryOut)
-def create_library(body: LibraryCreate, db: Session = Depends(get_db)) -> Library:
-    lib = Library(name=body.name, path=body.path, type=body.type, enabled=body.enabled)
+def create_library(
+    body: LibraryCreate,
+    _: Annotated[dict, Depends(require_auth)],
+    db: Session = Depends(get_db),
+) -> LibraryOut:
+    lib = Library(
+        name=body.name,
+        path=body.path,
+        type=body.type,
+        enabled=body.enabled,
+        auto_scan_enabled=body.auto_scan_enabled,
+        scan_interval_hours=body.scan_interval_hours,
+    )
     db.add(lib)
     db.commit()
     db.refresh(lib)
-    return lib
+    reload_library_jobs()
+    return _library_out(db, lib)
 
 
 @router.patch("/{library_id}", response_model=LibraryOut)
-def update_library(library_id: int, body: LibraryUpdate, db: Session = Depends(get_db)) -> Library:
+def update_library(
+    library_id: int,
+    body: LibraryUpdate,
+    _: Annotated[dict, Depends(require_auth)],
+    db: Session = Depends(get_db),
+) -> LibraryOut:
     lib = db.get(Library, library_id)
     if not lib:
         raise HTTPException(404, "library not found")
@@ -37,22 +70,29 @@ def update_library(library_id: int, body: LibraryUpdate, db: Session = Depends(g
     db.add(lib)
     db.commit()
     db.refresh(lib)
-    return lib
+    reload_library_jobs()
+    return _library_out(db, lib)
 
 
 @router.delete("/{library_id}", status_code=204)
-def delete_library(library_id: int, db: Session = Depends(get_db)) -> None:
+def delete_library(
+    library_id: int,
+    _: Annotated[dict, Depends(require_auth)],
+    db: Session = Depends(get_db),
+) -> None:
     lib = db.get(Library, library_id)
     if not lib:
         raise HTTPException(404, "library not found")
     db.delete(lib)
     db.commit()
+    reload_library_jobs()
 
 
 @router.post("/{library_id}/scan", response_model=ScanJobOut)
 def scan_library(
     library_id: int,
     background_tasks: BackgroundTasks,
+    _: Annotated[dict, Depends(require_auth)],
     db: Session = Depends(get_db),
 ) -> ScanJobOut:
     lib = db.get(Library, library_id)

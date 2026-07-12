@@ -11,6 +11,8 @@ class LibraryCreate(BaseModel):
     path: str = Field(min_length=1, max_length=1024)
     type: Literal["local", "strm", "mixed"] = "mixed"
     enabled: bool = True
+    auto_scan_enabled: bool = False
+    scan_interval_hours: int | None = Field(default=None, ge=1, le=24 * 30)
 
 
 class LibraryUpdate(BaseModel):
@@ -18,6 +20,8 @@ class LibraryUpdate(BaseModel):
     path: str | None = None
     type: Literal["local", "strm", "mixed"] | None = None
     enabled: bool | None = None
+    auto_scan_enabled: bool | None = None
+    scan_interval_hours: int | None = Field(default=None, ge=1, le=24 * 30)
 
 
 class LibraryOut(BaseModel):
@@ -28,6 +32,9 @@ class LibraryOut(BaseModel):
     path: str
     type: str
     enabled: bool
+    auto_scan_enabled: bool = False
+    scan_interval_hours: int | None = None
+    media_count: int = 0
     created_at: datetime
 
 
@@ -39,6 +46,14 @@ class ActorOut(BaseModel):
     provider: str | None = None
     provider_id: str | None = None
     image_url: str | None = None
+
+
+class ActorListItem(ActorOut):
+    media_count: int = 0
+
+
+class ActorDetail(ActorListItem):
+    pass
 
 
 class MediaListItem(BaseModel):
@@ -56,6 +71,7 @@ class MediaListItem(BaseModel):
     release_date: str | None = None
     score: float | None = None
     scraped_at: datetime | None = None
+    favorited: bool = False
 
 
 class MediaDetail(MediaListItem):
@@ -77,6 +93,13 @@ class MediaDetail(MediaListItem):
 
 class PaginatedMedia(BaseModel):
     items: list[MediaListItem]
+    total: int
+    page: int
+    page_size: int
+
+
+class PaginatedActors(BaseModel):
+    items: list[ActorListItem]
     total: int
     page: int
     page_size: int
@@ -105,18 +128,24 @@ class ProgressOut(BaseModel):
 class SettingsOut(BaseModel):
     metatube_base_url: str
     metatube_token_set: bool
+    metatube_provider: str = ""
+    metatube_fallback: bool = True
     alist_base_url: str
     alist_token_set: bool
     media_root: str
     auto_scrape: bool
     scan_extensions: str
     cors_origins: str
+    auth_enabled: bool = False
+    movie_providers: list[str] = []
     extra: dict[str, str] = {}
 
 
 class SettingsUpdate(BaseModel):
     metatube_base_url: str | None = None
     metatube_token: str | None = None
+    metatube_provider: str | None = None
+    metatube_fallback: bool | None = None
     alist_base_url: str | None = None
     alist_token: str | None = None
     auto_scrape: bool | None = None
@@ -138,3 +167,20 @@ class ScanJobOut(BaseModel):
 class HealthOut(BaseModel):
     status: str
     metatube: dict[str, Any] | None = None
+    auth_enabled: bool = False
+    scheduler: dict[str, Any] | None = None
+
+
+class LoginIn(BaseModel):
+    password: str = Field(min_length=1, max_length=256)
+
+
+class LoginOut(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    auth_enabled: bool = True
+
+
+class AuthStatusOut(BaseModel):
+    auth_enabled: bool
+    authenticated: bool

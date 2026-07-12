@@ -1,8 +1,12 @@
 import client from './client'
 import type {
+  Actor,
+  AuthStatus,
   Health,
   Library,
+  LoginResult,
   MediaDetail,
+  PaginatedActors,
   PaginatedMedia,
   PlayInfo,
   Progress,
@@ -12,10 +16,32 @@ import type {
 
 export const getHealth = () => client.get<Health>('/health').then((r) => r.data)
 
+export const getAuthStatus = () => client.get<AuthStatus>('/auth/status').then((r) => r.data)
+
+export const login = (password: string) =>
+  client.post<LoginResult>('/auth/login', { password }).then((r) => r.data)
+
 export const listLibraries = () => client.get<Library[]>('/libraries').then((r) => r.data)
 
-export const createLibrary = (body: { name: string; path: string; type?: string }) =>
-  client.post<Library>('/libraries', body).then((r) => r.data)
+export const createLibrary = (body: {
+  name: string
+  path: string
+  type?: string
+  auto_scan_enabled?: boolean
+  scan_interval_hours?: number | null
+}) => client.post<Library>('/libraries', body).then((r) => r.data)
+
+export const updateLibrary = (
+  id: number,
+  body: Partial<{
+    name: string
+    path: string
+    type: string
+    enabled: boolean
+    auto_scan_enabled: boolean
+    scan_interval_hours: number | null
+  }>,
+) => client.patch<Library>(`/libraries/${id}`, body).then((r) => r.data)
 
 export const deleteLibrary = (id: number) => client.delete(`/libraries/${id}`)
 
@@ -28,6 +54,7 @@ export const getScanJob = (jobId: string) =>
 export const listMedia = (params: {
   q?: string
   library_id?: number
+  favorited?: boolean
   page?: number
   page_size?: number
 }) => client.get<PaginatedMedia>('/media', { params }).then((r) => r.data)
@@ -36,6 +63,23 @@ export const getMedia = (id: number) => client.get<MediaDetail>(`/media/${id}`).
 
 export const rescrapeMedia = (id: number) =>
   client.post<MediaDetail>(`/media/${id}/rescrape`).then((r) => r.data)
+
+export const favoriteMedia = (id: number) =>
+  client.post<MediaDetail>(`/media/${id}/favorite`).then((r) => r.data)
+
+export const unfavoriteMedia = (id: number) =>
+  client.delete<MediaDetail>(`/media/${id}/favorite`).then((r) => r.data)
+
+export const listFavorites = (params?: { page?: number; page_size?: number }) =>
+  client.get<PaginatedMedia>('/favorites', { params }).then((r) => r.data)
+
+export const listActors = (params?: { q?: string; page?: number; page_size?: number }) =>
+  client.get<PaginatedActors>('/actors', { params }).then((r) => r.data)
+
+export const getActor = (id: number) => client.get<Actor>(`/actors/${id}`).then((r) => r.data)
+
+export const listActorMedia = (id: number, params?: { page?: number; page_size?: number }) =>
+  client.get<PaginatedMedia>(`/actors/${id}/media`, { params }).then((r) => r.data)
 
 export const playMedia = (id: number) => client.get<PlayInfo>(`/media/${id}/play`).then((r) => r.data)
 

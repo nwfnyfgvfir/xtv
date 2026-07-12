@@ -2,21 +2,28 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from app.config import get_settings
 from app.schemas import HealthOut
 from app.services.metatube import MetaTubeClient, MetaTubeError
+from app.services.scheduler import scheduler_status
 
 router = APIRouter()
 
 
 @router.get("/health", response_model=HealthOut)
 async def health() -> HealthOut:
-    mt: dict | None = None
+    settings = get_settings()
+    metatube: dict | None = None
     try:
-        client = MetaTubeClient()
-        data = await client.ping()
-        mt = {"ok": True, "data": data}
+        data = await MetaTubeClient().ping()
+        metatube = {"ok": True, "data": data}
     except MetaTubeError as exc:
-        mt = {"ok": False, "error": str(exc)}
+        metatube = {"ok": False, "error": str(exc)}
     except Exception as exc:  # noqa: BLE001
-        mt = {"ok": False, "error": str(exc)}
-    return HealthOut(status="ok", metatube=mt)
+        metatube = {"ok": False, "error": str(exc)}
+    return HealthOut(
+        status="ok",
+        metatube=metatube,
+        auth_enabled=settings.auth_enabled,
+        scheduler=scheduler_status(),
+    )
