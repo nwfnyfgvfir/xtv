@@ -543,6 +543,7 @@ watch(
 .hint {
   margin: 8px 0 0;
   font-size: 12px;
+  line-height: 1.45;
 }
 .muted {
   color: var(--muted);
@@ -552,6 +553,9 @@ watch(
     height: 52vw;
     min-height: 200px;
     border-radius: 8px;
+  }
+  .hint {
+    font-size: 11px;
   }
 }
 </style>

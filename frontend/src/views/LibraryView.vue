@@ -387,7 +387,7 @@ onBeforeUnmount(stopSoftRefresh)
       <div>
         <h1 class="page-title">媒体库</h1>
       </div>
-      <el-button type="primary" @click="showCreate = true">添加媒体库</el-button>
+      <el-button class="add-lib-btn" type="primary" @click="showCreate = true">添加媒体库</el-button>
     </div>
 
     <div v-if="libraries.length" class="lib-tabs">
@@ -417,9 +417,9 @@ onBeforeUnmount(stopSoftRefresh)
       </div>
       <div class="actions">
         <el-select
+          class="sort-select"
           :model-value="sort"
           size="small"
-          style="width: 168px"
           @change="onSortChange"
         >
           <el-option
@@ -429,7 +429,7 @@ onBeforeUnmount(stopSoftRefresh)
             :value="opt.value"
           />
         </el-select>
-        <div class="interval-inline">
+        <div v-if="currentLibrary.auto_scan_enabled" class="interval-inline">
           <el-input-number
             v-model="form.interval_value"
             size="small"
@@ -437,7 +437,7 @@ onBeforeUnmount(stopSoftRefresh)
             :max="999999"
             controls-position="right"
           />
-          <el-select v-model="form.interval_unit" size="small" style="width: 78px">
+          <el-select v-model="form.interval_unit" size="small" class="unit-select">
             <el-option label="秒" value="seconds" />
             <el-option label="分" value="minutes" />
             <el-option label="时" value="hours" />
@@ -473,7 +473,7 @@ onBeforeUnmount(stopSoftRefresh)
 
     <AppPagination :total="total" :page="page" :page-size="PAGE_SIZE" @update:page="onPageChange" />
 
-    <el-dialog v-model="showCreate" title="添加媒体库" width="440px">
+    <el-dialog v-model="showCreate" title="添加媒体库" class="create-lib-dialog" width="min(440px, 92vw)">
       <el-form label-width="100px">
         <el-form-item label="名称">
           <el-input v-model="form.name" />
@@ -520,6 +520,7 @@ onBeforeUnmount(stopSoftRefresh)
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 16px;
+  flex-wrap: wrap;
 }
 .lib-tabs {
   display: flex;
@@ -537,6 +538,13 @@ onBeforeUnmount(stopSoftRefresh)
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  max-width: 100%;
+}
+.lib-tab .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 140px;
 }
 .lib-tab.on {
   border-color: var(--accent);
@@ -550,6 +558,7 @@ onBeforeUnmount(stopSoftRefresh)
   background: var(--bg);
   padding: 1px 7px;
   border-radius: 999px;
+  flex-shrink: 0;
 }
 .lib-toolbar {
   display: flex;
@@ -567,6 +576,8 @@ onBeforeUnmount(stopSoftRefresh)
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  min-width: 0;
+  overflow: hidden;
 }
 .actions {
   display: flex;
@@ -575,10 +586,17 @@ onBeforeUnmount(stopSoftRefresh)
   flex-wrap: wrap;
   align-items: center;
 }
+.sort-select {
+  width: 168px;
+}
+.unit-select {
+  width: 78px;
+}
 .interval-inline {
   display: inline-flex;
   gap: 6px;
   align-items: center;
+  flex-wrap: wrap;
 }
 .scan-banner {
   margin-bottom: 16px;
@@ -634,13 +652,32 @@ code {
   margin-top: 6px;
   font-size: 12px;
 }
-@media (max-width: 640px) {
+@media (max-width: 860px) {
   .lib-toolbar {
     flex-direction: column;
     align-items: stretch;
   }
   .actions {
+    width: 100%;
     flex-wrap: wrap;
+  }
+  .sort-select {
+    width: min(168px, 100%);
+    flex: 1 1 140px;
+  }
+  .interval-inline {
+    width: 100%;
+  }
+  .add-lib-btn {
+    flex-shrink: 0;
+  }
+}
+@media (max-width: 640px) {
+  .lib-tab .name {
+    max-width: 100px;
+  }
+  .meta {
+    font-size: 12px;
   }
 }
 </style>

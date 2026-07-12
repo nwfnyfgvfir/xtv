@@ -112,9 +112,9 @@ async function toggleFav(e: Event) {
   left: 8px;
   z-index: 2;
   border: 0;
-  width: 36px;
-  height: 36px;
-  min-width: 36px;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.55);
   color: var(--accent);
@@ -181,5 +181,21 @@ async function toggleFav(e: Event) {
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+@media (max-width: 640px) {
+  .meta {
+    padding: 8px 8px 10px;
+  }
+  .title {
+    font-size: 12.5px;
+    min-height: 2.5em;
+  }
+  .sub {
+    font-size: 11px;
+  }
+  .badge {
+    font-size: 11px;
+    padding: 2px 6px;
+  }
 }
 </style>

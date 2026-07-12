@@ -183,11 +183,28 @@ onMounted(() => {
 }
 .info {
   min-width: 0;
+  flex: 1 1 200px;
 }
 .info .page-title {
   margin-bottom: 4px;
 }
 .info .muted {
   margin: 0 0 10px;
+}
+@media (max-width: 640px) {
+  .hero {
+    gap: 12px;
+  }
+  .avatar {
+    width: 80px;
+    height: 80px;
+  }
+  .hero-actions {
+    width: 100%;
+  }
+  .hero-actions :deep(.el-select) {
+    flex: 1 1 140px;
+    min-width: 0;
+  }
 }
 </style>

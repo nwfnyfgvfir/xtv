@@ -113,8 +113,18 @@ onMounted(() => {
   flex-wrap: wrap;
   margin-bottom: 8px;
 }
+.head > div {
+  min-width: 0;
+  flex: 1 1 auto;
+}
 .intro {
   margin: -4px 0 16px;
   font-size: 13px;
+}
+@media (max-width: 640px) {
+  .head :deep(.el-select) {
+    width: 100% !important;
+    max-width: 220px;
+  }
 }
 </style>

@@ -185,8 +185,29 @@ onMounted(async () => {
   margin-bottom: 20px;
   max-width: 760px;
   flex-wrap: wrap;
+  align-items: center;
+}
+.bar :deep(.el-select),
+.bar :deep(.el-input) {
+  min-width: 0;
 }
 .tip {
   margin-top: 24px;
+}
+@media (max-width: 640px) {
+  .bar {
+    max-width: none;
+  }
+  .bar :deep(.el-select) {
+    flex: 1 1 calc(50% - 5px);
+    width: auto !important;
+    min-width: 0;
+  }
+  .bar :deep(.el-input) {
+    flex: 1 1 100%;
+  }
+  .bar .el-button {
+    flex: 1 1 auto;
+  }
 }
 </style>

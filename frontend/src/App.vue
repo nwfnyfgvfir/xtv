@@ -128,6 +128,8 @@ function go(path: string) {
   gap: 16px;
   padding: 12px 16px;
   padding-top: calc(12px + env(safe-area-inset-top));
+  padding-left: max(16px, env(safe-area-inset-left));
+  padding-right: max(16px, env(safe-area-inset-right));
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg) 88%, transparent);
   position: sticky;
@@ -212,6 +214,14 @@ function go(path: string) {
   .brand-sub {
     display: none !important;
   }
+  .topbar {
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+    gap: 10px;
+  }
+  .brand-mark {
+    font-size: 24px;
+  }
   .bottom-nav {
     display: grid;
     grid-template-columns: repeat(5, 1fr);
@@ -224,6 +234,8 @@ function go(path: string) {
     border-top: 1px solid var(--border);
     backdrop-filter: blur(12px);
     padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+    padding-left: max(4px, env(safe-area-inset-left));
+    padding-right: max(4px, env(safe-area-inset-right));
   }
   .bottom-nav button {
     border: 0;

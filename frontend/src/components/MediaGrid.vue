@@ -28,6 +28,12 @@ defineProps<{ items: MediaListItem[] }>()
     gap: 10px;
   }
 }
+@media (max-width: 380px) {
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    gap: 8px;
+  }
+}
 .empty {
   margin-top: 48px;
   text-align: center;

@@ -124,11 +124,33 @@ onMounted(() => {
   gap: 10px;
   max-width: 520px;
   margin-bottom: 18px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.bar :deep(.el-input) {
+  flex: 1 1 180px;
+  min-width: 0;
 }
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 14px;
+}
+@media (max-width: 640px) {
+  .bar {
+    max-width: none;
+    width: 100%;
+  }
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 10px;
+  }
+}
+@media (max-width: 380px) {
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    gap: 8px;
+  }
 }
 .actor-card {
   border: 1px solid var(--border);

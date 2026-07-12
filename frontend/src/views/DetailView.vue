@@ -239,6 +239,23 @@ watch(() => props.id, load)
     grid-template-columns: 1fr;
     gap: 16px;
   }
+  .left {
+    max-width: 280px;
+    margin: 0 auto;
+    width: 100%;
+  }
+  .cover {
+    max-height: 55vh;
+    object-fit: contain;
+    margin: 0 auto;
+  }
+  .scrape-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .scrape-row :deep(.el-select) {
+    width: 100%;
+  }
 }
 .cover-wrap {
   position: relative;
@@ -354,7 +371,13 @@ h1 {
 }
 .player-wrap {
   margin-top: 32px;
+  margin-bottom: 12px;
   padding-top: 20px;
   border-top: 1px solid var(--border);
+  max-width: 100%;
+}
+.player-wrap :deep(.artplayer-app),
+.player-wrap :deep(video) {
+  max-width: 100%;
 }
 </style>

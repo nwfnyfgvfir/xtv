@@ -61,6 +61,8 @@ body,
   color: var(--text);
   font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  overflow-x: clip;
 }
 
 a {
@@ -92,6 +94,33 @@ textarea {
 
 .muted {
   color: var(--muted);
+}
+
+@media (max-width: 860px) {
+  .page {
+    padding: 14px 12px 28px;
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+  }
+}
+
+@media (max-width: 640px) {
+  .page-title {
+    font-size: 26px;
+    letter-spacing: 0.04em;
+  }
+
+  .skeleton-grid {
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 10px;
+  }
+}
+
+@media (max-width: 380px) {
+  .skeleton-grid {
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    gap: 8px;
+  }
 }
 
 /* Top progress bar */
@@ -214,6 +243,14 @@ textarea {
   --el-pagination-button-bg-color: var(--panel);
   --el-pagination-hover-color: var(--accent);
   --el-text-color-primary: var(--text);
+}
+
+@media (max-width: 640px) {
+  .el-pagination {
+    flex-wrap: wrap;
+    justify-content: center;
+    row-gap: 8px;
+  }
 }
 
 .el-empty__description p {
