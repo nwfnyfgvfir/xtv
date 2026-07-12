@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db import SessionLocal
 from app.models import Library, MediaItem
+from app.services.actors import delete_orphan_actors
 from app.services.jobs import ScanJob, job_store
 from app.services.library_revision import bump_revision
 from app.services.naming import extract_number
@@ -74,6 +75,10 @@ def scan_library_sync(db: Session, lib: Library, job: ScanJob | None = None) -> 
         if item.path not in seen_paths:
             db.delete(item)
             job.removed += 1
+
+    if job.removed:
+        db.flush()
+        delete_orphan_actors(db)
 
     db.commit()
     if job.created or job.removed:
@@ -172,6 +177,8 @@ def remove_path(library_id: int, path: str | Path) -> dict:
                 .filter(MediaItem.library_id == library_id, MediaItem.path == str(path))
                 .delete(synchronize_session=False)
             )
+        if n:
+            delete_orphan_actors(db)
         db.commit()
         if n:
             bump_revision(library_id)
@@ -298,6 +305,8 @@ def refresh_paths(library_id: int, paths: list[str] | set[str]) -> dict:
                     break
             job.removed += int(n)
 
+        if job.removed:
+            delete_orphan_actors(db)
         db.commit()
 
         # Optional scrape for newly created items only

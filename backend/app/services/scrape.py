@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.models import Actor, MediaItem
+from app.services.actors import merge_actors, normalize_actor_name, pick_canonical
 from app.services.metatube import MetaTubeClient, MetaTubeError
 
 logger = logging.getLogger(__name__)
@@ -50,9 +51,11 @@ def _actor_list(detail: dict[str, Any]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for a in actors:
         if isinstance(a, str):
-            out.append({"name": a})
+            name = normalize_actor_name(a)
+            if name:
+                out.append({"name": name})
         elif isinstance(a, dict):
-            name = a.get("name") or a.get("Name")
+            name = normalize_actor_name(a.get("name") or a.get("Name"))
             if name:
                 img = _first_image(
                     a.get("image_url") or a.get("images") or a.get("thumb_url") or a.get("image")
@@ -158,7 +161,7 @@ async def scrape_media_item(
         item.actors.clear()
         for a in _actor_list(detail):
             actor = await _upsert_actor(db, client, a)
-            if actor not in item.actors:
+            if actor is not None and actor not in item.actors:
                 item.actors.append(actor)
 
         if settings.auto_translate:
@@ -195,7 +198,7 @@ async def _apply_translations(
     src_plot: str | None,
     tags: list[str],
 ) -> None:
-    """Translate title/plot/tags/actors in-place. Fail-open (keeps originals)."""
+    """Translate title/plot/tags in-place. Actor names are identity — not translated."""
     from app.services.translate import translate_tags, translate_text
 
     # Always refresh originals from pre-translate MetaTube strings
@@ -213,24 +216,16 @@ async def _apply_translations(
         translated_tags = await translate_tags(tags)
         item.tags_json = json.dumps(translated_tags, ensure_ascii=False)
 
-    for actor in list(item.actors):
-        if not actor.name:
-            continue
-        new_name = await translate_text(actor.name)
-        if new_name and new_name != actor.name:
-            actor.name = new_name[:256]
-            db.add(actor)
-
 
 def _set_actor_provider_safe(
     db: Session,
     actor: Actor,
     provider: str | None,
     provider_id: str | None,
-) -> None:
-    """Assign provider keys only when they do not collide with another actor row."""
+) -> Actor:
+    """Assign provider keys; on collision merge actor into the key owner."""
     if not provider or not provider_id:
-        return
+        return actor
     pid = str(provider_id)
     existing = (
         db.query(Actor)
@@ -238,11 +233,13 @@ def _set_actor_provider_safe(
         .one_or_none()
     )
     if existing is not None and existing.id != actor.id:
-        return
+        # Provider key is stronger identity → keep existing, drop actor.
+        return merge_actors(db, keep=existing, drop=actor)
     if not actor.provider:
         actor.provider = provider
     if not actor.provider_id:
         actor.provider_id = pid
+    return actor
 
 
 async def enrich_actor_image(db: Session, actor: Actor, client: MetaTubeClient | None = None) -> bool:
@@ -261,7 +258,7 @@ async def enrich_actor_image(db: Session, actor: Actor, client: MetaTubeClient |
         if not img:
             return False
         actor.image_url = img
-        _set_actor_provider_safe(
+        actor = _set_actor_provider_safe(
             db,
             actor,
             str(best.get("provider") or "Gfriends"),
@@ -284,19 +281,32 @@ async def enrich_actor_image(db: Session, actor: Actor, client: MetaTubeClient |
         return False
 
 
-async def _upsert_actor(db: Session, client: MetaTubeClient, data: dict[str, Any]) -> Actor:
-    name = str(data["name"])
+async def _upsert_actor(db: Session, client: MetaTubeClient, data: dict[str, Any]) -> Actor | None:
+    name = normalize_actor_name(str(data.get("name") or ""))
+    if not name:
+        return None
     provider = data.get("provider")
     provider_id = data.get("provider_id")
     actor: Actor | None = None
+
+    # 1) Provider key
     if provider and provider_id:
         actor = (
             db.query(Actor)
             .filter(Actor.provider == provider, Actor.provider_id == str(provider_id))
             .one_or_none()
         )
+
+    # 2) Exact name — merge duplicates if multiple rows share the name
     if actor is None:
-        actor = db.query(Actor).filter(Actor.name == name).first()
+        matches = db.query(Actor).filter(Actor.name == name).all()
+        if matches:
+            actor = pick_canonical(matches)
+            for other in matches:
+                if other.id != actor.id:
+                    actor = merge_actors(db, keep=actor, drop=other)
+
+    # 3) Create
     if actor is None:
         actor = Actor(
             name=name,
@@ -307,8 +317,9 @@ async def _upsert_actor(db: Session, client: MetaTubeClient, data: dict[str, Any
         try:
             db.flush()
         except Exception:  # noqa: BLE001
-            # Concurrent insert of same provider key — re-query.
+            # Concurrent insert of same provider key — re-query existing row.
             db.rollback()
+            actor = None
             if provider and provider_id:
                 actor = (
                     db.query(Actor)
@@ -316,14 +327,18 @@ async def _upsert_actor(db: Session, client: MetaTubeClient, data: dict[str, Any
                     .one_or_none()
                 )
             if actor is None:
-                actor = db.query(Actor).filter(Actor.name == name).first()
+                matches = db.query(Actor).filter(Actor.name == name).all()
+                if matches:
+                    actor = pick_canonical(matches)
+                    for other in matches:
+                        if other.id != actor.id:
+                            actor = merge_actors(db, keep=actor, drop=other)
             if actor is None:
                 actor = Actor(name=name)
                 db.add(actor)
                 db.flush()
     else:
-        # Fill missing provider keys without unique collisions.
-        _set_actor_provider_safe(
+        actor = _set_actor_provider_safe(
             db,
             actor,
             str(provider) if provider else None,
@@ -341,6 +356,7 @@ async def _upsert_actor(db: Session, client: MetaTubeClient, data: dict[str, Any
     if not actor.image_url:
         await enrich_actor_image(db, actor, client)
     return actor
+
 
 
 def _as_float(v: Any) -> float | None:

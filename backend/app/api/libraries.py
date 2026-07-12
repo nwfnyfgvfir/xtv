@@ -10,6 +10,7 @@ from app.db import get_db
 from app.deps import require_auth
 from app.models import Library, MediaItem
 from app.schemas import LibraryCreate, LibraryOut, LibraryUpdate, ScanJobOut
+from app.services.actors import delete_orphan_actors
 from app.services.jobs import job_store
 from app.services.library_revision import get_revision
 from app.services.scanner import run_scan_job
@@ -92,6 +93,8 @@ def delete_library(
     if not lib:
         raise HTTPException(404, "library not found")
     db.delete(lib)
+    db.flush()
+    delete_orphan_actors(db)
     db.commit()
     reload_library_jobs()
 

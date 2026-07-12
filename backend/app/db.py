@@ -87,3 +87,30 @@ def init_db() -> None:
             )
     except Exception:  # noqa: BLE001
         logger.debug("scan_interval backfill skipped", exc_info=True)
+
+    _run_actor_dedupe_once()
+
+
+ACTOR_DEDUPE_KEY = "actors_deduped_v1"
+
+
+def _run_actor_dedupe_once() -> None:
+    """One-shot merge of duplicate actors + orphan cleanup for existing DBs."""
+    from app.models import AppSetting
+    from app.services.actors import dedupe_actors, delete_orphan_actors
+
+    db = SessionLocal()
+    try:
+        flag = db.get(AppSetting, ACTOR_DEDUPE_KEY)
+        if flag and flag.value == "1":
+            return
+        merged = dedupe_actors(db)
+        orphans = delete_orphan_actors(db)
+        db.merge(AppSetting(key=ACTOR_DEDUPE_KEY, value="1"))
+        db.commit()
+        logger.info("Actor cleanup: merged=%s orphans_deleted=%s", merged, orphans)
+    except Exception:  # noqa: BLE001
+        db.rollback()
+        logger.exception("Actor dedupe failed")
+    finally:
+        db.close()
