@@ -16,6 +16,7 @@ const favorited = ref(Boolean(props.item.favorited))
 const title = computed(() => props.item.title || props.item.number || props.item.filename)
 const cover = computed(() => props.item.cover_url || props.item.thumb_url || '')
 const showImage = computed(() => Boolean(cover.value) && !imgFailed.value)
+const isChineseSub = computed(() => props.item.subtitle_flag === 'C')
 
 watch(
   () => props.item.favorited,
@@ -65,6 +66,7 @@ async function toggleFav(e: Event) {
       <button class="fav" type="button" :disabled="favLoading" @click="toggleFav">
         {{ favorited ? '♥' : '♡' }}
       </button>
+      <span v-if="isChineseSub" class="sub-badge">中字</span>
       <span v-if="item.number" class="badge">{{ item.number }}</span>
       <span v-if="!item.scraped_at" class="chip">未刮削</span>
     </div>
@@ -108,14 +110,29 @@ async function toggleFav(e: Event) {
   left: 8px;
   z-index: 2;
   border: 0;
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.55);
   color: var(--accent);
   cursor: pointer;
   font-size: 16px;
   line-height: 1;
+}
+.sub-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 3;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #1a1205;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
 }
 .badge {
   position: absolute;
@@ -133,7 +150,7 @@ async function toggleFav(e: Event) {
 }
 .chip {
   position: absolute;
-  top: 8px;
+  bottom: 8px;
   right: 8px;
   font-size: 11px;
   padding: 2px 7px;
@@ -151,6 +168,7 @@ async function toggleFav(e: Event) {
   line-height: 1.35;
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
   min-height: 2.7em;

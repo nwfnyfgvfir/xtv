@@ -178,15 +178,40 @@ def put_progress(
 
 @router.get("/images/proxy")
 async def proxy_image(url: str = Query(..., min_length=8)):
-    """Optional image proxy to avoid hotlink issues."""
+    """Same-origin image proxy with SSRF guards and short LRU cache (no auth — for <img>)."""
     import httpx
     from fastapi.responses import Response
 
-    if not (url.startswith("http://") or url.startswith("https://")):
-        raise HTTPException(400, "invalid url")
-    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-        resp = await client.get(url, headers={"User-Agent": "TV-App/0.1"})
+    from app.services.images import cache_get, cache_set, validate_proxy_url
+
+    try:
+        url = validate_proxy_url(url)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    cached = cache_get(url)
+    if cached:
+        ctype, body = cached
+        return Response(content=body, media_type=ctype, headers={"Cache-Control": "public, max-age=3600"})
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            resp = await client.get(
+                url,
+                headers={
+                    "User-Agent": "TV-App/0.2",
+                    "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+                },
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, f"upstream fetch failed: {exc}") from exc
     if resp.status_code >= 400:
         raise HTTPException(resp.status_code, "upstream image error")
     content_type = resp.headers.get("content-type", "image/jpeg")
-    return Response(content=resp.content, media_type=content_type)
+    if "image" not in content_type and "octet-stream" not in content_type:
+        # still allow (some CDNs return wrong types)
+        content_type = content_type or "image/jpeg"
+    body = resp.content
+    if len(body) <= 5 * 1024 * 1024:
+        cache_set(url, content_type, body)
+    return Response(content=body, media_type=content_type, headers={"Cache-Control": "public, max-age=3600"})

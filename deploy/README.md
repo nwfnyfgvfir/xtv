@@ -79,6 +79,36 @@ docker compose logs -f autofilm
 
 详见仓库内 `config/autofilm/README.md`。TV 的 `ALIST_*` 与 AutoFilm 须指向同一 Alist。
 
+## Nginx 反代（推荐）
+
+完整示例见同目录 [`nginx.conf.example`](./nginx.conf.example)。
+
+要点：
+
+| 项 | 说明 |
+|----|------|
+| 上游 | `127.0.0.1:8000`（compose `HOST_PORT`） |
+| TLS | 证书由 certbot / 现有证书管理；HTTP 301 到 HTTPS |
+| 视频 Range | `/api/stream/` 必须 `proxy_buffering off` 并转发 `Range` |
+| 超时 | 刮削/大文件建议 `proxy_read_timeout` ≥ 3600s |
+| 图片代理 | `/api/images/proxy` 可开 nginx 缓存（应用内已有短 LRU） |
+| 鉴权 | 浏览器 `<img>` 走同源代理，**无需** JWT；API 其它路径仍走 JWT |
+
+```bash
+# 示例：复制并启用
+sudo cp deploy/nginx.conf.example /etc/nginx/sites-available/tv
+sudo ln -sf /etc/nginx/sites-available/tv /etc/nginx/sites-enabled/tv
+# 编辑 server_name 与 ssl_certificate*
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+环境变量建议生产开启登录：
+
+```env
+ADMIN_PASSWORD=***
+JWT_SECRET=***至少32字节随机串***
+```
+
 ## 不要做的事
 
 - 不要在生产机 `docker compose build`（用 GHCR）

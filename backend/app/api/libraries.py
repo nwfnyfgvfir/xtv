@@ -39,6 +39,9 @@ def create_library(
     _: Annotated[dict, Depends(require_auth)],
     db: Session = Depends(get_db),
 ) -> LibraryOut:
+    secs = body.scan_interval_seconds
+    if secs is None and body.scan_interval_hours:
+        secs = body.scan_interval_hours * 3600
     lib = Library(
         name=body.name,
         path=body.path,
@@ -46,6 +49,7 @@ def create_library(
         enabled=body.enabled,
         auto_scan_enabled=body.auto_scan_enabled,
         scan_interval_hours=body.scan_interval_hours,
+        scan_interval_seconds=secs,
     )
     db.add(lib)
     db.commit()
@@ -65,6 +69,8 @@ def update_library(
     if not lib:
         raise HTTPException(404, "library not found")
     data = body.model_dump(exclude_unset=True)
+    if "scan_interval_seconds" not in data and data.get("scan_interval_hours"):
+        data["scan_interval_seconds"] = int(data["scan_interval_hours"]) * 3600
     for k, v in data.items():
         setattr(lib, k, v)
     db.add(lib)

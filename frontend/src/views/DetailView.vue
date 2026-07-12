@@ -7,6 +7,7 @@ import CoverPlaceholder from '@/components/CoverPlaceholder.vue'
 import {
   favoriteMedia,
   getMedia,
+  getSettings,
   playMedia,
   rescrapeMedia,
   unfavoriteMedia,
@@ -22,6 +23,11 @@ const loading = ref(false)
 const playing = ref(false)
 const imgFailed = ref(false)
 const favLoading = ref(false)
+const playLoading = ref(false)
+const scrapeLoading = ref(false)
+const providers = ref<string[]>([])
+const scrapeProvider = ref('')
+const scrapeFallback = ref(true)
 
 const tags = computed(() => {
   if (!item.value?.tags_json) return [] as string[]
@@ -35,10 +41,15 @@ const tags = computed(() => {
 
 const cover = computed(() => item.value?.cover_url || item.value?.thumb_url || '')
 const showImage = computed(() => Boolean(cover.value) && !imgFailed.value)
+const isChineseSub = computed(
+  () => item.value?.subtitle_flag === 'C' || tags.value.includes('中文字幕'),
+)
 
 async function load() {
   loading.value = true
   imgFailed.value = false
+  playing.value = false
+  play.value = null
   try {
     item.value = await getMedia(Number(props.id))
   } catch {
@@ -48,24 +59,44 @@ async function load() {
   }
 }
 
+async function loadProviders() {
+  try {
+    const s = await getSettings()
+    providers.value = s.movie_providers || []
+    scrapeProvider.value = s.metatube_provider || ''
+    scrapeFallback.value = s.metatube_fallback !== false
+  } catch {
+    /* ignore */
+  }
+}
+
 async function onPlay() {
+  playLoading.value = true
   try {
     play.value = await playMedia(Number(props.id))
     playing.value = true
   } catch (e: unknown) {
     const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
     ElMessage.error(msg || '获取播放地址失败')
+  } finally {
+    playLoading.value = false
   }
 }
 
 async function onRescrape() {
+  scrapeLoading.value = true
   try {
-    item.value = await rescrapeMedia(Number(props.id))
+    item.value = await rescrapeMedia(Number(props.id), {
+      provider: scrapeProvider.value || undefined,
+      fallback: scrapeFallback.value,
+    })
     imgFailed.value = false
     ElMessage.success('刮削完成')
   } catch (e: unknown) {
     const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
     ElMessage.error(msg || '刮削失败')
+  } finally {
+    scrapeLoading.value = false
   }
 }
 
@@ -83,7 +114,10 @@ async function onToggleFav() {
   }
 }
 
-onMounted(load)
+onMounted(() => {
+  void load()
+  void loadProviders()
+})
 watch(() => props.id, load)
 </script>
 
@@ -92,20 +126,23 @@ watch(() => props.id, load)
     <div v-if="loading && !item" class="muted">加载中…</div>
     <div v-else-if="item" class="detail">
       <div class="left">
-        <img
-          v-if="showImage"
-          class="cover"
-          :src="cover"
-          :alt="item.title || ''"
-          @error="imgFailed = true"
-        />
-        <CoverPlaceholder
-          v-else
-          size="lg"
-          :number="item.number"
-          :title="item.title"
-          :filename="item.filename"
-        />
+        <div class="cover-wrap">
+          <img
+            v-if="showImage"
+            class="cover"
+            :src="cover"
+            :alt="item.title || ''"
+            @error="imgFailed = true"
+          />
+          <CoverPlaceholder
+            v-else
+            size="lg"
+            :number="item.number"
+            :title="item.title"
+            :filename="item.filename"
+          />
+          <span v-if="isChineseSub" class="sub-badge">中字</span>
+        </div>
       </div>
       <div class="right">
         <div class="number">{{ item.number || '未知番号' }}</div>
@@ -117,11 +154,30 @@ watch(() => props.id, load)
           <span> · {{ item.source_type }}</span>
         </p>
         <div class="btns">
-          <el-button type="primary" @click="onPlay">播放</el-button>
+          <el-button type="primary" :loading="playLoading" @click="onPlay">播放</el-button>
           <el-button :loading="favLoading" @click="onToggleFav">
             {{ item.favorited ? '取消收藏' : '收藏' }}
           </el-button>
-          <el-button @click="onRescrape" :disabled="!item.number">重新刮削</el-button>
+        </div>
+        <div class="scrape-row">
+          <el-select
+            v-model="scrapeProvider"
+            clearable
+            filterable
+            placeholder="刮削源（自动）"
+            style="min-width: 160px; flex: 1"
+          >
+            <el-option label="自动" value="" />
+            <el-option v-for="p in providers" :key="p" :label="p" :value="p" />
+          </el-select>
+          <el-switch v-model="scrapeFallback" active-text="fallback" />
+          <el-button
+            :loading="scrapeLoading"
+            :disabled="!item.number"
+            @click="onRescrape"
+          >
+            重新刮削
+          </el-button>
         </div>
         <div v-if="tags.length" class="tags">
           <el-tag v-for="t in tags" :key="t" size="small" effect="dark" class="tag">{{ t }}</el-tag>
@@ -150,7 +206,7 @@ watch(() => props.id, load)
     </div>
 
     <div v-if="playing && play" class="player-wrap">
-      <VideoPlayer :media-id="Number(id)" :src="play.play_url" />
+      <VideoPlayer :media-id="Number(id)" :src="play.play_url" :autoplay="true" />
       <p class="muted">播放类型: {{ play.kind }}</p>
     </div>
   </div>
@@ -159,14 +215,18 @@ watch(() => props.id, load)
 <style scoped>
 .detail {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: minmax(180px, 260px) 1fr;
   gap: 28px;
   align-items: start;
 }
 @media (max-width: 720px) {
   .detail {
     grid-template-columns: 1fr;
+    gap: 16px;
   }
+}
+.cover-wrap {
+  position: relative;
 }
 .cover {
   width: 100%;
@@ -175,6 +235,17 @@ watch(() => props.id, load)
   box-shadow: var(--shadow-card);
   display: block;
   background: var(--bg);
+}
+.sub-badge {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #1a1205;
 }
 .number {
   font-family: var(--font-display);
@@ -185,7 +256,7 @@ watch(() => props.id, load)
 }
 h1 {
   margin: 8px 0 10px;
-  font-size: 26px;
+  font-size: clamp(20px, 4vw, 26px);
   line-height: 1.3;
   font-weight: 600;
 }
@@ -196,7 +267,14 @@ h1 {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  margin: 16px 0;
+  margin: 16px 0 10px;
+}
+.scrape-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 14px;
 }
 .tags {
   display: flex;
@@ -235,6 +313,7 @@ h1 {
   font-size: 13px;
   color: var(--text);
   cursor: pointer;
+  min-height: 40px;
 }
 .actor:hover {
   border-color: var(--accent);

@@ -19,6 +19,8 @@ const active = computed(() => {
   return 'library'
 })
 
+const showChrome = computed(() => route.name !== 'login')
+
 setupAuthInterceptor(() => {
   if (route.name !== 'login') router.push({ name: 'login', query: { redirect: route.fullPath } })
 })
@@ -46,46 +48,86 @@ function onLogout() {
   logout()
   router.push({ name: 'login' })
 }
+
+function go(path: string) {
+  router.push(path)
+}
 </script>
 
 <template>
-  <div class="layout">
+  <div class="layout" :class="{ 'has-bottom': showChrome }">
     <div class="route-progress" :class="{ on: navigating }"><div class="bar" /></div>
-    <header class="topbar">
-      <div class="brand" @click="router.push('/')">
+    <header v-if="showChrome" class="topbar">
+      <div class="brand" @click="go('/')">
         <span class="brand-mark">TV</span>
         <span class="brand-sub">CINEMA</span>
       </div>
-      <nav class="nav">
-        <button :class="{ on: active === 'library' }" @click="router.push('/')">媒体库</button>
-        <button :class="{ on: active === 'actors' }" @click="router.push('/actors')">演员</button>
-        <button :class="{ on: active === 'favorites' }" @click="router.push('/favorites')">收藏</button>
-        <button :class="{ on: active === 'search' }" @click="router.push('/search')">搜索</button>
-        <button :class="{ on: active === 'settings' }" @click="router.push('/settings')">设置</button>
+      <nav class="nav desktop-nav">
+        <button :class="{ on: active === 'library' }" @click="go('/')">媒体库</button>
+        <button :class="{ on: active === 'actors' }" @click="go('/actors')">演员</button>
+        <button :class="{ on: active === 'favorites' }" @click="go('/favorites')">收藏</button>
+        <button :class="{ on: active === 'search' }" @click="go('/search')">搜索</button>
+        <button :class="{ on: active === 'settings' }" @click="go('/settings')">设置</button>
       </nav>
       <div class="tools">
         <button class="icon-btn" type="button" :title="theme === 'dark' ? '切换白天' : '切换暗色'" @click="toggle">
           {{ theme === 'dark' ? '☀' : '☾' }}
         </button>
-        <button v-if="authEnabled && isAuthenticated" class="icon-btn" type="button" @click="onLogout">退出</button>
-        <button v-else-if="authEnabled" class="icon-btn" type="button" @click="router.push('/login')">登录</button>
+        <button v-if="authEnabled && isAuthenticated" class="icon-btn desktop-only" type="button" @click="onLogout">
+          退出
+        </button>
+        <button
+          v-else-if="authEnabled"
+          class="icon-btn desktop-only"
+          type="button"
+          @click="go('/login')"
+        >
+          登录
+        </button>
       </div>
     </header>
-    <main>
+    <main class="main">
       <router-view />
     </main>
+    <nav v-if="showChrome" class="bottom-nav" aria-label="主导航">
+      <button :class="{ on: active === 'library' }" type="button" @click="go('/')">
+        <span class="ico">▣</span><span>库</span>
+      </button>
+      <button :class="{ on: active === 'actors' }" type="button" @click="go('/actors')">
+        <span class="ico">◎</span><span>演员</span>
+      </button>
+      <button :class="{ on: active === 'favorites' }" type="button" @click="go('/favorites')">
+        <span class="ico">♥</span><span>收藏</span>
+      </button>
+      <button :class="{ on: active === 'search' }" type="button" @click="go('/search')">
+        <span class="ico">⌕</span><span>搜索</span>
+      </button>
+      <button :class="{ on: active === 'settings' }" type="button" @click="go('/settings')">
+        <span class="ico">⚙</span><span>设置</span>
+      </button>
+    </nav>
   </div>
 </template>
 
 <style scoped>
 .layout {
   min-height: 100vh;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.layout.has-bottom {
+  padding-bottom: calc(64px + env(safe-area-inset-bottom));
+}
+@media (min-width: 861px) {
+  .layout.has-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
 }
 .topbar {
   display: flex;
   align-items: center;
-  gap: 20px;
-  padding: 12px 20px;
+  gap: 16px;
+  padding: 12px 16px;
+  padding-top: calc(12px + env(safe-area-inset-top));
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg) 88%, transparent);
   position: sticky;
@@ -130,6 +172,7 @@ function onLogout() {
   cursor: pointer;
   font-size: 14px;
   font-weight: 500;
+  min-height: 40px;
   transition: background 0.15s ease, color 0.15s ease;
 }
 .nav button.on {
@@ -151,12 +194,57 @@ function onLogout() {
   background: var(--panel);
   color: var(--text);
   border-radius: 999px;
-  padding: 6px 12px;
+  padding: 8px 12px;
   cursor: pointer;
   font-size: 13px;
+  min-height: 40px;
 }
 .icon-btn:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+.bottom-nav {
+  display: none;
+}
+@media (max-width: 860px) {
+  .desktop-nav,
+  .desktop-only,
+  .brand-sub {
+    display: none !important;
+  }
+  .bottom-nav {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    background: color-mix(in srgb, var(--panel) 94%, transparent);
+    border-top: 1px solid var(--border);
+    backdrop-filter: blur(12px);
+    padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+  }
+  .bottom-nav button {
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    font-size: 11px;
+    padding: 6px 2px;
+    min-height: 48px;
+    cursor: pointer;
+  }
+  .bottom-nav button.on {
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .bottom-nav .ico {
+    font-size: 16px;
+    line-height: 1;
+  }
 }
 </style>

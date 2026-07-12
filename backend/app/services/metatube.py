@@ -108,6 +108,18 @@ class MetaTubeClient:
         data = await self._get("/v1/providers", auth=True)
         return data if isinstance(data, dict) else {}
 
+    async def search_actor(self, q: str, provider: str = "") -> list[dict[str, Any]]:
+        data = await self._get(
+            "/v1/actors/search",
+            params={"q": q, "provider": provider or ""},
+            auth=True,
+        )
+        return data if isinstance(data, list) else []
+
+    async def get_actor(self, provider: str, actor_id: str) -> dict[str, Any]:
+        data = await self._get(f"/v1/actors/{provider}/{actor_id}", auth=True)
+        return data if isinstance(data, dict) else {}
+
     def primary_image_url(self, provider: str, movie_id: str, url: str = "", quality: int = 90) -> str:
         from urllib.parse import quote, urlencode
 
@@ -116,11 +128,7 @@ class MetaTubeClient:
         return f"{path}?{qs}" if qs else path
 
     def proxied_image_url(self, provider: str | None, provider_id: str | None, url: str | None) -> str | None:
-        """Rewrite third-party image URLs through MetaTube primary image proxy."""
-        if not url:
-            return url
-        if "/v1/images/" in url:
-            return url
-        if provider and provider_id:
-            return self.primary_image_url(provider, provider_id, url)
-        return url
+        """Legacy MetaTube primary proxy — prefer site_proxy_url for API responses."""
+        from app.services.images import site_proxy_url
+
+        return site_proxy_url(url)

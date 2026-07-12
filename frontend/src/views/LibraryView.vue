@@ -33,8 +33,40 @@ const form = ref({
   path: 'local',
   type: 'mixed',
   auto_scan_enabled: false,
-  scan_interval_hours: 24 as number | null,
+  interval_value: 24,
+  interval_unit: 'hours' as 'seconds' | 'minutes' | 'hours',
 })
+
+function toSeconds(value: number, unit: 'seconds' | 'minutes' | 'hours') {
+  if (unit === 'seconds') return Math.max(30, value)
+  if (unit === 'minutes') return Math.max(30, value * 60)
+  return Math.max(30, value * 3600)
+}
+
+function formatInterval(lib: Library) {
+  const s = lib.scan_interval_seconds || (lib.scan_interval_hours ? lib.scan_interval_hours * 3600 : 0)
+  if (!s) return ''
+  if (s % 3600 === 0) return `${s / 3600}h`
+  if (s % 60 === 0) return `${s / 60}m`
+  return `${s}s`
+}
+
+function syncIntervalForm(lib: Library | null) {
+  if (!lib) return
+  const s =
+    lib.scan_interval_seconds ||
+    (lib.scan_interval_hours ? lib.scan_interval_hours * 3600 : 86400)
+  if (s % 3600 === 0) {
+    form.value.interval_value = s / 3600
+    form.value.interval_unit = 'hours'
+  } else if (s % 60 === 0) {
+    form.value.interval_value = s / 60
+    form.value.interval_unit = 'minutes'
+  } else {
+    form.value.interval_value = s
+    form.value.interval_unit = 'seconds'
+  }
+}
 
 const currentLibrary = computed(() =>
   libraries.value.find((l) => l.id === currentLibraryId.value) || null,
@@ -53,6 +85,8 @@ async function loadLibraries() {
   ) {
     currentLibraryId.value = libraries.value[0]?.id ?? null
   }
+  const cur = libraries.value.find((l) => l.id === currentLibraryId.value) || null
+  syncIntervalForm(cur)
 }
 
 async function loadMedia() {
@@ -89,18 +123,24 @@ async function load() {
 function selectLibrary(id: number) {
   currentLibraryId.value = id
   page.value = 1
+  const lib = libraries.value.find((l) => l.id === id) || null
+  syncIntervalForm(lib)
   router.replace({ query: { ...route.query, library: String(id) } })
   void loadMedia()
 }
 
 async function onCreate() {
   try {
+    const secs = form.value.auto_scan_enabled
+      ? toSeconds(form.value.interval_value, form.value.interval_unit)
+      : null
     const lib = await createLibrary({
       name: form.value.name,
       path: form.value.path,
       type: form.value.type,
       auto_scan_enabled: form.value.auto_scan_enabled,
-      scan_interval_hours: form.value.auto_scan_enabled ? form.value.scan_interval_hours : null,
+      scan_interval_seconds: secs,
+      scan_interval_hours: secs ? Math.max(1, Math.round(secs / 3600)) : null,
     })
     showCreate.value = false
     ElMessage.success('媒体库已创建')
@@ -165,14 +205,33 @@ async function onDelete(lib: Library) {
 
 async function toggleAutoScan(lib: Library) {
   try {
+    const secs =
+      lib.scan_interval_seconds ||
+      (lib.scan_interval_hours ? lib.scan_interval_hours * 3600 : 86400)
     await updateLibrary(lib.id, {
       auto_scan_enabled: !lib.auto_scan_enabled,
-      scan_interval_hours: lib.scan_interval_hours || 24,
+      scan_interval_seconds: secs,
+      scan_interval_hours: Math.max(1, Math.round(secs / 3600)),
     })
     await loadLibraries()
     ElMessage.success(!lib.auto_scan_enabled ? '已开启定时扫描' : '已关闭定时扫描')
   } catch {
     ElMessage.error('更新失败')
+  }
+}
+
+async function saveInterval(lib: Library) {
+  const secs = toSeconds(form.value.interval_value, form.value.interval_unit)
+  try {
+    await updateLibrary(lib.id, {
+      scan_interval_seconds: secs,
+      scan_interval_hours: Math.max(1, Math.round(secs / 3600)),
+      auto_scan_enabled: true,
+    })
+    await loadLibraries()
+    ElMessage.success(`定时间隔已设为 ${secs}s`)
+  } catch {
+    ElMessage.error('更新间隔失败')
   }
 }
 
@@ -221,10 +280,25 @@ onMounted(load)
         <span>{{ currentLibrary.path }}</span>
         <span>· {{ currentLibrary.type }}</span>
         <span v-if="currentLibrary.auto_scan_enabled">
-          · 定时每 {{ currentLibrary.scan_interval_hours || 24 }}h
+          · 定时每 {{ formatInterval(currentLibrary) || '24h' }}
         </span>
       </div>
       <div class="actions">
+        <div class="interval-inline">
+          <el-input-number
+            v-model="form.interval_value"
+            size="small"
+            :min="1"
+            :max="999999"
+            controls-position="right"
+          />
+          <el-select v-model="form.interval_unit" size="small" style="width: 78px">
+            <el-option label="秒" value="seconds" />
+            <el-option label="分" value="minutes" />
+            <el-option label="时" value="hours" />
+          </el-select>
+          <el-button size="small" plain @click="saveInterval(currentLibrary)">应用间隔</el-button>
+        </div>
         <el-button size="small" @click="toggleAutoScan(currentLibrary)">
           {{ currentLibrary.auto_scan_enabled ? '关闭定时' : '开启定时' }}
         </el-button>
@@ -281,8 +355,16 @@ onMounted(load)
         <el-form-item label="定时扫描">
           <el-switch v-model="form.auto_scan_enabled" />
         </el-form-item>
-        <el-form-item v-if="form.auto_scan_enabled" label="间隔(小时)">
-          <el-input-number v-model="form.scan_interval_hours" :min="1" :max="720" />
+        <el-form-item label="扫描间隔">
+          <div class="interval-row">
+            <el-input-number v-model="form.interval_value" :min="1" :max="999999" />
+            <el-select v-model="form.interval_unit" style="width: 110px">
+              <el-option label="秒" value="seconds" />
+              <el-option label="分" value="minutes" />
+              <el-option label="时" value="hours" />
+            </el-select>
+          </div>
+          <div class="muted tip">最小 30 秒；创建或点「应用间隔」写入当前库</div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -355,6 +437,13 @@ onMounted(load)
   display: flex;
   gap: 8px;
   flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.interval-inline {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
 }
 .scan-banner {
   margin-bottom: 16px;
@@ -404,5 +493,24 @@ onMounted(load)
 }
 code {
   color: var(--accent);
+}
+.interval-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+}
+.tip {
+  margin-top: 6px;
+  font-size: 12px;
+}
+@media (max-width: 640px) {
+  .lib-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .actions {
+    flex-wrap: wrap;
+  }
 }
 </style>

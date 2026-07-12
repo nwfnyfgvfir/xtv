@@ -10,16 +10,15 @@ from app.db import get_db
 from app.deps import require_auth
 from app.models import Favorite, MediaItem
 from app.schemas import MediaListItem, PaginatedMedia
-from app.services.metatube import MetaTubeClient
+from app.services.images import site_proxy_url
 
 router = APIRouter(prefix="/favorites", tags=["favorites"])
 
 
 def _to_item(item: MediaItem) -> MediaListItem:
-    client = MetaTubeClient()
     data = MediaListItem.model_validate(item)
-    data.cover_url = client.proxied_image_url(item.provider, item.provider_id, data.cover_url)
-    data.thumb_url = client.proxied_image_url(item.provider, item.provider_id, data.thumb_url)
+    data.cover_url = site_proxy_url(data.cover_url)
+    data.thumb_url = site_proxy_url(data.thumb_url)
     data.favorited = True
     return data
 

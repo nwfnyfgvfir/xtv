@@ -10,18 +10,29 @@ from app.db import get_db
 from app.deps import require_auth
 from app.models import Actor, MediaActor, MediaItem
 from app.schemas import ActorDetail, ActorListItem, MediaListItem, PaginatedActors, PaginatedMedia
-from app.services.metatube import MetaTubeClient
+from app.services.images import site_proxy_url
+from app.services.scrape import enrich_actor_image
 
 router = APIRouter(prefix="/actors", tags=["actors"])
 
 
 def _proxy_media(item: MediaItem, favorited_ids: set[int]) -> MediaListItem:
-    client = MetaTubeClient()
     data = MediaListItem.model_validate(item)
-    data.cover_url = client.proxied_image_url(item.provider, item.provider_id, data.cover_url)
-    data.thumb_url = client.proxied_image_url(item.provider, item.provider_id, data.thumb_url)
+    data.cover_url = site_proxy_url(data.cover_url)
+    data.thumb_url = site_proxy_url(data.thumb_url)
     data.favorited = item.id in favorited_ids
     return data
+
+
+def _actor_item(actor: Actor, media_count: int = 0) -> ActorListItem:
+    return ActorListItem(
+        id=actor.id,
+        name=actor.name,
+        provider=actor.provider,
+        provider_id=actor.provider_id,
+        image_url=site_proxy_url(actor.image_url),
+        media_count=media_count,
+    )
 
 
 @router.get("", response_model=PaginatedActors)
@@ -49,17 +60,7 @@ def list_actors(
         .limit(page_size)
         .all()
     )
-    items = [
-        ActorListItem(
-            id=actor.id,
-            name=actor.name,
-            provider=actor.provider,
-            provider_id=actor.provider_id,
-            image_url=actor.image_url,
-            media_count=int(cnt or 0),
-        )
-        for actor, cnt in rows
-    ]
+    items = [_actor_item(actor, int(cnt or 0)) for actor, cnt in rows]
     return PaginatedActors(items=items, total=total, page=page, page_size=page_size)
 
 
@@ -73,14 +74,30 @@ def get_actor(
     if not actor:
         raise HTTPException(404, "actor not found")
     cnt = db.query(func.count(MediaActor.media_id)).filter(MediaActor.actor_id == actor_id).scalar() or 0
-    return ActorDetail(
-        id=actor.id,
-        name=actor.name,
-        provider=actor.provider,
-        provider_id=actor.provider_id,
-        image_url=actor.image_url,
-        media_count=int(cnt),
-    )
+    base = _actor_item(actor, int(cnt))
+    return ActorDetail(**base.model_dump())
+
+
+@router.post("/{actor_id}/rescrape-image", response_model=ActorDetail)
+async def rescrape_actor_image(
+    actor_id: int,
+    _: Annotated[dict, Depends(require_auth)],
+    db: Session = Depends(get_db),
+) -> ActorDetail:
+    actor = db.get(Actor, actor_id)
+    if not actor:
+        raise HTTPException(404, "actor not found")
+    # force re-fetch
+    actor.image_url = None
+    db.add(actor)
+    db.commit()
+    ok = await enrich_actor_image(db, actor)
+    db.refresh(actor)
+    if not ok and not actor.image_url:
+        raise HTTPException(502, "actor image not found")
+    cnt = db.query(func.count(MediaActor.media_id)).filter(MediaActor.actor_id == actor_id).scalar() or 0
+    base = _actor_item(actor, int(cnt))
+    return ActorDetail(**base.model_dump())
 
 
 @router.get("/{actor_id}/media", response_model=PaginatedMedia)

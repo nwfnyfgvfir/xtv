@@ -29,6 +29,7 @@ export const createLibrary = (body: {
   type?: string
   auto_scan_enabled?: boolean
   scan_interval_hours?: number | null
+  scan_interval_seconds?: number | null
 }) => client.post<Library>('/libraries', body).then((r) => r.data)
 
 export const updateLibrary = (
@@ -40,6 +41,7 @@ export const updateLibrary = (
     enabled: boolean
     auto_scan_enabled: boolean
     scan_interval_hours: number | null
+    scan_interval_seconds: number | null
   }>,
 ) => client.patch<Library>(`/libraries/${id}`, body).then((r) => r.data)
 
@@ -61,8 +63,10 @@ export const listMedia = (params: {
 
 export const getMedia = (id: number) => client.get<MediaDetail>(`/media/${id}`).then((r) => r.data)
 
-export const rescrapeMedia = (id: number) =>
-  client.post<MediaDetail>(`/media/${id}/rescrape`).then((r) => r.data)
+export const rescrapeMedia = (
+  id: number,
+  body?: { provider?: string; fallback?: boolean },
+) => client.post<MediaDetail>(`/media/${id}/rescrape`, body || {}).then((r) => r.data)
 
 export const favoriteMedia = (id: number) =>
   client.post<MediaDetail>(`/media/${id}/favorite`).then((r) => r.data)
@@ -77,6 +81,9 @@ export const listActors = (params?: { q?: string; page?: number; page_size?: num
   client.get<PaginatedActors>('/actors', { params }).then((r) => r.data)
 
 export const getActor = (id: number) => client.get<Actor>(`/actors/${id}`).then((r) => r.data)
+
+export const rescrapeActorImage = (id: number) =>
+  client.post<Actor>(`/actors/${id}/rescrape-image`).then((r) => r.data)
 
 export const listActorMedia = (id: number, params?: { page?: number; page_size?: number }) =>
   client.get<PaginatedMedia>(`/actors/${id}/media`, { params }).then((r) => r.data)

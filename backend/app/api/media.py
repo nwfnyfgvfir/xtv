@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session, joinedload
 from app.db import get_db
 from app.deps import require_auth
 from app.models import Favorite, MediaItem
-from app.schemas import MediaDetail, MediaListItem, PaginatedMedia
-from app.services.metatube import MetaTubeClient
+from app.schemas import MediaDetail, MediaListItem, PaginatedMedia, RescrapeIn
+from app.services.images import site_proxy_url
 from app.services.scrape import scrape_media_item
 
 router = APIRouter()
@@ -24,13 +24,13 @@ def _with_proxied_images(
 ) -> MediaListItem | MediaDetail:
     model = MediaDetail if detail else MediaListItem
     data = model.model_validate(item)
-    client = MetaTubeClient()
-    provider = item.provider
-    provider_id = item.provider_id
-    data.cover_url = client.proxied_image_url(provider, provider_id, data.cover_url)
-    data.thumb_url = client.proxied_image_url(provider, provider_id, data.thumb_url)
+    data.cover_url = site_proxy_url(data.cover_url)
+    data.thumb_url = site_proxy_url(data.thumb_url)
     if detail and isinstance(data, MediaDetail):
-        data.backdrop_url = client.proxied_image_url(provider, provider_id, data.backdrop_url)
+        data.backdrop_url = site_proxy_url(data.backdrop_url)
+        data.actors = [
+            a.model_copy(update={"image_url": site_proxy_url(a.image_url)}) for a in data.actors
+        ]
     if favorited is None:
         favorited = item.favorite is not None
     data.favorited = bool(favorited)
@@ -107,6 +107,7 @@ async def rescrape_media(
     media_id: int,
     _: Annotated[dict, Depends(require_auth)],
     db: Session = Depends(get_db),
+    body: RescrapeIn | None = None,
 ) -> MediaDetail:
     item = (
         db.query(MediaItem)
@@ -118,7 +119,14 @@ async def rescrape_media(
         raise HTTPException(404, "media not found")
     if not item.number:
         raise HTTPException(400, "no number parsed; cannot scrape")
-    ok = await scrape_media_item(db, item, force=True)
+    body = body or RescrapeIn()
+    ok = await scrape_media_item(
+        db,
+        item,
+        force=True,
+        provider_override=body.provider,
+        fallback_override=body.fallback,
+    )
     db.refresh(item)
     if not ok and not item.scraped_at:
         raise HTTPException(502, "scrape failed or no results")

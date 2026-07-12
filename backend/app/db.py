@@ -73,3 +73,15 @@ def init_db() -> None:
     # Lightweight migrations for existing SQLite DBs
     _ensure_column("libraries", "auto_scan_enabled", "BOOLEAN", "0")
     _ensure_column("libraries", "scan_interval_hours", "INTEGER", None)
+    _ensure_column("libraries", "scan_interval_seconds", "INTEGER", None)
+    # Backfill seconds from legacy hours when empty
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE libraries SET scan_interval_seconds = scan_interval_hours * 3600 "
+                    "WHERE scan_interval_seconds IS NULL AND scan_interval_hours IS NOT NULL"
+                )
+            )
+    except Exception:  # noqa: BLE001
+        logger.debug("scan_interval backfill skipped", exc_info=True)

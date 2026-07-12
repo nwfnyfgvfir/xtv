@@ -14,6 +14,15 @@ from app.services.scanner import run_scan_job
 logger = logging.getLogger(__name__)
 
 _scheduler: BackgroundScheduler | None = None
+_MIN_SECONDS = 30
+
+
+def _interval_seconds(lib: Library) -> int:
+    if lib.scan_interval_seconds and lib.scan_interval_seconds > 0:
+        return max(_MIN_SECONDS, int(lib.scan_interval_seconds))
+    if lib.scan_interval_hours and lib.scan_interval_hours > 0:
+        return max(_MIN_SECONDS, int(lib.scan_interval_hours) * 3600)
+    return 86400
 
 
 def _scan_library_task(library_id: int) -> None:
@@ -43,10 +52,8 @@ def shutdown_scheduler() -> None:
 
 
 def reload_library_jobs() -> None:
-    """Re-read libraries and (re)register interval scan jobs."""
     if _scheduler is None:
         return
-    # remove existing library jobs
     for job in list(_scheduler.get_jobs()):
         if str(job.id).startswith("libscan-"):
             job.remove()
@@ -59,20 +66,18 @@ def reload_library_jobs() -> None:
             .all()
         )
         for lib in libs:
-            hours = lib.scan_interval_hours or 24
-            if hours < 1:
-                hours = 1
+            secs = _interval_seconds(lib)
             job_id = f"libscan-{lib.id}"
             _scheduler.add_job(
                 _scan_library_task,
-                trigger=IntervalTrigger(hours=hours),
+                trigger=IntervalTrigger(seconds=secs),
                 id=job_id,
                 args=[lib.id],
                 replace_existing=True,
                 max_instances=1,
                 coalesce=True,
             )
-            logger.info("Registered auto-scan library=%s every %sh", lib.id, hours)
+            logger.info("Registered auto-scan library=%s every %ss", lib.id, secs)
     finally:
         db.close()
 

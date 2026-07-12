@@ -30,7 +30,8 @@ class Library(Base):
     type: Mapped[str] = mapped_column(String(32), default="mixed", nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     auto_scan_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    scan_interval_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    scan_interval_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)  # legacy
+    scan_interval_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     media_items: Mapped[list[MediaItem]] = relationship(back_populates="library", cascade="all, delete-orphan")

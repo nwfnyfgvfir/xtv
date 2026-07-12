@@ -6,6 +6,7 @@ export interface Library {
   enabled: boolean
   auto_scan_enabled?: boolean
   scan_interval_hours?: number | null
+  scan_interval_seconds?: number | null
   media_count?: number
   created_at: string
 }
@@ -24,6 +25,8 @@ export interface MediaListItem {
   score?: number | null
   scraped_at?: string | null
   favorited?: boolean
+  subtitle_flag?: string | null
+  disc?: string | null
 }
 
 export interface Actor {
@@ -44,8 +47,6 @@ export interface MediaDetail extends MediaListItem {
   backdrop_url?: string | null
   strm_target?: string | null
   tags_json?: string | null
-  disc?: string | null
-  subtitle_flag?: string | null
   file_size?: number | null
   created_at: string
   updated_at: string

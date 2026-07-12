@@ -13,6 +13,7 @@ class LibraryCreate(BaseModel):
     enabled: bool = True
     auto_scan_enabled: bool = False
     scan_interval_hours: int | None = Field(default=None, ge=1, le=24 * 30)
+    scan_interval_seconds: int | None = Field(default=None, ge=30, le=30 * 24 * 3600)
 
 
 class LibraryUpdate(BaseModel):
@@ -22,6 +23,7 @@ class LibraryUpdate(BaseModel):
     enabled: bool | None = None
     auto_scan_enabled: bool | None = None
     scan_interval_hours: int | None = Field(default=None, ge=1, le=24 * 30)
+    scan_interval_seconds: int | None = Field(default=None, ge=30, le=30 * 24 * 3600)
 
 
 class LibraryOut(BaseModel):
@@ -34,6 +36,7 @@ class LibraryOut(BaseModel):
     enabled: bool
     auto_scan_enabled: bool = False
     scan_interval_hours: int | None = None
+    scan_interval_seconds: int | None = None
     media_count: int = 0
     created_at: datetime
 
@@ -72,6 +75,8 @@ class MediaListItem(BaseModel):
     score: float | None = None
     scraped_at: datetime | None = None
     favorited: bool = False
+    subtitle_flag: str | None = None
+    disc: str | None = None
 
 
 class MediaDetail(MediaListItem):
@@ -83,12 +88,15 @@ class MediaDetail(MediaListItem):
     backdrop_url: str | None = None
     strm_target: str | None = None
     tags_json: str | None = None
-    disc: str | None = None
-    subtitle_flag: str | None = None
     file_size: int | None = None
     created_at: datetime
     updated_at: datetime
     actors: list[ActorOut] = []
+
+
+class RescrapeIn(BaseModel):
+    provider: str | None = None
+    fallback: bool | None = None
 
 
 class PaginatedMedia(BaseModel):

@@ -29,6 +29,20 @@ def _pick_best(results: list[dict[str, Any]], number: str) -> dict[str, Any] | N
     return results[0]
 
 
+def _first_image(v: Any) -> str | None:
+    if isinstance(v, str) and v.startswith("http"):
+        return v
+    if isinstance(v, list):
+        for x in v:
+            if isinstance(x, str) and x.startswith("http"):
+                return x
+            if isinstance(x, dict):
+                u = x.get("url") or x.get("thumb") or x.get("image")
+                if isinstance(u, str) and u.startswith("http"):
+                    return u
+    return None
+
+
 def _actor_list(detail: dict[str, Any]) -> list[dict[str, Any]]:
     actors = detail.get("actors") or detail.get("Actors") or []
     if not isinstance(actors, list):
@@ -40,18 +54,27 @@ def _actor_list(detail: dict[str, Any]) -> list[dict[str, Any]]:
         elif isinstance(a, dict):
             name = a.get("name") or a.get("Name")
             if name:
+                img = _first_image(
+                    a.get("image_url") or a.get("images") or a.get("thumb_url") or a.get("image")
+                )
                 out.append(
                     {
                         "name": name,
                         "provider": a.get("provider") or a.get("Provider"),
                         "provider_id": a.get("id") or a.get("ID") or a.get("provider_id"),
-                        "image_url": a.get("image_url") or a.get("images") or a.get("thumb_url"),
+                        "image_url": img,
                     }
                 )
     return out
 
 
-async def scrape_media_item(db: Session, item: MediaItem, force: bool = False) -> bool:
+async def scrape_media_item(
+    db: Session,
+    item: MediaItem,
+    force: bool = False,
+    provider_override: str | None = None,
+    fallback_override: bool | None = None,
+) -> bool:
     """Scrape metadata for a media item. Returns True if updated."""
     if not item.number:
         return False
@@ -65,10 +88,18 @@ async def scrape_media_item(db: Session, item: MediaItem, force: bool = False) -
 
     try:
         settings = get_settings()
+        provider_q = (
+            provider_override
+            if provider_override is not None
+            else (settings.metatube_provider or "")
+        )
+        fallback = (
+            fallback_override if fallback_override is not None else settings.metatube_fallback
+        )
         results = await client.search_movie(
             item.number,
-            provider=settings.metatube_provider or "",
-            fallback=settings.metatube_fallback,
+            provider=provider_q or "",
+            fallback=fallback,
         )
         best = _pick_best(results, item.number)
         if not best:
@@ -92,13 +123,12 @@ async def scrape_media_item(db: Session, item: MediaItem, force: bool = False) -
         item.provider = provider or item.provider
         item.provider_id = provider_id or item.provider_id
 
-        raw_cover = detail.get("cover_url") or best.get("cover_url") or item.cover_url
-        raw_thumb = detail.get("thumb_url") or best.get("thumb_url") or item.thumb_url
-        raw_backdrop = detail.get("big_cover_url") or detail.get("backdrop_url") or item.backdrop_url
-        # Prefer MetaTube image proxy so clients need not reach source CDNs (e.g. javbus).
-        item.cover_url = client.proxied_image_url(provider, provider_id, raw_cover) or item.cover_url
-        item.thumb_url = client.proxied_image_url(provider, provider_id, raw_thumb) or item.thumb_url
-        item.backdrop_url = client.proxied_image_url(provider, provider_id, raw_backdrop) or item.backdrop_url
+        # Store ORIGINAL source URLs; API layer rewrites to site proxy.
+        item.cover_url = detail.get("cover_url") or best.get("cover_url") or item.cover_url
+        item.thumb_url = detail.get("thumb_url") or best.get("thumb_url") or item.thumb_url
+        item.backdrop_url = (
+            detail.get("big_cover_url") or detail.get("backdrop_url") or item.backdrop_url
+        )
 
         item.score = _as_float(detail.get("score") if detail.get("score") is not None else best.get("score"))
         item.studio = _first_str(detail.get("maker") or detail.get("studio") or detail.get("label"))
@@ -113,11 +143,12 @@ async def scrape_media_item(db: Session, item: MediaItem, force: bool = False) -
             if item.subtitle_flag == "C" and "中文字幕" not in tags:
                 tags.append("中文字幕")
             item.tags_json = json.dumps(tags, ensure_ascii=False)
+        elif item.subtitle_flag == "C":
+            item.tags_json = json.dumps(["中文字幕"], ensure_ascii=False)
 
-        # actors
         item.actors.clear()
         for a in _actor_list(detail):
-            actor = _upsert_actor(db, a)
+            actor = await _upsert_actor(db, client, a)
             if actor not in item.actors:
                 item.actors.append(actor)
 
@@ -136,7 +167,38 @@ async def scrape_media_item(db: Session, item: MediaItem, force: bool = False) -
         return False
 
 
-def _upsert_actor(db: Session, data: dict[str, Any]) -> Actor:
+async def enrich_actor_image(db: Session, actor: Actor, client: MetaTubeClient | None = None) -> bool:
+    """Fetch actor portrait from MetaTube Gfriends search if missing."""
+    if actor.image_url:
+        return False
+    client = client or MetaTubeClient()
+    if not client.token:
+        return False
+    try:
+        results = await client.search_actor(actor.name)
+        if not results:
+            return False
+        best = results[0]
+        img = _first_image(best.get("images") or best.get("image_url") or best.get("image"))
+        if not img:
+            return False
+        actor.image_url = img
+        if not actor.provider:
+            actor.provider = str(best.get("provider") or "Gfriends")
+        if not actor.provider_id:
+            actor.provider_id = str(best.get("id") or actor.name)
+        db.add(actor)
+        db.commit()
+        return True
+    except MetaTubeError as exc:
+        logger.debug("actor image scrape failed %s: %s", actor.name, exc)
+        return False
+    except Exception:  # noqa: BLE001
+        logger.debug("actor image scrape error %s", actor.name, exc_info=True)
+        return False
+
+
+async def _upsert_actor(db: Session, client: MetaTubeClient, data: dict[str, Any]) -> Actor:
     name = str(data["name"])
     provider = data.get("provider")
     provider_id = data.get("provider_id")
@@ -153,12 +215,17 @@ def _upsert_actor(db: Session, data: dict[str, Any]) -> Actor:
         actor = Actor(name=name, provider=provider, provider_id=str(provider_id) if provider_id else None)
         db.add(actor)
         db.flush()
-    else:
-        if data.get("image_url") and not actor.image_url:
-            actor.image_url = str(data["image_url"]) if not isinstance(data["image_url"], list) else None
+
     img = data.get("image_url")
     if isinstance(img, str) and img:
         actor.image_url = img
+    elif isinstance(img, list):
+        first = _first_image(img)
+        if first:
+            actor.image_url = first
+
+    if not actor.image_url:
+        await enrich_actor_image(db, actor, client)
     return actor
 
 
