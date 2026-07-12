@@ -7,6 +7,16 @@ const props = defineProps<{ mediaId: number; src: string; autoplay?: boolean }>(
 const containerRef = ref<HTMLDivElement | null>(null)
 let player: Artplayer | null = null
 let timer: number | undefined
+let clickTimer: number | undefined
+
+const CLICK_DELAY_MS = 280
+
+function clearClickTimer() {
+  if (clickTimer !== undefined) {
+    window.clearTimeout(clickTimer)
+    clickTimer = undefined
+  }
+}
 
 async function restore() {
   if (!player) return
@@ -31,7 +41,21 @@ function save() {
   })
 }
 
+function seekOrToggleByX(clientX: number, target: HTMLElement) {
+  if (!player) return
+  const rect = target.getBoundingClientRect()
+  const ratio = rect.width > 0 ? (clientX - rect.left) / rect.width : 0.5
+  if (ratio < 0.4) {
+    player.currentTime = Math.max(0, player.currentTime - 10)
+  } else if (ratio > 0.6) {
+    player.currentTime = Math.min(player.duration || 1e9, player.currentTime + 10)
+  } else {
+    player.toggle()
+  }
+}
+
 function destroy() {
+  clearClickTimer()
   if (timer) {
     window.clearInterval(timer)
     timer = undefined
@@ -46,6 +70,10 @@ function destroy() {
 function create() {
   destroy()
   if (!containerRef.value || !props.src) return
+
+  // Prefer custom seek gestures over Artplayer's default dblclick-fullscreen.
+  Artplayer.DBCLICK_FULLSCREEN = false
+
   player = new Artplayer({
     container: containerRef.value,
     url: props.src,
@@ -64,39 +92,40 @@ function create() {
     backdrop: true,
     playsInline: true,
     lang: 'zh-cn',
+    // Full-area gesture layer sits above video (z40) but below controls (z60).
+    // Capturing clicks here prevents Artplayer's built-in first-click toggle.
     layers: [
       {
-        name: 'seek-left',
+        name: 'gesture',
         html: '',
         style: {
           position: 'absolute',
-          left: '0',
-          top: '0',
-          width: '40%',
+          inset: '0',
+          width: '100%',
           height: '100%',
           zIndex: '10',
+          background: 'transparent',
         },
-        click: undefined as unknown as () => void,
+        click(_component, event) {
+          if (!player) return
+          const e = event as MouseEvent
+          const target = event.currentTarget as HTMLElement | null
+          if (!target) return
+
+          if (clickTimer !== undefined) {
+            clearClickTimer()
+            seekOrToggleByX(e.clientX, target)
+            return
+          }
+
+          clickTimer = window.setTimeout(() => {
+            clickTimer = undefined
+            player?.toggle()
+          }, CLICK_DELAY_MS)
+        },
       },
     ],
   })
-
-  // Double-click left/right seek zones
-  const el = containerRef.value
-  const onDbl = (e: MouseEvent) => {
-    if (!player) return
-    const rect = el.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const ratio = x / rect.width
-    if (ratio < 0.4) {
-      player.currentTime = Math.max(0, player.currentTime - 10)
-    } else if (ratio > 0.6) {
-      player.currentTime = Math.min(player.duration || 1e9, player.currentTime + 10)
-    } else {
-      player.toggle()
-    }
-  }
-  el.addEventListener('dblclick', onDbl)
 
   player.on('ready', () => {
     void restore()
@@ -108,17 +137,10 @@ function create() {
   player.on('video:ended', save)
 
   timer = window.setInterval(save, 5000)
-  ;(player as unknown as { _dbl?: (e: MouseEvent) => void })._dbl = onDbl
 }
 
 onMounted(create)
-onBeforeUnmount(() => {
-  if (player && containerRef.value) {
-    const dbl = (player as unknown as { _dbl?: (e: MouseEvent) => void })._dbl
-    if (dbl) containerRef.value.removeEventListener('dblclick', dbl)
-  }
-  destroy()
-})
+onBeforeUnmount(destroy)
 
 watch(
   () => props.src,
