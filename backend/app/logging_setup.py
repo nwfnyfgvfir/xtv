@@ -45,6 +45,14 @@ def configure_logging(settings: Settings | None = None) -> None:
     for name in ("httpx", "httpcore", "watchdog", "apscheduler", "urllib3"):
         logging.getLogger(name).setLevel(noisy_level)
 
+    # uvicorn access log is independent of root level; mute when not debugging
+    # so soft-refresh / progress PUT do not flood the console.
+    access = logging.getLogger("uvicorn.access")
+    if settings.debug:
+        access.setLevel(logging.INFO)
+    else:
+        access.setLevel(logging.WARNING)
+
     logging.getLogger("app").setLevel(level)
     _CONFIGURED = True
     logging.getLogger(__name__).debug("Logging configured level=%s", level_name)

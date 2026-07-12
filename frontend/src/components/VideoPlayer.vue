@@ -7,10 +7,14 @@ const props = defineProps<{ mediaId: number; src: string; autoplay?: boolean }>(
 const containerRef = ref<HTMLDivElement | null>(null)
 let player: Artplayer | null = null
 let timer: number | undefined
+let unlockFabEl: HTMLElement | null = null
 
 const DBLCLICK_MS = 300
 const DRAG_THRESHOLD_PX = 8
 const SEEK_RATIO = 0.5
+const IS_MOBILE =
+  typeof navigator !== 'undefined' &&
+  /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
 
 type DragState = {
   pointerId: number
@@ -22,12 +26,43 @@ type DragState = {
   moved: boolean
 }
 
+type MutableLockPlayer = Artplayer & { isLock: boolean }
+
 let drag: DragState | null = null
 let lastTapAt = 0
 let lastTapX = 0
 let suppressClickUntil = 0
 let singleTapTimer: number | undefined
 const gestureCleanups: Array<() => void> = []
+
+function isPlayerLocked(art: Artplayer | null): boolean {
+  if (!art) return false
+  if (art.isLock) return true
+  try {
+    return art.template.$player.classList.contains('art-lock')
+  } catch {
+    return false
+  }
+}
+
+function setPlayerLock(art: Artplayer, locked: boolean) {
+  const mutable = art as MutableLockPlayer
+  try {
+    const root = art.template.$player
+    if (locked) root.classList.add('art-lock')
+    else root.classList.remove('art-lock')
+  } catch {
+    /* ignore */
+  }
+  mutable.isLock = locked
+  art.emit('lock', locked)
+}
+
+function syncUnlockFab(locked: boolean) {
+  if (!unlockFabEl) return
+  // Desktop needs a floating unlock control (native lock layer is mobile-only).
+  unlockFabEl.style.display = locked && !IS_MOBILE ? 'flex' : 'none'
+}
 
 function clearSingleTapTimer() {
   if (singleTapTimer != null) {
@@ -37,7 +72,7 @@ function clearSingleTapTimer() {
 }
 
 function toggleControls() {
-  if (!player) return
+  if (!player || isPlayerLocked(player)) return
   try {
     player.controls.toggle()
   } catch {
@@ -109,7 +144,7 @@ function setPlayedBar(next: number, duration: number) {
 }
 
 function commitSeek(next: number) {
-  if (!player) return
+  if (!player || isPlayerLocked(player)) return
   const duration = Number.isFinite(player.duration) ? player.duration : 0
   if (!(duration > 0)) return
   const t = clamp(next, 0, duration)
@@ -128,7 +163,7 @@ function commitSeek(next: number) {
 }
 
 function seekOrToggleByX(clientX: number, target: HTMLElement) {
-  if (!player) return
+  if (!player || isPlayerLocked(player)) return
   const rect = target.getBoundingClientRect()
   const ratio = rect.width > 0 ? (clientX - rect.left) / rect.width : 0.5
   if (ratio < 0.4) {
@@ -147,7 +182,7 @@ function bindGestureLayer(el: HTMLElement) {
   ;(el.style as CSSStyleDeclaration & { webkitUserSelect?: string }).webkitUserSelect = 'none'
 
   const onPointerDown = (e: PointerEvent) => {
-    if (!player || e.button !== 0) return
+    if (!player || isPlayerLocked(player) || e.button !== 0) return
     // Only primary pointer
     if (drag) return
     const rect = el.getBoundingClientRect()
@@ -168,7 +203,7 @@ function bindGestureLayer(el: HTMLElement) {
   }
 
   const onPointerMove = (e: PointerEvent) => {
-    if (!player || !drag || e.pointerId !== drag.pointerId) return
+    if (!player || isPlayerLocked(player) || !drag || e.pointerId !== drag.pointerId) return
     const dx = e.clientX - drag.startX
     const dy = e.clientY - drag.startY
     if (!drag.dragging) {
@@ -199,6 +234,17 @@ function bindGestureLayer(el: HTMLElement) {
 
   const endPointer = (e: PointerEvent) => {
     if (!drag || e.pointerId !== drag.pointerId) return
+    if (isPlayerLocked(player)) {
+      drag = null
+      try {
+        el.releasePointerCapture(e.pointerId)
+      } catch {
+        /* ignore */
+      }
+      lastTapAt = 0
+      clearSingleTapTimer()
+      return
+    }
     const wasDrag = drag.dragging
     const clientX = e.clientX
     const startTime = drag.startTime
@@ -242,9 +288,7 @@ function bindGestureLayer(el: HTMLElement) {
   }
 
   const onClick = (e: MouseEvent) => {
-    // Layer click is also fired by Artplayer's component proxy; ignore after drag
-    // and ignore single clicks (double handled in pointerup).
-    if (Date.now() < suppressClickUntil) {
+    if (isPlayerLocked(player) || Date.now() < suppressClickUntil) {
       e.preventDefault()
       e.stopPropagation()
       return
@@ -273,6 +317,7 @@ function destroy() {
   clearSingleTapTimer()
   drag = null
   lastTapAt = 0
+  unlockFabEl = null
   if (timer) {
     window.clearInterval(timer)
     timer = undefined
@@ -308,7 +353,33 @@ function create() {
     mutex: true,
     backdrop: true,
     playsInline: true,
+    // Mobile built-in side lock button; desktop uses custom control + unlock FAB.
+    lock: true,
     lang: 'zh-cn',
+    controls: IS_MOBILE
+      ? []
+      : [
+          {
+            name: 'screen-lock',
+            position: 'right',
+            index: 10,
+            html: '锁',
+            tooltip: '锁屏',
+            style: {
+              padding: '0 8px',
+              color: '#fff',
+            },
+            click() {
+              if (!player || isPlayerLocked(player)) return
+              setPlayerLock(player, true)
+              try {
+                player.controls.show = false
+              } catch {
+                /* ignore */
+              }
+            },
+          },
+        ],
     // Full-area gesture layer sits above video (z40) but below controls (z60).
     // Blocks Artplayer's built-in first-click toggle / dblclick fullscreen.
     layers: [
@@ -334,7 +405,67 @@ function create() {
           clearGestureCleanups()
         },
       },
+      {
+        name: 'unlock-fab',
+        html: '开锁',
+        style: {
+          position: 'absolute',
+          right: '12px',
+          top: '50%',
+          transform: 'translateY(-50%)',
+          zIndex: '80',
+          display: 'none',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minWidth: '44px',
+          height: '44px',
+          padding: '0 12px',
+          borderRadius: '999px',
+          background: 'rgba(0,0,0,.55)',
+          color: '#fff',
+          fontSize: '13px',
+          cursor: 'pointer',
+          userSelect: 'none',
+          pointerEvents: 'auto',
+        },
+        click() {
+          if (!player) return
+          setPlayerLock(player, false)
+        },
+        mounted(el) {
+          unlockFabEl = el
+          syncUnlockFab(isPlayerLocked(player))
+        },
+        beforeUnmount() {
+          unlockFabEl = null
+        },
+      },
     ],
+  })
+
+  player.on('lock', (state: boolean) => {
+    syncUnlockFab(state)
+    if (state) {
+      drag = null
+      clearSingleTapTimer()
+      lastTapAt = 0
+      try {
+        player!.controls.show = false
+      } catch {
+        /* ignore */
+      }
+      try {
+        player!.notice.show = '已锁屏'
+      } catch {
+        /* ignore */
+      }
+    } else {
+      try {
+        player!.notice.show = '已解锁'
+      } catch {
+        /* ignore */
+      }
+    }
   })
 
   player.on('ready', () => {
@@ -361,7 +492,9 @@ watch(
 <template>
   <div class="player-wrap">
     <div ref="containerRef" class="player" />
-    <p class="hint muted">滑动快进/快退 · 双击左 -10s · 双击右 +10s · 双击中切换 · 单击显示/隐藏控制栏</p>
+    <p class="hint muted">
+      滑动快进/快退 · 双击左 -10s · 双击右 +10s · 双击中切换 · 单击显示/隐藏控制栏 · 控制栏「锁」锁屏
+    </p>
   </div>
 </template>
 

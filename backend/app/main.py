@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    # Re-apply after uvicorn may have installed its own loggers/handlers.
+    configure_logging()
     init_db()
     settings = get_settings()
     settings.media_root_path.mkdir(parents=True, exist_ok=True)
