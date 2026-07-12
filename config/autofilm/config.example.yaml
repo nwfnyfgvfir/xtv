@@ -1,35 +1,102 @@
-# Copy to config.yaml and fill credentials when using compose profile "full".
-# AutoFilm generates .strm under /media/strm for this app to scan.
+# AutoFilm 配置示例（对接「另机」Alist，为本项目生成 .strm）
+#
+# 启用：
+#   cp config/autofilm/config.example.yaml config/autofilm/config.yaml
+#   # 填写下方 base_url / token / source_dir
+#   docker compose --profile autofilm up -d
+#
+# 官方文档：https://github.com/AkimioJR/AutoFilm
+# 说明文档：https://blog.akimio.top/posts/1031/
+#
+# 与本 TV 应用的配合：
+#   - AutoFilm 把 .strm 写到容器内 /media/strm/...（已挂载宿主机 media）
+#   - TV 添加媒体库路径 strm（或 strm/jav），再扫描
+#   - mode 推荐 AlistPath：.strm 内是 Alist 站内路径，由 TV 的 ALIST_* 解析 raw_url
+#   - 也可用 AlistURL / RawURL：.strm 内是 http(s)，TV 直接给播放器
 
+# ---------- AList（远程 VPS，本 compose 不部署 Alist）----------
 alist:
-  - id: main
-    base_url: http://alist:5244
-    public_url:
-    username: admin
+  - id: remote
+    # AutoFilm 容器访问 Alist 的地址（须从运行 AutoFilm 的机器可达）
+    base_url: https://alist.example.com
+    # 公网地址；mode=AlistURL 时写入 .strm（浏览器/播放端要能打开）
+    public_url: https://alist.example.com
+    username: ""
     password: ""
+    otp_code: ""
+    # 推荐：Alist 后台生成的永久 Token（填了可不用账号密码）
     token: ""
+    # API 最小间隔（秒），防风控；0 不限速
     wait_time: 0.2
 
+# 本项目不依赖 Jellyfin/Emby，库海报任务可留空
 media_servers: []
 
+# ---------- Alist → 本地 .strm（核心）----------
 alist2strm_tasks:
+  # 番号/成人片库示例：扫 Alist 上的目录，输出到本机 media/strm
   - id: jav-cloud
+    # Cron：秒 分 时 日 月 星期（每天 03:00）
     cron: "0 0 3 * * *"
-    alist: main
+    alist: remote
+    # Alist 上的源目录（按你网盘挂载路径改）
     source_dir: /cloud/jav
+    # 输出到 TV 扫描目录（compose 已挂 ./media → /media）
     target_dir: /media/strm/jav
+    # AlistPath | AlistURL | RawURL
+    #   AlistPath — 推荐：.strm 一行 Alist 路径，TV 用 ALIST_TOKEN 换 raw_url
+    #   AlistURL  — .strm 为 public_url + 路径（需公网可播）
+    #   RawURL    — .strm 为存储直链（可能带过期签名）
     mode: AlistPath
+    # true：所有 .strm 平铺到 target_dir，且不下载伴生文件
     flatten_mode: false
     overwrite: false
     concurrency: 20
     download:
       enable: false
+      subtitle: false
+      image: false
+      nfo: false
+      other_ext: []
+      concurrency: 5
     sync:
+      # 远端删除后是否删本地 .strm
       enabled: true
+      # 同步删除时忽略的文件名正则（仅文件名）
+      ignore: ""
       smart_protection:
+        # 防止 Alist 短暂不可达导致大批误删
         enabled: true
         threshold: 100
         grace_scans: 3
 
+  # 可选：第二任务（电影等），不需要可删掉整段
+  # - id: movies
+  #   cron: "0 30 3 * * *"
+  #   alist: remote
+  #   source_dir: /cloud/movies
+  #   target_dir: /media/strm/movies
+  #   mode: AlistPath
+  #   flatten_mode: false
+  #   overwrite: false
+  #   concurrency: 20
+  #   download:
+  #     enable: false
+  #     subtitle: false
+  #     image: false
+  #     nfo: false
+  #     other_ext: []
+  #     concurrency: 5
+  #   sync:
+  #     enabled: true
+  #     ignore: ""
+  #     smart_protection:
+  #       enabled: true
+  #       threshold: 100
+  #       grace_scans: 3
+
+# 动漫追更写入 Alist UrlTree（可选，默认关闭）
 ani2alist_tasks: []
+
+# Jellyfin/Emby 库海报（本项目不用，保持空）
 library_poster_tasks: []

@@ -1,42 +1,51 @@
-# Optional local dependencies. MetaTube is remote — not included.
-# App image (after GHCR publish):
-#   image: ghcr.io/<owner>/<repo>:latest
+# Production: pull prebuilt image from GHCR (no local build).
+# Alist is on another VPS — not deployed here.
+#
+#   cp .env.example .env
+#   docker compose pull && docker compose up -d
+#
+# Optional AutoFilm (remote Alist → .strm under ./media):
+#   cp config/autofilm/config.example.yaml config/autofilm/config.yaml
+#   docker compose --profile autofilm up -d
 
 services:
   tv:
-    build: .
+    image: ${TV_IMAGE:-ghcr.io/OWNER/tv:latest}
     container_name: tv-app
     ports:
-      - "8000:8000"
+      - "${HOST_PORT:-8000}:8000"
     env_file:
       - .env
     environment:
       MEDIA_ROOT: /media
       DATABASE_URL: sqlite:////data/app.db
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
     volumes:
-      - ./media:/media
-      - ./data:/data
+      - ${MEDIA_DIR:-./media}:/media
+      - ${DATA_DIR:-./data}:/data
     restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
-  alist:
-    image: xhofe/alist:latest
-    container_name: tv-alist
-    profiles: ["full"]
-    ports:
-      - "5244:5244"
-    volumes:
-      - ./data/alist:/opt/alist/data
-      - ./media/local:/local
-    restart: unless-stopped
-
+  # Optional: scan remote Alist and write .strm into shared /media
+  # Image: https://hub.docker.com/r/akimio/autofilm
+  # Requires config/autofilm/config.yaml (see config.example.yaml)
   autofilm:
-    image: akimio/autofilm:latest
+    image: ${AUTOFILM_IMAGE:-akimio/autofilm:latest}
     container_name: tv-autofilm
-    profiles: ["full"]
+    profiles: ["autofilm"]
     volumes:
-      - ./config/autofilm:/config
-      - ./media:/media
-      - ./data/autofilm-logs:/logs
-    depends_on:
-      - alist
+      - ./config/autofilm:/config:ro
+      - ${MEDIA_DIR:-./media}:/media
+      - ${AUTOFILM_LOG_DIR:-./data/autofilm-logs}:/logs
     restart: unless-stopped
