@@ -13,7 +13,8 @@ import {
   deleteLibrary,
   updateLibrary,
 } from '@/api/media'
-import type { Library, MediaListItem, ScanJob } from '@/api/types'
+import type { Library, MediaListItem, MediaSort, ScanJob } from '@/api/types'
+import { loadMediaSort, MEDIA_SORT_OPTIONS, saveMediaSort } from '@/utils/mediaSort'
 
 const route = useRoute()
 const router = useRouter()
@@ -22,6 +23,7 @@ const items = ref<MediaListItem[]>([])
 const libraries = ref<Library[]>([])
 const total = ref(0)
 const page = ref(1)
+const sort = ref<MediaSort>(loadMediaSort())
 const loading = ref(false)
 const scanningId = ref<number | null>(null)
 const scanProgress = ref<ScanJob | null>(null)
@@ -114,6 +116,7 @@ async function loadMedia(opts?: { quiet?: boolean }) {
       page: page.value,
       page_size: 48,
       library_id: currentLibraryId.value,
+      sort: sort.value,
     })
     const nextIds = data.items.map((i) => i.id)
     const prevIds = items.value.map((i) => i.id)
@@ -203,6 +206,13 @@ function selectLibrary(id: number) {
   const lib = libraries.value.find((l) => l.id === id) || null
   syncIntervalForm(lib)
   router.replace({ query: { ...route.query, library: String(id) } })
+  void loadMedia()
+}
+
+function onSortChange(v: MediaSort) {
+  sort.value = v
+  saveMediaSort(v)
+  page.value = 1
   void loadMedia()
 }
 
@@ -369,6 +379,19 @@ onBeforeUnmount(stopSoftRefresh)
         <span v-else>· 实时监听中</span>
       </div>
       <div class="actions">
+        <el-select
+          :model-value="sort"
+          size="small"
+          style="width: 168px"
+          @change="onSortChange"
+        >
+          <el-option
+            v-for="opt in MEDIA_SORT_OPTIONS"
+            :key="opt.value"
+            :label="opt.label"
+            :value="opt.value"
+          />
+        </el-select>
         <div class="interval-inline">
           <el-input-number
             v-model="form.interval_value"

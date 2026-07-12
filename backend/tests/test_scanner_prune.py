@@ -19,6 +19,9 @@ def test_scan_prunes_missing_and_adds_new(tmp_path: Path, monkeypatch) -> None:
 
     get_settings.cache_clear()
     monkeypatch.setenv("MEDIA_ROOT", str(media_root))
+    # Keep scan unit test offline (no MetaTube / translate side effects).
+    monkeypatch.setenv("AUTO_SCRAPE", "false")
+    monkeypatch.setenv("AUTO_TRANSLATE", "false")
     get_settings.cache_clear()
 
     keep = lib_dir / "KEEP-001.mp4"

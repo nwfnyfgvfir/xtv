@@ -74,6 +74,8 @@ def init_db() -> None:
     _ensure_column("libraries", "auto_scan_enabled", "BOOLEAN", "0")
     _ensure_column("libraries", "scan_interval_hours", "INTEGER", None)
     _ensure_column("libraries", "scan_interval_seconds", "INTEGER", None)
+    _ensure_column("media_items", "title_original", "TEXT", None)
+    _ensure_column("media_items", "plot_original", "TEXT", None)
     # Backfill seconds from legacy hours when empty
     try:
         with engine.begin() as conn:

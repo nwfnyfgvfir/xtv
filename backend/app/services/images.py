@@ -29,6 +29,39 @@ def site_proxy_url(url: str | None) -> str | None:
     return f"/api/images/proxy?url={quote(url, safe='')}"
 
 
+def rewrite_image_url(
+    url: str | None,
+    *,
+    provider: str | None = None,
+    provider_id: str | None = None,
+    quality: int = 90,
+) -> str | None:
+    """Rewrite image URL according to IMAGE_PROXY_MODE (site | metatube)."""
+    if not url:
+        return url
+    # Already proxied / relative — leave as-is
+    if url.startswith("/api/images/proxy"):
+        return url
+    if url.startswith("/") and not url.startswith("//"):
+        return url
+    if not (url.startswith("http://") or url.startswith("https://")):
+        return url
+
+    from app.config import get_settings
+
+    mode = (get_settings().image_proxy_mode or "site").strip().lower()
+    if mode == "metatube" and provider and provider_id:
+        from app.services.metatube import MetaTubeClient
+
+        return MetaTubeClient().primary_image_url(
+            str(provider),
+            str(provider_id),
+            url=url,
+            quality=quality,
+        )
+    return site_proxy_url(url)
+
+
 def validate_proxy_url(url: str) -> str:
     """Return normalized URL or raise ValueError (SSRF guards)."""
     parsed = urlparse(url)

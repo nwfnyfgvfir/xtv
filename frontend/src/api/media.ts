@@ -57,6 +57,7 @@ export const listMedia = (params: {
   q?: string
   library_id?: number
   favorited?: boolean
+  sort?: string
   page?: number
   page_size?: number
 }) => client.get<PaginatedMedia>('/media', { params }).then((r) => r.data)
@@ -74,7 +75,7 @@ export const favoriteMedia = (id: number) =>
 export const unfavoriteMedia = (id: number) =>
   client.delete<MediaDetail>(`/media/${id}/favorite`).then((r) => r.data)
 
-export const listFavorites = (params?: { page?: number; page_size?: number }) =>
+export const listFavorites = (params?: { page?: number; page_size?: number; sort?: string }) =>
   client.get<PaginatedMedia>('/favorites', { params }).then((r) => r.data)
 
 export const listActors = (params?: { q?: string; page?: number; page_size?: number }) =>
@@ -85,8 +86,10 @@ export const getActor = (id: number) => client.get<Actor>(`/actors/${id}`).then(
 export const rescrapeActorImage = (id: number) =>
   client.post<Actor>(`/actors/${id}/rescrape-image`).then((r) => r.data)
 
-export const listActorMedia = (id: number, params?: { page?: number; page_size?: number }) =>
-  client.get<PaginatedMedia>(`/actors/${id}/media`, { params }).then((r) => r.data)
+export const listActorMedia = (
+  id: number,
+  params?: { page?: number; page_size?: number; sort?: string },
+) => client.get<PaginatedMedia>(`/actors/${id}/media`, { params }).then((r) => r.data)
 
 export const playMedia = (id: number) => client.get<PlayInfo>(`/media/${id}/play`).then((r) => r.data)
 

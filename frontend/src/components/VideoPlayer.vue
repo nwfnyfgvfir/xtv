@@ -97,14 +97,45 @@ function save() {
   })
 }
 
+function setPlayedBar(next: number, duration: number) {
+  if (!player || !(duration > 0)) return
+  const ratio = clamp(next / duration, 0, 1)
+  try {
+    // ArtPlayer progress UI listens to setBar; keep bar in sync during custom seek.
+    player.emit('setBar', 'played', ratio)
+  } catch {
+    /* ignore */
+  }
+}
+
+function commitSeek(next: number) {
+  if (!player) return
+  const duration = Number.isFinite(player.duration) ? player.duration : 0
+  if (!(duration > 0)) return
+  const t = clamp(next, 0, duration)
+  try {
+    // Prefer seek setter (drives events); fall back to currentTime.
+    ;(player as Artplayer & { seek?: number }).seek = t
+  } catch {
+    player.currentTime = t
+  }
+  setPlayedBar(t, duration)
+  try {
+    player.notice.show = `${formatTime(t)} / ${formatTime(duration)}`
+  } catch {
+    /* ignore */
+  }
+}
+
 function seekOrToggleByX(clientX: number, target: HTMLElement) {
   if (!player) return
   const rect = target.getBoundingClientRect()
   const ratio = rect.width > 0 ? (clientX - rect.left) / rect.width : 0.5
   if (ratio < 0.4) {
-    player.currentTime = Math.max(0, player.currentTime - 10)
+    commitSeek(Math.max(0, (player.currentTime || 0) - 10))
   } else if (ratio > 0.6) {
-    player.currentTime = Math.min(player.duration || 1e9, player.currentTime + 10)
+    const duration = Number.isFinite(player.duration) ? player.duration : 1e9
+    commitSeek(Math.min(duration, (player.currentTime || 0) + 10))
   } else {
     player.toggle()
   }
@@ -157,7 +188,8 @@ function bindGestureLayer(el: HTMLElement) {
     if (!(duration > 0)) return
     const delta = (dx / drag.width) * duration * SEEK_RATIO
     const next = clamp(drag.startTime + delta, 0, duration)
-    player.currentTime = next
+    // Optimistic UI only while dragging — avoid thrashing media seek on remote streams.
+    setPlayedBar(next, duration)
     try {
       player.notice.show = `${formatTime(next)} / ${formatTime(duration)}`
     } catch {
@@ -169,6 +201,9 @@ function bindGestureLayer(el: HTMLElement) {
     if (!drag || e.pointerId !== drag.pointerId) return
     const wasDrag = drag.dragging
     const clientX = e.clientX
+    const startTime = drag.startTime
+    const width = drag.width
+    const startX = drag.startX
     drag = null
     try {
       el.releasePointerCapture(e.pointerId)
@@ -176,6 +211,12 @@ function bindGestureLayer(el: HTMLElement) {
       /* ignore */
     }
     if (wasDrag) {
+      const duration = player && Number.isFinite(player.duration) ? player.duration : 0
+      if (player && duration > 0) {
+        const dx = clientX - startX
+        const delta = (dx / width) * duration * SEEK_RATIO
+        commitSeek(startTime + delta)
+      }
       // Suppress the synthetic click that follows a drag.
       suppressClickUntil = Date.now() + 350
       lastTapAt = 0

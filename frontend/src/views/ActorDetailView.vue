@@ -4,12 +4,14 @@ import { ElMessage } from 'element-plus'
 import MediaGrid from '@/components/MediaGrid.vue'
 import SkeletonGrid from '@/components/SkeletonGrid.vue'
 import { getActor, listActorMedia, rescrapeActorImage } from '@/api/media'
-import type { Actor, MediaListItem } from '@/api/types'
+import type { Actor, MediaListItem, MediaSort } from '@/api/types'
 import { monogramChar, monogramStyle } from '@/utils/monogram'
+import { loadMediaSort, MEDIA_SORT_OPTIONS, saveMediaSort } from '@/utils/mediaSort'
 
 const props = defineProps<{ id: string }>()
 const actor = ref<Actor | null>(null)
 const items = ref<MediaListItem[]>([])
+const sort = ref<MediaSort>(loadMediaSort())
 const loading = ref(false)
 const imgLoading = ref(false)
 const imgFailed = ref(false)
@@ -19,13 +21,23 @@ async function load() {
   imgFailed.value = false
   try {
     actor.value = await getActor(Number(props.id))
-    const data = await listActorMedia(Number(props.id), { page: 1, page_size: 96 })
+    const data = await listActorMedia(Number(props.id), {
+      page: 1,
+      page_size: 96,
+      sort: sort.value,
+    })
     items.value = data.items
   } catch {
     ElMessage.error('加载演员详情失败')
   } finally {
     loading.value = false
   }
+}
+
+function onSortChange(v: MediaSort) {
+  sort.value = v
+  saveMediaSort(v)
+  void load()
 }
 
 async function onRescrapeImage() {
@@ -63,9 +75,19 @@ watch(() => props.id, load)
       <div class="info">
         <h1 class="page-title">{{ actor.name }}</h1>
         <p class="muted">{{ actor.media_count ?? items.length }} 部作品</p>
-        <el-button size="small" :loading="imgLoading" @click="onRescrapeImage">
-          重新刮削头像
-        </el-button>
+        <div class="hero-actions">
+          <el-select :model-value="sort" size="small" style="width: 168px" @change="onSortChange">
+            <el-option
+              v-for="opt in MEDIA_SORT_OPTIONS"
+              :key="opt.value"
+              :label="opt.label"
+              :value="opt.value"
+            />
+          </el-select>
+          <el-button size="small" :loading="imgLoading" @click="onRescrapeImage">
+            重新刮削头像
+          </el-button>
+        </div>
       </div>
     </div>
     <SkeletonGrid v-if="loading && !items.length" />
@@ -97,6 +119,13 @@ watch(() => props.id, load)
   font-size: 36px;
   color: var(--accent);
   background: var(--panel);
+}
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
 }
 .info {
   min-width: 0;

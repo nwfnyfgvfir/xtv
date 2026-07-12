@@ -144,6 +144,8 @@ class SettingsOut(BaseModel):
     alist_token_set: bool
     media_root: str
     auto_scrape: bool
+    auto_translate: bool = True
+    image_proxy_mode: Literal["site", "metatube"] = "site"
     scan_extensions: str
     cors_origins: str
     auth_enabled: bool = False
@@ -159,6 +161,8 @@ class SettingsUpdate(BaseModel):
     alist_base_url: str | None = None
     alist_token: str | None = None
     auto_scrape: bool | None = None
+    auto_translate: bool | None = None
+    image_proxy_mode: Literal["site", "metatube"] | None = None
     scan_extensions: str | None = None
     extra: dict[str, str] | None = None
 

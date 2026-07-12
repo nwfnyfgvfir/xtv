@@ -22,8 +22,13 @@ OVERRIDE_KEYS = {
     "alist_base_url",
     "alist_token",
     "auto_scrape",
+    "auto_translate",
+    "image_proxy_mode",
     "scan_extensions",
 }
+
+_BOOL_TRUE = ("1", "true", "yes", "on")
+_IMAGE_PROXY_MODES = frozenset({"site", "metatube"})
 
 
 def _db_map(db: Session) -> dict[str, str]:
@@ -40,13 +45,19 @@ def _apply_overrides_to_runtime(db_map: dict[str, str]) -> None:
     if "metatube_provider" in db_map:
         s.metatube_provider = db_map["metatube_provider"]
     if "metatube_fallback" in db_map:
-        s.metatube_fallback = db_map["metatube_fallback"].lower() in ("1", "true", "yes", "on")
+        s.metatube_fallback = db_map["metatube_fallback"].lower() in _BOOL_TRUE
     if "alist_base_url" in db_map and db_map["alist_base_url"]:
         s.alist_base_url = db_map["alist_base_url"]
     if "alist_token" in db_map:
         s.alist_token = db_map["alist_token"]
     if "auto_scrape" in db_map:
-        s.auto_scrape = db_map["auto_scrape"].lower() in ("1", "true", "yes", "on")
+        s.auto_scrape = db_map["auto_scrape"].lower() in _BOOL_TRUE
+    if "auto_translate" in db_map:
+        s.auto_translate = db_map["auto_translate"].lower() in _BOOL_TRUE
+    if "image_proxy_mode" in db_map:
+        mode = (db_map["image_proxy_mode"] or "").strip().lower()
+        if mode in _IMAGE_PROXY_MODES:
+            s.image_proxy_mode = mode
     if "scan_extensions" in db_map and db_map["scan_extensions"]:
         s.scan_extensions = db_map["scan_extensions"]
 
@@ -79,8 +90,16 @@ async def get_app_settings(
     provider = db_map.get("metatube_provider", s.metatube_provider)
     fallback_raw = db_map.get("metatube_fallback")
     fallback = (
-        fallback_raw.lower() in ("1", "true", "yes", "on") if fallback_raw is not None else s.metatube_fallback
+        fallback_raw.lower() in _BOOL_TRUE if fallback_raw is not None else s.metatube_fallback
     )
+    auto_translate_raw = db_map.get("auto_translate")
+    auto_translate = (
+        auto_translate_raw.lower() in _BOOL_TRUE
+        if auto_translate_raw is not None
+        else s.auto_translate
+    )
+    mode_raw = (db_map.get("image_proxy_mode") or s.image_proxy_mode or "site").strip().lower()
+    image_proxy_mode = mode_raw if mode_raw in _IMAGE_PROXY_MODES else "site"
     return SettingsOut(
         metatube_base_url=db_map.get("metatube_base_url") or s.metatube_base_url,
         metatube_token_set=bool(token),
@@ -90,6 +109,8 @@ async def get_app_settings(
         alist_token_set=bool(alist_token),
         media_root=str(s.media_root_path),
         auto_scrape=s.auto_scrape,
+        auto_translate=auto_translate,
+        image_proxy_mode=image_proxy_mode,  # type: ignore[arg-type]
         scan_extensions=s.scan_extensions,
         cors_origins=s.cors_origins,
         auth_enabled=s.auth_enabled,

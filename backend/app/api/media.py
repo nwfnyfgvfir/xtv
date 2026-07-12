@@ -10,8 +10,9 @@ from app.db import get_db
 from app.deps import require_auth
 from app.models import Favorite, MediaItem
 from app.schemas import MediaDetail, MediaListItem, PaginatedMedia, RescrapeIn
-from app.services.images import site_proxy_url
+from app.services.images import rewrite_image_url
 from app.services.scrape import scrape_media_item
+from app.services.sorting import media_order_by
 
 router = APIRouter()
 
@@ -24,12 +25,18 @@ def _with_proxied_images(
 ) -> MediaListItem | MediaDetail:
     model = MediaDetail if detail else MediaListItem
     data = model.model_validate(item)
-    data.cover_url = site_proxy_url(data.cover_url)
-    data.thumb_url = site_proxy_url(data.thumb_url)
+    data.cover_url = rewrite_image_url(
+        data.cover_url, provider=item.provider, provider_id=item.provider_id
+    )
+    data.thumb_url = rewrite_image_url(
+        data.thumb_url, provider=item.provider, provider_id=item.provider_id
+    )
     if detail and isinstance(data, MediaDetail):
-        data.backdrop_url = site_proxy_url(data.backdrop_url)
+        data.backdrop_url = rewrite_image_url(
+            data.backdrop_url, provider=item.provider, provider_id=item.provider_id
+        )
         data.actors = [
-            a.model_copy(update={"image_url": site_proxy_url(a.image_url)}) for a in data.actors
+            a.model_copy(update={"image_url": rewrite_image_url(a.image_url)}) for a in data.actors
         ]
     if favorited is None:
         favorited = item.favorite is not None
@@ -44,6 +51,7 @@ def list_media(
     library_id: int | None = None,
     scraped: bool | None = None,
     favorited: bool | None = None,
+    sort: str | None = Query(None, description="number_asc|number_desc|created_asc|created_desc|release_asc|release_desc"),
     page: int = Query(1, ge=1),
     page_size: int = Query(40, ge=1, le=200),
     db: Session = Depends(get_db),
@@ -72,7 +80,7 @@ def list_media(
     total = query.with_entities(func.count(MediaItem.id)).scalar() or 0
     items = (
         query.options(joinedload(MediaItem.favorite))
-        .order_by(MediaItem.id.desc())
+        .order_by(*media_order_by(sort))
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()

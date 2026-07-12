@@ -1,5 +1,5 @@
-from app.config import Settings
-from app.services.images import site_proxy_url, validate_proxy_url
+from app.config import Settings, get_settings
+from app.services.images import rewrite_image_url, site_proxy_url, validate_proxy_url
 from app.services.metatube import MetaTubeClient
 import pytest
 
@@ -36,6 +36,31 @@ def test_proxied_image_url_uses_site_proxy():
     out = client.proxied_image_url(None, None, raw)
     assert out and out.startswith("/api/images/proxy?url=")
     assert client.proxied_image_url("JavBus", "id", None) is None
+
+
+def test_rewrite_image_url_site_mode(monkeypatch):
+    s = get_settings()
+    monkeypatch.setattr(s, "image_proxy_mode", "site")
+    raw = "https://cdn.example.com/a.jpg"
+    out = rewrite_image_url(raw, provider="JavBus", provider_id="x")
+    assert out and out.startswith("/api/images/proxy?url=")
+
+
+def test_rewrite_image_url_metatube_mode(monkeypatch):
+    s = get_settings()
+    monkeypatch.setattr(s, "image_proxy_mode", "metatube")
+    monkeypatch.setattr(s, "metatube_base_url", "https://mt.example")
+    raw = "https://cdn.example.com/a.jpg"
+    out = rewrite_image_url(raw, provider="JavBus", provider_id="IPX-1")
+    assert out and out.startswith("https://mt.example/v1/images/primary/JavBus/IPX-1?")
+
+
+def test_rewrite_image_url_metatube_fallback_without_provider(monkeypatch):
+    s = get_settings()
+    monkeypatch.setattr(s, "image_proxy_mode", "metatube")
+    raw = "https://cdn.example.com/a.jpg"
+    out = rewrite_image_url(raw)
+    assert out and out.startswith("/api/images/proxy?url=")
 
 
 def test_validate_proxy_blocks_localhost():

@@ -82,6 +82,16 @@ export interface Progress {
   updated_at?: string | null
 }
 
+export type ImageProxyMode = 'site' | 'metatube'
+
+export type MediaSort =
+  | 'number_asc'
+  | 'number_desc'
+  | 'created_asc'
+  | 'created_desc'
+  | 'release_asc'
+  | 'release_desc'
+
 export interface Settings {
   metatube_base_url: string
   metatube_token_set: boolean
@@ -91,6 +101,8 @@ export interface Settings {
   alist_token_set: boolean
   media_root: string
   auto_scrape: boolean
+  auto_translate?: boolean
+  image_proxy_mode?: ImageProxyMode
   scan_extensions: string
   cors_origins: string
   auth_enabled?: boolean

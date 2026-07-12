@@ -10,15 +10,20 @@ from app.db import get_db
 from app.deps import require_auth
 from app.models import Favorite, MediaItem
 from app.schemas import MediaListItem, PaginatedMedia
-from app.services.images import site_proxy_url
+from app.services.images import rewrite_image_url
+from app.services.sorting import media_order_by
 
 router = APIRouter(prefix="/favorites", tags=["favorites"])
 
 
 def _to_item(item: MediaItem) -> MediaListItem:
     data = MediaListItem.model_validate(item)
-    data.cover_url = site_proxy_url(data.cover_url)
-    data.thumb_url = site_proxy_url(data.thumb_url)
+    data.cover_url = rewrite_image_url(
+        data.cover_url, provider=item.provider, provider_id=item.provider_id
+    )
+    data.thumb_url = rewrite_image_url(
+        data.thumb_url, provider=item.provider, provider_id=item.provider_id
+    )
     data.favorited = True
     return data
 
@@ -26,15 +31,17 @@ def _to_item(item: MediaItem) -> MediaListItem:
 @router.get("", response_model=PaginatedMedia)
 def list_favorites(
     _: Annotated[dict, Depends(require_auth)],
+    sort: str | None = Query(None, description="omit = favorite time desc; else media sort keys"),
     page: int = Query(1, ge=1),
     page_size: int = Query(48, ge=1, le=200),
     db: Session = Depends(get_db),
 ) -> PaginatedMedia:
     query = db.query(MediaItem).join(Favorite, Favorite.media_id == MediaItem.id)
     total = query.with_entities(func.count(MediaItem.id)).scalar() or 0
+    order = media_order_by(sort) if sort else [Favorite.created_at.desc()]
     items = (
         query.options(joinedload(MediaItem.favorite))
-        .order_by(Favorite.created_at.desc())
+        .order_by(*order)
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()

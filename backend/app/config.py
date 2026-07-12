@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     port: int = 8000
     scan_extensions: str = "mp4,mkv,avi,wmv,m2ts,ts,mov,strm"
     auto_scrape: bool = True
+    auto_translate: bool = True
+    image_proxy_mode: str = "site"  # site | metatube
+    log_level: str = "INFO"
+    debug: bool = False
     admin_password: str = ""
     jwt_secret: str = "tv-dev-secret-change-me"
     jwt_expire_hours: int = 72

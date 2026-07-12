@@ -10,16 +10,21 @@ from app.db import get_db
 from app.deps import require_auth
 from app.models import Actor, MediaActor, MediaItem
 from app.schemas import ActorDetail, ActorListItem, MediaListItem, PaginatedActors, PaginatedMedia
-from app.services.images import site_proxy_url
+from app.services.images import rewrite_image_url
 from app.services.scrape import enrich_actor_image
+from app.services.sorting import media_order_by
 
 router = APIRouter(prefix="/actors", tags=["actors"])
 
 
 def _proxy_media(item: MediaItem, favorited_ids: set[int]) -> MediaListItem:
     data = MediaListItem.model_validate(item)
-    data.cover_url = site_proxy_url(data.cover_url)
-    data.thumb_url = site_proxy_url(data.thumb_url)
+    data.cover_url = rewrite_image_url(
+        data.cover_url, provider=item.provider, provider_id=item.provider_id
+    )
+    data.thumb_url = rewrite_image_url(
+        data.thumb_url, provider=item.provider, provider_id=item.provider_id
+    )
     data.favorited = item.id in favorited_ids
     return data
 
@@ -30,7 +35,8 @@ def _actor_item(actor: Actor, media_count: int = 0) -> ActorListItem:
         name=actor.name,
         provider=actor.provider,
         provider_id=actor.provider_id,
-        image_url=site_proxy_url(actor.image_url),
+        # Actor portraits use site proxy (MetaTube primary is movie-oriented).
+        image_url=rewrite_image_url(actor.image_url),
         media_count=media_count,
     )
 
@@ -104,6 +110,7 @@ async def rescrape_actor_image(
 def actor_media(
     actor_id: int,
     _: Annotated[dict, Depends(require_auth)],
+    sort: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(48, ge=1, le=200),
     db: Session = Depends(get_db),
@@ -119,7 +126,7 @@ def actor_media(
     total = query.with_entities(func.count(MediaItem.id)).scalar() or 0
     items = (
         query.options(joinedload(MediaItem.favorite))
-        .order_by(MediaItem.id.desc())
+        .order_by(*media_order_by(sort))
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()

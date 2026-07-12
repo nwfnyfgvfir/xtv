@@ -118,12 +118,19 @@ async def scrape_media_item(
         else:
             detail = best
 
-        item.title = detail.get("title") or best.get("title") or item.title
-        item.plot = detail.get("summary") or detail.get("plot") or detail.get("description") or item.plot
+        src_title = detail.get("title") or best.get("title") or item.title
+        src_plot = (
+            detail.get("summary")
+            or detail.get("plot")
+            or detail.get("description")
+            or item.plot
+        )
+        item.title = src_title
+        item.plot = src_plot
         item.provider = provider or item.provider
         item.provider_id = provider_id or item.provider_id
 
-        # Store ORIGINAL source URLs; API layer rewrites to site proxy.
+        # Store ORIGINAL source URLs; API layer rewrites via image proxy mode.
         item.cover_url = detail.get("cover_url") or best.get("cover_url") or item.cover_url
         item.thumb_url = detail.get("thumb_url") or best.get("thumb_url") or item.thumb_url
         item.backdrop_url = (
@@ -137,6 +144,7 @@ async def scrape_media_item(
         if rd is not None:
             item.release_date = str(rd)[:32]
 
+        tags: list[str] = []
         genres = detail.get("genres") or detail.get("tags") or []
         if isinstance(genres, list) and genres:
             tags = [g if isinstance(g, str) else str(g.get("name", g)) for g in genres]
@@ -144,13 +152,17 @@ async def scrape_media_item(
                 tags.append("中文字幕")
             item.tags_json = json.dumps(tags, ensure_ascii=False)
         elif item.subtitle_flag == "C":
-            item.tags_json = json.dumps(["中文字幕"], ensure_ascii=False)
+            tags = ["中文字幕"]
+            item.tags_json = json.dumps(tags, ensure_ascii=False)
 
         item.actors.clear()
         for a in _actor_list(detail):
             actor = await _upsert_actor(db, client, a)
             if actor not in item.actors:
                 item.actors.append(actor)
+
+        if settings.auto_translate:
+            await _apply_translations(db, item, src_title=src_title, src_plot=src_plot, tags=tags)
 
         item.scraped_at = datetime.now(timezone.utc)
         db.add(item)
@@ -161,10 +173,76 @@ async def scrape_media_item(
         logger.warning("scrape failed for %s: %s", item.number, exc)
         db.rollback()
         return False
-    except Exception:  # noqa: BLE001
-        logger.exception("unexpected scrape error for %s", item.number)
-        db.rollback()
+    except Exception as exc:  # noqa: BLE001
+        # Avoid lazy-loading expired attributes after a failed flush.
+        number = getattr(item, "number", None) or "?"
+        try:
+            logger.exception("unexpected scrape error for %s: %s", number, exc)
+        except Exception:  # noqa: BLE001
+            logger.exception("unexpected scrape error")
+        try:
+            db.rollback()
+        except Exception:  # noqa: BLE001
+            pass
         return False
+
+
+async def _apply_translations(
+    db: Session,
+    item: MediaItem,
+    *,
+    src_title: str | None,
+    src_plot: str | None,
+    tags: list[str],
+) -> None:
+    """Translate title/plot/tags/actors in-place. Fail-open (keeps originals)."""
+    from app.services.translate import translate_tags, translate_text
+
+    # Always refresh originals from pre-translate MetaTube strings
+    if src_title:
+        item.title_original = str(src_title)[:512]
+    if src_plot:
+        item.plot_original = str(src_plot)
+
+    if item.title:
+        item.title = await translate_text(item.title)
+    if item.plot:
+        item.plot = await translate_text(item.plot)
+
+    if tags:
+        translated_tags = await translate_tags(tags)
+        item.tags_json = json.dumps(translated_tags, ensure_ascii=False)
+
+    for actor in list(item.actors):
+        if not actor.name:
+            continue
+        new_name = await translate_text(actor.name)
+        if new_name and new_name != actor.name:
+            actor.name = new_name[:256]
+            db.add(actor)
+
+
+def _set_actor_provider_safe(
+    db: Session,
+    actor: Actor,
+    provider: str | None,
+    provider_id: str | None,
+) -> None:
+    """Assign provider keys only when they do not collide with another actor row."""
+    if not provider or not provider_id:
+        return
+    pid = str(provider_id)
+    existing = (
+        db.query(Actor)
+        .filter(Actor.provider == provider, Actor.provider_id == pid)
+        .one_or_none()
+    )
+    if existing is not None and existing.id != actor.id:
+        return
+    if not actor.provider:
+        actor.provider = provider
+    if not actor.provider_id:
+        actor.provider_id = pid
 
 
 async def enrich_actor_image(db: Session, actor: Actor, client: MetaTubeClient | None = None) -> bool:
@@ -183,12 +261,20 @@ async def enrich_actor_image(db: Session, actor: Actor, client: MetaTubeClient |
         if not img:
             return False
         actor.image_url = img
-        if not actor.provider:
-            actor.provider = str(best.get("provider") or "Gfriends")
-        if not actor.provider_id:
-            actor.provider_id = str(best.get("id") or actor.name)
+        _set_actor_provider_safe(
+            db,
+            actor,
+            str(best.get("provider") or "Gfriends"),
+            str(best.get("id") or actor.name),
+        )
         db.add(actor)
-        db.commit()
+        # Flush only — caller owns the outer transaction/commit.
+        try:
+            db.flush()
+        except Exception:  # noqa: BLE001
+            logger.debug("actor image flush failed %s", actor.name, exc_info=True)
+            # Do not rollback outer scrape transaction; leave image unset.
+            return False
         return True
     except MetaTubeError as exc:
         logger.debug("actor image scrape failed %s: %s", actor.name, exc)
@@ -212,9 +298,37 @@ async def _upsert_actor(db: Session, client: MetaTubeClient, data: dict[str, Any
     if actor is None:
         actor = db.query(Actor).filter(Actor.name == name).first()
     if actor is None:
-        actor = Actor(name=name, provider=provider, provider_id=str(provider_id) if provider_id else None)
+        actor = Actor(
+            name=name,
+            provider=str(provider) if provider else None,
+            provider_id=str(provider_id) if provider_id else None,
+        )
         db.add(actor)
-        db.flush()
+        try:
+            db.flush()
+        except Exception:  # noqa: BLE001
+            # Concurrent insert of same provider key — re-query.
+            db.rollback()
+            if provider and provider_id:
+                actor = (
+                    db.query(Actor)
+                    .filter(Actor.provider == provider, Actor.provider_id == str(provider_id))
+                    .one_or_none()
+                )
+            if actor is None:
+                actor = db.query(Actor).filter(Actor.name == name).first()
+            if actor is None:
+                actor = Actor(name=name)
+                db.add(actor)
+                db.flush()
+    else:
+        # Fill missing provider keys without unique collisions.
+        _set_actor_provider_safe(
+            db,
+            actor,
+            str(provider) if provider else None,
+            str(provider_id) if provider_id else None,
+        )
 
     img = data.get("image_url")
     if isinstance(img, str) and img:

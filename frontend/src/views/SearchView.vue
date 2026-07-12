@@ -3,14 +3,16 @@ import { ref } from 'vue'
 import MediaGrid from '@/components/MediaGrid.vue'
 import SkeletonGrid from '@/components/SkeletonGrid.vue'
 import { listLibraries, listMedia } from '@/api/media'
-import type { Library, MediaListItem } from '@/api/types'
+import type { Library, MediaListItem, MediaSort } from '@/api/types'
 import { ElMessage } from 'element-plus'
 import { onMounted } from 'vue'
+import { loadMediaSort, MEDIA_SORT_OPTIONS, saveMediaSort } from '@/utils/mediaSort'
 
 const q = ref('')
 const libraryId = ref<number | null>(null)
 const libraries = ref<Library[]>([])
 const items = ref<MediaListItem[]>([])
+const sort = ref<MediaSort>(loadMediaSort())
 const loading = ref(false)
 const searched = ref(false)
 
@@ -29,6 +31,7 @@ async function search() {
     const data = await listMedia({
       q: q.value || undefined,
       library_id: libraryId.value || undefined,
+      sort: sort.value,
       page: 1,
       page_size: 60,
     })
@@ -38,6 +41,12 @@ async function search() {
   } finally {
     loading.value = false
   }
+}
+
+function onSortChange(v: MediaSort) {
+  sort.value = v
+  saveMediaSort(v)
+  if (searched.value) void search()
 }
 </script>
 
@@ -57,6 +66,14 @@ async function search() {
           :key="lib.id"
           :label="lib.name"
           :value="lib.id"
+        />
+      </el-select>
+      <el-select :model-value="sort" style="width: 168px" @change="onSortChange">
+        <el-option
+          v-for="opt in MEDIA_SORT_OPTIONS"
+          :key="opt.value"
+          :label="opt.label"
+          :value="opt.value"
         />
       </el-select>
       <el-input

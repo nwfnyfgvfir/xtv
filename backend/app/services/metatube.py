@@ -128,7 +128,7 @@ class MetaTubeClient:
         return f"{path}?{qs}" if qs else path
 
     def proxied_image_url(self, provider: str | None, provider_id: str | None, url: str | None) -> str | None:
-        """Legacy MetaTube primary proxy — prefer site_proxy_url for API responses."""
-        from app.services.images import site_proxy_url
+        """Rewrite image URL using current IMAGE_PROXY_MODE."""
+        from app.services.images import rewrite_image_url
 
-        return site_proxy_url(url)
+        return rewrite_image_url(url, provider=provider, provider_id=provider_id)

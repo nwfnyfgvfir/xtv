@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getHealth, getSettings, updateSettings } from '@/api/media'
-import type { Health, Settings } from '@/api/types'
+import type { Health, ImageProxyMode, Settings } from '@/api/types'
 
 const settings = ref<Settings | null>(null)
 const health = ref<Health | null>(null)
@@ -14,6 +14,8 @@ const form = ref({
   alist_base_url: '',
   alist_token: '',
   auto_scrape: true,
+  auto_translate: true,
+  image_proxy_mode: 'site' as ImageProxyMode,
   scan_extensions: '',
 })
 const saving = ref(false)
@@ -24,6 +26,9 @@ async function load() {
   form.value.metatube_base_url = settings.value.metatube_base_url
   form.value.alist_base_url = settings.value.alist_base_url
   form.value.auto_scrape = settings.value.auto_scrape
+  form.value.auto_translate = settings.value.auto_translate !== false
+  form.value.image_proxy_mode =
+    settings.value.image_proxy_mode === 'metatube' ? 'metatube' : 'site'
   form.value.scan_extensions = settings.value.scan_extensions
   form.value.metatube_provider = settings.value.metatube_provider || ''
   form.value.metatube_fallback = settings.value.metatube_fallback !== false
@@ -38,6 +43,8 @@ async function save() {
       metatube_base_url: form.value.metatube_base_url,
       alist_base_url: form.value.alist_base_url,
       auto_scrape: form.value.auto_scrape,
+      auto_translate: form.value.auto_translate,
+      image_proxy_mode: form.value.image_proxy_mode,
       scan_extensions: form.value.scan_extensions,
       metatube_provider: form.value.metatube_provider,
       metatube_fallback: form.value.metatube_fallback,
@@ -62,7 +69,7 @@ onMounted(() => {
 <template>
   <div class="page">
     <h1 class="page-title">设置</h1>
-    <p class="muted intro">MetaTube 刮削源、Alist 与系统状态</p>
+    <p class="muted intro">MetaTube 刮削源、图片代理、翻译与系统状态</p>
 
     <el-card class="card" shadow="never">
       <template #header>
@@ -138,6 +145,16 @@ onMounted(() => {
         <el-form-item label="自动刮削">
           <el-switch v-model="form.auto_scrape" />
         </el-form-item>
+        <el-form-item label="刮削后自动翻译">
+          <el-switch v-model="form.auto_translate" />
+          <span class="field-hint muted">日文标题/简介/演员/标签 → 简中（免费 Google）</span>
+        </el-form-item>
+        <el-form-item label="图片代理">
+          <el-select v-model="form.image_proxy_mode" style="width: 100%">
+            <el-option label="本站代理（/api/images/proxy）" value="site" />
+            <el-option label="MetaTube 图片代理" value="metatube" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="扫描扩展名">
           <el-input v-model="form.scan_extensions" />
         </el-form-item>
@@ -147,7 +164,8 @@ onMounted(() => {
       </el-form>
       <p class="muted tip">
         定时扫描请在媒体库页对单个库开启「定时扫描」。登录密码通过环境变量
-        <code>ADMIN_PASSWORD</code> 配置。
+        <code>ADMIN_PASSWORD</code> 配置。调试日志用 <code>LOG_LEVEL</code> /
+        <code>DEBUG</code>（环境变量，不在此页）。
       </p>
     </el-card>
   </div>
@@ -183,6 +201,10 @@ onMounted(() => {
   margin: 0;
   font-size: 12px;
   line-height: 1.5;
+}
+.field-hint {
+  margin-left: 10px;
+  font-size: 12px;
 }
 code {
   color: var(--accent);
