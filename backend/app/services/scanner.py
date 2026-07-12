@@ -10,6 +10,7 @@ from app.config import get_settings
 from app.db import SessionLocal
 from app.models import Library, MediaItem
 from app.services.jobs import ScanJob, job_store
+from app.services.library_revision import bump_revision
 from app.services.naming import extract_number
 from app.services.scrape import scrape_media_item
 from app.services.strm import classify_strm_target, read_strm_target
@@ -23,6 +24,17 @@ def resolve_library_path(lib: Library) -> Path:
     if not p.is_absolute():
         p = settings.media_root_path / p
     return p.resolve()
+
+
+def _is_media_file(path: Path, exts: set[str]) -> bool:
+    if not path.is_file():
+        return False
+    ext = path.suffix.lower().lstrip(".")
+    return bool(ext) and ext in exts
+
+
+def _normalize_abs(path: Path | str) -> str:
+    return str(Path(path).resolve())
 
 
 def scan_library_sync(db: Session, lib: Library, job: ScanJob | None = None) -> ScanJob:
@@ -64,6 +76,8 @@ def scan_library_sync(db: Session, lib: Library, job: ScanJob | None = None) -> 
             job.removed += 1
 
     db.commit()
+    if job.created or job.removed:
+        bump_revision(lib.id)
 
     job.message = (
         f"scanning done scanned={job.scanned} created={job.created} "
@@ -76,6 +90,7 @@ def scan_library_sync(db: Session, lib: Library, job: ScanJob | None = None) -> 
             .all()
         )
         total_scrape = len(items)
+        scraped_before = job.scraped
         for idx, item in enumerate(items, start=1):
             try:
                 job.message = f"scraping {idx}/{total_scrape}: {item.number}"
@@ -84,6 +99,9 @@ def scan_library_sync(db: Session, lib: Library, job: ScanJob | None = None) -> 
                     job.scraped += 1
             except Exception as exc:  # noqa: BLE001
                 job.errors.append(f"scrape {item.number}: {exc}")
+        # Cover/metadata updates should also nudge clients.
+        if job.scraped > scraped_before:
+            bump_revision(lib.id)
 
     job.status = "done"
     job.message = (
@@ -91,6 +109,236 @@ def scan_library_sync(db: Session, lib: Library, job: ScanJob | None = None) -> 
         f"removed={job.removed} scraped={job.scraped}"
     )
     return job
+
+
+def ingest_path(library_id: int, path: str | Path, *, scrape: bool | None = None) -> dict:
+    """Ingest a single media file into the library (Jellyfin-style path refresh)."""
+    settings = get_settings()
+    p = Path(path)
+    result = {"ok": False, "created": 0, "scanned": 0, "scraped": 0, "message": ""}
+    if not p.exists() or not p.is_file():
+        result["message"] = "not a file"
+        return result
+    if not _is_media_file(p, settings.extension_set):
+        result["message"] = "not media"
+        return result
+
+    db = SessionLocal()
+    try:
+        lib = db.get(Library, library_id)
+        if not lib:
+            result["message"] = "library not found"
+            return result
+        job = ScanJob(job_id="path", library_id=library_id)
+        do_scrape = settings.auto_scrape if scrape is None else scrape
+        _ingest_file(db, lib, p, job, auto_scrape=do_scrape)
+        db.commit()
+        if job.created or job.scraped:
+            bump_revision(library_id)
+        result.update(
+            ok=True,
+            created=job.created,
+            scanned=1,
+            scraped=job.scraped,
+            message="ingested",
+        )
+        return result
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("ingest_path failed %s", path)
+        db.rollback()
+        result["message"] = str(exc)
+        return result
+    finally:
+        db.close()
+
+
+def remove_path(library_id: int, path: str | Path) -> dict:
+    """Remove DB row for a path that no longer exists on disk."""
+    abs_path = _normalize_abs(path)
+    result = {"ok": False, "removed": 0, "message": ""}
+    # If file still exists, do not remove.
+    if Path(abs_path).exists():
+        result["message"] = "still exists"
+        return result
+
+    db = SessionLocal()
+    try:
+        q = db.query(MediaItem).filter(MediaItem.library_id == library_id, MediaItem.path == abs_path)
+        n = q.delete(synchronize_session=False)
+        # Also try unresolved / alternate path forms
+        if n == 0:
+            n = (
+                db.query(MediaItem)
+                .filter(MediaItem.library_id == library_id, MediaItem.path == str(path))
+                .delete(synchronize_session=False)
+            )
+        db.commit()
+        if n:
+            bump_revision(library_id)
+        result.update(ok=True, removed=int(n), message="removed" if n else "not found")
+        return result
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("remove_path failed %s", path)
+        db.rollback()
+        result["message"] = str(exc)
+        return result
+    finally:
+        db.close()
+
+
+def refresh_paths(library_id: int, paths: list[str] | set[str]) -> dict:
+    """
+    Targeted refresh for a small set of paths (files and/or directories).
+    Directory paths: rglob media under them and prune DB rows under that prefix.
+    """
+    settings = get_settings()
+    exts = settings.extension_set
+    summary = {
+        "ok": True,
+        "scanned": 0,
+        "created": 0,
+        "removed": 0,
+        "scraped": 0,
+        "errors": [],
+    }
+    if not paths:
+        return summary
+
+    db = SessionLocal()
+    try:
+        lib = db.get(Library, library_id)
+        if not lib:
+            summary["ok"] = False
+            summary["errors"].append("library not found")
+            return summary
+        root = resolve_library_path(lib)
+        root_s = str(root)
+        job = ScanJob(job_id="paths", library_id=library_id)
+
+        file_targets: list[Path] = []
+        dir_targets: list[Path] = []
+        missing: list[str] = []
+
+        for raw in paths:
+            p = Path(raw)
+            try:
+                p = p.resolve()
+            except Exception:  # noqa: BLE001
+                p = Path(raw)
+            # Only touch paths inside the library root.
+            try:
+                p.relative_to(root)
+            except ValueError:
+                # Allow if raw string still under root_s prefix (Windows case quirks)
+                if not str(p).lower().startswith(root_s.lower()):
+                    continue
+            if p.exists() and p.is_dir():
+                dir_targets.append(p)
+            elif p.exists() and p.is_file():
+                if _is_media_file(p, exts):
+                    file_targets.append(p)
+            else:
+                missing.append(str(p))
+
+        # Ingest files
+        for p in file_targets:
+            try:
+                _ingest_file(db, lib, p, job, auto_scrape=False)
+                job.scanned += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("refresh ingest failed %s", p)
+                summary["errors"].append(f"{p.name}: {exc}")
+
+        # Directory subtrees: ingest + prefix prune
+        for d in dir_targets:
+            seen: set[str] = set()
+            try:
+                for path in d.rglob("*"):
+                    if not _is_media_file(path, exts):
+                        continue
+                    try:
+                        item = _ingest_file(db, lib, path, job, auto_scrape=False)
+                        seen.add(item.path)
+                        job.scanned += 1
+                    except Exception as exc:  # noqa: BLE001
+                        logger.exception("refresh dir ingest failed %s", path)
+                        summary["errors"].append(f"{path.name}: {exc}")
+                prefix = str(d.resolve())
+                # Normalize prefix separator for SQL LIKE
+                rows = (
+                    db.query(MediaItem)
+                    .filter(MediaItem.library_id == library_id, MediaItem.path.like(prefix + "%"))
+                    .all()
+                )
+                for item in rows:
+                    if item.path not in seen:
+                        # Only prune if truly under this dir and missing on disk
+                        if not Path(item.path).exists():
+                            db.delete(item)
+                            job.removed += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("refresh dir failed %s", d)
+                summary["errors"].append(f"{d}: {exc}")
+
+        # Explicit missing paths → remove
+        for m in missing:
+            candidates = {m}
+            try:
+                candidates.add(_normalize_abs(m))
+            except Exception:  # noqa: BLE001
+                pass
+            n = 0
+            for cand in candidates:
+                n = (
+                    db.query(MediaItem)
+                    .filter(MediaItem.library_id == library_id, MediaItem.path == cand)
+                    .delete(synchronize_session=False)
+                )
+                if n:
+                    break
+            job.removed += int(n)
+
+        db.commit()
+
+        # Optional scrape for newly created items only
+        if settings.auto_scrape and job.created:
+            items = (
+                db.query(MediaItem)
+                .filter(
+                    MediaItem.library_id == library_id,
+                    MediaItem.number.isnot(None),
+                    MediaItem.scraped_at.is_(None),
+                )
+                .order_by(MediaItem.id.desc())
+                .limit(max(job.created * 2, 10))
+                .all()
+            )
+            for item in items:
+                try:
+                    ok = asyncio.run(scrape_media_item(db, item, force=False))
+                    if ok:
+                        job.scraped += 1
+                except Exception as exc:  # noqa: BLE001
+                    summary["errors"].append(f"scrape {item.number}: {exc}")
+
+        if job.created or job.removed or job.scraped:
+            bump_revision(library_id)
+
+        summary.update(
+            scanned=job.scanned,
+            created=job.created,
+            removed=job.removed,
+            scraped=job.scraped,
+        )
+        return summary
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("refresh_paths failed library=%s", library_id)
+        db.rollback()
+        summary["ok"] = False
+        summary["errors"].append(str(exc))
+        return summary
+    finally:
+        db.close()
 
 
 def _ingest_file(db: Session, lib: Library, path: Path, job: ScanJob, auto_scrape: bool) -> MediaItem:

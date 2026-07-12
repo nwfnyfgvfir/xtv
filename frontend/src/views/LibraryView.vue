@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import MediaGrid from '@/components/MediaGrid.vue'
@@ -26,6 +26,10 @@ const loading = ref(false)
 const scanningId = ref<number | null>(null)
 const scanProgress = ref<ScanJob | null>(null)
 const currentLibraryId = ref<number | null>(null)
+const SOFT_REFRESH_MS = 5000
+let softRefreshTimer: number | undefined
+/** Fingerprint of last known library content for soft-refresh. */
+let lastSoftFingerprint = ''
 
 const showCreate = ref(false)
 const form = ref({
@@ -72,6 +76,13 @@ const currentLibrary = computed(() =>
   libraries.value.find((l) => l.id === currentLibraryId.value) || null,
 )
 
+function libraryFingerprint(libs: Library[], libId: number | null, mediaTotal: number, ids: number[]) {
+  const libPart = libs
+    .map((l) => `${l.id}:${l.media_count ?? 0}:${l.content_revision ?? 0}`)
+    .join('|')
+  return `${libPart}#${libId ?? ''}:${mediaTotal}:${ids.join(',')}`
+}
+
 async function loadLibraries() {
   libraries.value = await listLibraries()
   const qLib = Number(route.query.library || 0) || null
@@ -89,25 +100,91 @@ async function loadLibraries() {
   syncIntervalForm(cur)
 }
 
-async function loadMedia() {
+async function loadMedia(opts?: { quiet?: boolean }) {
   if (currentLibraryId.value == null) {
     items.value = []
     total.value = 0
+    lastSoftFingerprint = libraryFingerprint(libraries.value, null, 0, [])
     return
   }
-  loading.value = true
+  const quiet = Boolean(opts?.quiet) && items.value.length > 0
+  if (!quiet) loading.value = true
   try {
     const data = await listMedia({
       page: page.value,
       page_size: 48,
       library_id: currentLibraryId.value,
     })
-    items.value = data.items
-    total.value = data.total
+    const nextIds = data.items.map((i) => i.id)
+    const prevIds = items.value.map((i) => i.id)
+    const changed =
+      data.total !== total.value ||
+      nextIds.length !== prevIds.length ||
+      nextIds.some((id, idx) => id !== prevIds[idx])
+    if (changed || !quiet) {
+      items.value = data.items
+      total.value = data.total
+    }
+    lastSoftFingerprint = libraryFingerprint(
+      libraries.value,
+      currentLibraryId.value,
+      data.total,
+      nextIds,
+    )
   } catch {
-    ElMessage.error('加载媒体失败')
+    if (!quiet) ElMessage.error('加载媒体失败')
   } finally {
-    loading.value = false
+    if (!quiet) loading.value = false
+  }
+}
+
+async function softRefreshTick() {
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+  if (scanningId.value) return
+  try {
+    const prevCur = currentLibraryId.value
+    const prevSig = libraries.value
+      .map((l) => `${l.id}:${l.media_count ?? 0}:${l.content_revision ?? 0}`)
+      .join('|')
+    await loadLibraries()
+    const nextSig = libraries.value
+      .map((l) => `${l.id}:${l.media_count ?? 0}:${l.content_revision ?? 0}`)
+      .join('|')
+    const curChanged =
+      prevCur !== currentLibraryId.value ||
+      prevSig !== nextSig ||
+      !lastSoftFingerprint
+    if (curChanged) {
+      await loadMedia({ quiet: true })
+    }
+  } catch {
+    /* ignore soft-refresh errors */
+  }
+}
+
+function onVisibilityChange() {
+  if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+    void softRefreshTick()
+  }
+}
+
+function startSoftRefresh() {
+  stopSoftRefresh()
+  softRefreshTimer = window.setInterval(() => {
+    void softRefreshTick()
+  }, SOFT_REFRESH_MS)
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', onVisibilityChange)
+  }
+}
+
+function stopSoftRefresh() {
+  if (softRefreshTimer != null) {
+    window.clearInterval(softRefreshTimer)
+    softRefreshTimer = undefined
+  }
+  if (typeof document !== 'undefined') {
+    document.removeEventListener('visibilitychange', onVisibilityChange)
   }
 }
 
@@ -214,7 +291,11 @@ async function toggleAutoScan(lib: Library) {
       scan_interval_hours: Math.max(1, Math.round(secs / 3600)),
     })
     await loadLibraries()
-    ElMessage.success(!lib.auto_scan_enabled ? '已开启定时扫描' : '已关闭定时扫描')
+    ElMessage.success(
+      !lib.auto_scan_enabled
+        ? '已开启定时全量扫描（目录实时监听始终开启）'
+        : '已关闭定时全量扫描（目录实时监听仍开启）',
+    )
   } catch {
     ElMessage.error('更新失败')
   }
@@ -246,7 +327,11 @@ watch(
   },
 )
 
-onMounted(load)
+onMounted(() => {
+  void load()
+  startSoftRefresh()
+})
+onBeforeUnmount(stopSoftRefresh)
 </script>
 
 <template>
@@ -254,7 +339,6 @@ onMounted(load)
     <div class="head">
       <div>
         <h1 class="page-title">媒体库</h1>
-        <p class="muted intro">按库浏览（Jellyfin 风格），互不混排</p>
       </div>
       <el-button type="primary" @click="showCreate = true">添加媒体库</el-button>
     </div>
@@ -280,8 +364,9 @@ onMounted(load)
         <span>{{ currentLibrary.path }}</span>
         <span>· {{ currentLibrary.type }}</span>
         <span v-if="currentLibrary.auto_scan_enabled">
-          · 定时每 {{ formatInterval(currentLibrary) || '24h' }}
+          · 定时全量每 {{ formatInterval(currentLibrary) || '24h' }}
         </span>
+        <span v-else>· 实时监听中</span>
       </div>
       <div class="actions">
         <div class="interval-inline">
@@ -333,7 +418,7 @@ onMounted(load)
         :total="total"
         :page-size="48"
         v-model:current-page="page"
-        @current-change="loadMedia"
+        @current-change="() => loadMedia()"
       />
     </div>
 
@@ -364,7 +449,9 @@ onMounted(load)
               <el-option label="时" value="hours" />
             </el-select>
           </div>
-          <div class="muted tip">最小 30 秒；创建或点「应用间隔」写入当前库</div>
+          <div class="muted tip">
+            最小 30 秒。目录实时监听始终开启；定时扫描为周期全量校验/清理。
+          </div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -381,10 +468,7 @@ onMounted(load)
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-}
-.intro {
-  margin: 0 0 16px;
-  font-size: 13px;
+  margin-bottom: 16px;
 }
 .lib-tabs {
   display: flex;

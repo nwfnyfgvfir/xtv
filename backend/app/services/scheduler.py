@@ -82,7 +82,7 @@ def reload_library_jobs() -> None:
         finally:
             db.close()
 
-    # Keep filesystem watches in sync with the same auto_scan_enabled libraries.
+    # Keep filesystem watches in sync with enabled libraries (realtime ≠ auto_scan).
     try:
         from app.services.watcher import reload_watches
 

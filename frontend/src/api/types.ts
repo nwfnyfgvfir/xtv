@@ -8,6 +8,8 @@ export interface Library {
   scan_interval_hours?: number | null
   scan_interval_seconds?: number | null
   media_count?: number
+  /** Bumped when library media is added/removed/scraped (LibraryChanged-style). */
+  content_revision?: number
   created_at: string
 }
 

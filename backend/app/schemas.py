@@ -38,6 +38,8 @@ class LibraryOut(BaseModel):
     scan_interval_hours: int | None = None
     scan_interval_seconds: int | None = None
     media_count: int = 0
+    # In-process LibraryChanged generation (bumped on ingest/remove/scrape).
+    content_revision: int = 0
     created_at: datetime
 
 

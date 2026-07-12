@@ -26,9 +26,31 @@ let drag: DragState | null = null
 let lastTapAt = 0
 let lastTapX = 0
 let suppressClickUntil = 0
+let singleTapTimer: number | undefined
 const gestureCleanups: Array<() => void> = []
 
+function clearSingleTapTimer() {
+  if (singleTapTimer != null) {
+    window.clearTimeout(singleTapTimer)
+    singleTapTimer = undefined
+  }
+}
+
+function toggleControls() {
+  if (!player) return
+  try {
+    player.controls.toggle()
+  } catch {
+    try {
+      player.controls.show = !player.controls.show
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 function clearGestureCleanups() {
+  clearSingleTapTimer()
   while (gestureCleanups.length) {
     const fn = gestureCleanups.pop()
     try {
@@ -128,6 +150,7 @@ function bindGestureLayer(el: HTMLElement) {
       drag.dragging = true
       drag.moved = true
       lastTapAt = 0
+      clearSingleTapTimer()
     }
     e.preventDefault()
     const duration = Number.isFinite(player.duration) ? player.duration : 0
@@ -156,16 +179,24 @@ function bindGestureLayer(el: HTMLElement) {
       // Suppress the synthetic click that follows a drag.
       suppressClickUntil = Date.now() + 350
       lastTapAt = 0
+      clearSingleTapTimer()
       return
     }
-    // Tap: double-tap detection only (single tap is intentionally a no-op).
+    // Deferred single-tap toggles controls; second tap within DBLCLICK_MS seeks/plays.
     const now = Date.now()
     if (now - lastTapAt <= DBLCLICK_MS && Math.abs(clientX - lastTapX) < 40) {
+      clearSingleTapTimer()
       lastTapAt = 0
       seekOrToggleByX(clientX, el)
     } else {
       lastTapAt = now
       lastTapX = clientX
+      clearSingleTapTimer()
+      singleTapTimer = window.setTimeout(() => {
+        singleTapTimer = undefined
+        lastTapAt = 0
+        toggleControls()
+      }, DBLCLICK_MS)
     }
   }
 
@@ -198,6 +229,7 @@ function bindGestureLayer(el: HTMLElement) {
 
 function destroy() {
   clearGestureCleanups()
+  clearSingleTapTimer()
   drag = null
   lastTapAt = 0
   if (timer) {
@@ -250,7 +282,7 @@ function create() {
           zIndex: '10',
           background: 'transparent',
         },
-        // Swallow Artplayer component click (no single-click pause).
+        // Swallow Artplayer component click; single-tap toggle lives in pointerup.
         click() {
           /* intentional no-op */
         },
@@ -288,7 +320,7 @@ watch(
 <template>
   <div class="player-wrap">
     <div ref="containerRef" class="player" />
-    <p class="hint muted">滑动快进/快退 · 双击左 -10s · 双击右 +10s · 双击中切换 · 单击无操作</p>
+    <p class="hint muted">滑动快进/快退 · 双击左 -10s · 双击右 +10s · 双击中切换 · 单击显示/隐藏控制栏</p>
   </div>
 </template>
 

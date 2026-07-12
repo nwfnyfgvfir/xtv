@@ -11,6 +11,7 @@ from app.deps import require_auth
 from app.models import Library, MediaItem
 from app.schemas import LibraryCreate, LibraryOut, LibraryUpdate, ScanJobOut
 from app.services.jobs import job_store
+from app.services.library_revision import get_revision
 from app.services.scanner import run_scan_job
 from app.services.scheduler import reload_library_jobs
 
@@ -21,6 +22,7 @@ def _library_out(db: Session, lib: Library) -> LibraryOut:
     count = db.query(func.count(MediaItem.id)).filter(MediaItem.library_id == lib.id).scalar() or 0
     data = LibraryOut.model_validate(lib)
     data.media_count = int(count)
+    data.content_revision = get_revision(lib.id)
     return data
 
 
