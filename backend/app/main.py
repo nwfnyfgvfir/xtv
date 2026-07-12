@@ -13,6 +13,7 @@ from app.api import api_router
 from app.config import get_settings
 from app.db import init_db
 from app.services.scheduler import shutdown_scheduler, start_scheduler
+from app.services.watcher import start_watcher, stop_watcher
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,15 @@ async def lifespan(_app: FastAPI):
         start_scheduler()
     except Exception:  # noqa: BLE001
         logger.exception("Failed to start scheduler")
+    try:
+        start_watcher()
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to start filesystem watcher")
     yield
+    try:
+        stop_watcher()
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to stop filesystem watcher")
     try:
         shutdown_scheduler()
     except Exception:  # noqa: BLE001

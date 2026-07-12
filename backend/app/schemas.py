@@ -168,6 +168,7 @@ class ScanJobOut(BaseModel):
     scanned: int = 0
     created: int = 0
     scraped: int = 0
+    removed: int = 0
     errors: list[str] = []
     message: str | None = None
 

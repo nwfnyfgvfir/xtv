@@ -34,12 +34,14 @@ def scan_library_sync(db: Session, lib: Library, job: ScanJob | None = None) -> 
     job.library_id = lib.id
 
     if not root.exists():
+        # Do not prune when the library root is missing — avoid wiping the DB on mount glitches.
         job.status = "error"
         job.message = f"Path not found: {root}"
         job.errors.append(job.message)
         return job
 
     exts = settings.extension_set
+    seen_paths: set[str] = set()
     for path in root.rglob("*"):
         if not path.is_file():
             continue
@@ -47,15 +49,26 @@ def scan_library_sync(db: Session, lib: Library, job: ScanJob | None = None) -> 
         if ext not in exts:
             continue
         try:
-            _ingest_file(db, lib, path, job, auto_scrape=False)
+            item = _ingest_file(db, lib, path, job, auto_scrape=False)
+            seen_paths.add(item.path)
             job.scanned += 1
         except Exception as exc:  # noqa: BLE001
             logger.exception("ingest failed %s", path)
             job.errors.append(f"{path.name}: {exc}")
 
+    # Remove DB rows for files that disappeared from disk.
+    existing = db.query(MediaItem).filter(MediaItem.library_id == lib.id).all()
+    for item in existing:
+        if item.path not in seen_paths:
+            db.delete(item)
+            job.removed += 1
+
     db.commit()
 
-    job.message = f"scanning done scanned={job.scanned} created={job.created}; scraping…"
+    job.message = (
+        f"scanning done scanned={job.scanned} created={job.created} "
+        f"removed={job.removed}; scraping…"
+    )
     if settings.auto_scrape:
         items = (
             db.query(MediaItem)
@@ -73,7 +86,10 @@ def scan_library_sync(db: Session, lib: Library, job: ScanJob | None = None) -> 
                 job.errors.append(f"scrape {item.number}: {exc}")
 
     job.status = "done"
-    job.message = f"scanned={job.scanned} created={job.created} scraped={job.scraped}"
+    job.message = (
+        f"scanned={job.scanned} created={job.created} "
+        f"removed={job.removed} scraped={job.scraped}"
+    )
     return job
 
 

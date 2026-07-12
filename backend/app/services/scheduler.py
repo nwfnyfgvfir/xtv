@@ -13,6 +13,8 @@ from app.services.scanner import run_scan_job
 
 logger = logging.getLogger(__name__)
 
+# Imported lazily inside reload to avoid circular imports with watcher.
+
 _scheduler: BackgroundScheduler | None = None
 _MIN_SECONDS = 30
 
@@ -52,34 +54,41 @@ def shutdown_scheduler() -> None:
 
 
 def reload_library_jobs() -> None:
-    if _scheduler is None:
-        return
-    for job in list(_scheduler.get_jobs()):
-        if str(job.id).startswith("libscan-"):
-            job.remove()
+    if _scheduler is not None:
+        for job in list(_scheduler.get_jobs()):
+            if str(job.id).startswith("libscan-"):
+                job.remove()
 
-    db = SessionLocal()
-    try:
-        libs = (
-            db.query(Library)
-            .filter(Library.enabled.is_(True), Library.auto_scan_enabled.is_(True))
-            .all()
-        )
-        for lib in libs:
-            secs = _interval_seconds(lib)
-            job_id = f"libscan-{lib.id}"
-            _scheduler.add_job(
-                _scan_library_task,
-                trigger=IntervalTrigger(seconds=secs),
-                id=job_id,
-                args=[lib.id],
-                replace_existing=True,
-                max_instances=1,
-                coalesce=True,
+        db = SessionLocal()
+        try:
+            libs = (
+                db.query(Library)
+                .filter(Library.enabled.is_(True), Library.auto_scan_enabled.is_(True))
+                .all()
             )
-            logger.info("Registered auto-scan library=%s every %ss", lib.id, secs)
-    finally:
-        db.close()
+            for lib in libs:
+                secs = _interval_seconds(lib)
+                job_id = f"libscan-{lib.id}"
+                _scheduler.add_job(
+                    _scan_library_task,
+                    trigger=IntervalTrigger(seconds=secs),
+                    id=job_id,
+                    args=[lib.id],
+                    replace_existing=True,
+                    max_instances=1,
+                    coalesce=True,
+                )
+                logger.info("Registered auto-scan library=%s every %ss", lib.id, secs)
+        finally:
+            db.close()
+
+    # Keep filesystem watches in sync with the same auto_scan_enabled libraries.
+    try:
+        from app.services.watcher import reload_watches
+
+        reload_watches()
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to reload filesystem watches")
 
 
 def scheduler_status() -> dict[str, Any]:

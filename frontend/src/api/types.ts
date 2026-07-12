@@ -103,6 +103,7 @@ export interface ScanJob {
   scanned: number
   created: number
   scraped: number
+  removed?: number
   errors: string[]
   message?: string | null
 }

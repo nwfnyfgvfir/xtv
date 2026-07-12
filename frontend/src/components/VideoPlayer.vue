@@ -7,15 +7,49 @@ const props = defineProps<{ mediaId: number; src: string; autoplay?: boolean }>(
 const containerRef = ref<HTMLDivElement | null>(null)
 let player: Artplayer | null = null
 let timer: number | undefined
-let clickTimer: number | undefined
 
-const CLICK_DELAY_MS = 280
+const DBLCLICK_MS = 300
+const DRAG_THRESHOLD_PX = 8
+const SEEK_RATIO = 0.5
 
-function clearClickTimer() {
-  if (clickTimer !== undefined) {
-    window.clearTimeout(clickTimer)
-    clickTimer = undefined
+type DragState = {
+  pointerId: number
+  startX: number
+  startY: number
+  startTime: number
+  width: number
+  dragging: boolean
+  moved: boolean
+}
+
+let drag: DragState | null = null
+let lastTapAt = 0
+let lastTapX = 0
+let suppressClickUntil = 0
+const gestureCleanups: Array<() => void> = []
+
+function clearGestureCleanups() {
+  while (gestureCleanups.length) {
+    const fn = gestureCleanups.pop()
+    try {
+      fn?.()
+    } catch {
+      /* ignore */
+    }
   }
+}
+
+function formatTime(sec: number): string {
+  if (!Number.isFinite(sec) || sec < 0) return '00:00'
+  const s = Math.floor(sec % 60)
+  const m = Math.floor(sec / 60) % 60
+  const h = Math.floor(sec / 3600)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`
+}
+
+function clamp(n: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, n))
 }
 
 async function restore() {
@@ -54,8 +88,118 @@ function seekOrToggleByX(clientX: number, target: HTMLElement) {
   }
 }
 
+function bindGestureLayer(el: HTMLElement) {
+  el.style.touchAction = 'pan-y'
+  el.style.userSelect = 'none'
+  ;(el.style as CSSStyleDeclaration & { webkitUserSelect?: string }).webkitUserSelect = 'none'
+
+  const onPointerDown = (e: PointerEvent) => {
+    if (!player || e.button !== 0) return
+    // Only primary pointer
+    if (drag) return
+    const rect = el.getBoundingClientRect()
+    drag = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      startTime: player.currentTime || 0,
+      width: rect.width || 1,
+      dragging: false,
+      moved: false,
+    }
+    try {
+      el.setPointerCapture(e.pointerId)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const onPointerMove = (e: PointerEvent) => {
+    if (!player || !drag || e.pointerId !== drag.pointerId) return
+    const dx = e.clientX - drag.startX
+    const dy = e.clientY - drag.startY
+    if (!drag.dragging) {
+      if (Math.abs(dx) < DRAG_THRESHOLD_PX && Math.abs(dy) < DRAG_THRESHOLD_PX) return
+      // Prefer horizontal swipe for seek
+      if (Math.abs(dx) < Math.abs(dy)) {
+        drag = null
+        return
+      }
+      drag.dragging = true
+      drag.moved = true
+      lastTapAt = 0
+    }
+    e.preventDefault()
+    const duration = Number.isFinite(player.duration) ? player.duration : 0
+    if (!(duration > 0)) return
+    const delta = (dx / drag.width) * duration * SEEK_RATIO
+    const next = clamp(drag.startTime + delta, 0, duration)
+    player.currentTime = next
+    try {
+      player.notice.show = `${formatTime(next)} / ${formatTime(duration)}`
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const endPointer = (e: PointerEvent) => {
+    if (!drag || e.pointerId !== drag.pointerId) return
+    const wasDrag = drag.dragging
+    const clientX = e.clientX
+    drag = null
+    try {
+      el.releasePointerCapture(e.pointerId)
+    } catch {
+      /* ignore */
+    }
+    if (wasDrag) {
+      // Suppress the synthetic click that follows a drag.
+      suppressClickUntil = Date.now() + 350
+      lastTapAt = 0
+      return
+    }
+    // Tap: double-tap detection only (single tap is intentionally a no-op).
+    const now = Date.now()
+    if (now - lastTapAt <= DBLCLICK_MS && Math.abs(clientX - lastTapX) < 40) {
+      lastTapAt = 0
+      seekOrToggleByX(clientX, el)
+    } else {
+      lastTapAt = now
+      lastTapX = clientX
+    }
+  }
+
+  const onClick = (e: MouseEvent) => {
+    // Layer click is also fired by Artplayer's component proxy; ignore after drag
+    // and ignore single clicks (double handled in pointerup).
+    if (Date.now() < suppressClickUntil) {
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
+    // Prevent Artplayer from treating residual events oddly; we own gestures.
+    e.preventDefault()
+  }
+
+  el.addEventListener('pointerdown', onPointerDown)
+  el.addEventListener('pointermove', onPointerMove)
+  el.addEventListener('pointerup', endPointer)
+  el.addEventListener('pointercancel', endPointer)
+  el.addEventListener('click', onClick)
+
+  gestureCleanups.push(() => {
+    el.removeEventListener('pointerdown', onPointerDown)
+    el.removeEventListener('pointermove', onPointerMove)
+    el.removeEventListener('pointerup', endPointer)
+    el.removeEventListener('pointercancel', endPointer)
+    el.removeEventListener('click', onClick)
+  })
+}
+
 function destroy() {
-  clearClickTimer()
+  clearGestureCleanups()
+  drag = null
+  lastTapAt = 0
   if (timer) {
     window.clearInterval(timer)
     timer = undefined
@@ -93,7 +237,7 @@ function create() {
     playsInline: true,
     lang: 'zh-cn',
     // Full-area gesture layer sits above video (z40) but below controls (z60).
-    // Capturing clicks here prevents Artplayer's built-in first-click toggle.
+    // Blocks Artplayer's built-in first-click toggle / dblclick fullscreen.
     layers: [
       {
         name: 'gesture',
@@ -106,22 +250,15 @@ function create() {
           zIndex: '10',
           background: 'transparent',
         },
-        click(_component, event) {
-          if (!player) return
-          const e = event as MouseEvent
-          const target = event.currentTarget as HTMLElement | null
-          if (!target) return
-
-          if (clickTimer !== undefined) {
-            clearClickTimer()
-            seekOrToggleByX(e.clientX, target)
-            return
-          }
-
-          clickTimer = window.setTimeout(() => {
-            clickTimer = undefined
-            player?.toggle()
-          }, CLICK_DELAY_MS)
+        // Swallow Artplayer component click (no single-click pause).
+        click() {
+          /* intentional no-op */
+        },
+        mounted(el) {
+          bindGestureLayer(el)
+        },
+        beforeUnmount() {
+          clearGestureCleanups()
         },
       },
     ],
@@ -151,7 +288,7 @@ watch(
 <template>
   <div class="player-wrap">
     <div ref="containerRef" class="player" />
-    <p class="hint muted">双击左侧 -10s · 双击右侧 +10s · 中间切换播放</p>
+    <p class="hint muted">滑动快进/快退 · 双击左 -10s · 双击右 +10s · 双击中切换 · 单击无操作</p>
   </div>
 </template>
 

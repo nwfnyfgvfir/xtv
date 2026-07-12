@@ -14,6 +14,7 @@ class ScanJob:
     scanned: int = 0
     created: int = 0
     scraped: int = 0
+    removed: int = 0
     errors: list[str] = field(default_factory=list)
     message: str | None = None
 
@@ -25,6 +26,7 @@ class ScanJob:
             "scanned": self.scanned,
             "created": self.created,
             "scraped": self.scraped,
+            "removed": self.removed,
             "errors": self.errors[-50:],
             "message": self.message,
         }
