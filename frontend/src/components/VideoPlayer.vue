@@ -8,13 +8,11 @@ const containerRef = ref<HTMLDivElement | null>(null)
 let player: Artplayer | null = null
 let timer: number | undefined
 let unlockFabEl: HTMLElement | null = null
+let gestureLayerEl: HTMLElement | null = null
 
 const DBLCLICK_MS = 300
 const DRAG_THRESHOLD_PX = 8
 const SEEK_RATIO = 0.5
-const IS_MOBILE =
-  typeof navigator !== 'undefined' &&
-  /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
 
 type DragState = {
   pointerId: number
@@ -60,8 +58,17 @@ function setPlayerLock(art: Artplayer, locked: boolean) {
 
 function syncUnlockFab(locked: boolean) {
   if (!unlockFabEl) return
-  // Desktop needs a floating unlock control (native lock layer is mobile-only).
-  unlockFabEl.style.display = locked && !IS_MOBILE ? 'flex' : 'none'
+  // Floating unlock for all platforms (Artplayer built-in lock layer is mobile-only
+  // and sits under our full-area gesture layer, so it is not usable).
+  unlockFabEl.style.display = locked ? 'flex' : 'none'
+  unlockFabEl.style.pointerEvents = locked ? 'auto' : 'none'
+}
+
+function syncGestureLayer(locked: boolean) {
+  // While locked, let unlock FAB receive taps; unlock restores gesture capture.
+  if (gestureLayerEl) {
+    gestureLayerEl.style.pointerEvents = locked ? 'none' : 'auto'
+  }
 }
 
 function clearSingleTapTimer() {
@@ -318,6 +325,7 @@ function destroy() {
   drag = null
   lastTapAt = 0
   unlockFabEl = null
+  gestureLayerEl = null
   if (timer) {
     window.clearInterval(timer)
     timer = undefined
@@ -353,34 +361,33 @@ function create() {
     mutex: true,
     backdrop: true,
     playsInline: true,
-    // Mobile built-in side lock button; desktop uses custom control + unlock FAB.
-    lock: true,
+    // Do not use Artplayer mobile-only lock plugin: our full-area gesture layer
+    // covers its side button. Unified custom lock works on phone + desktop.
+    lock: false,
     lang: 'zh-cn',
-    controls: IS_MOBILE
-      ? []
-      : [
-          {
-            name: 'screen-lock',
-            position: 'right',
-            index: 10,
-            html: '锁',
-            tooltip: '锁屏',
-            style: {
-              padding: '0 8px',
-              color: '#fff',
-            },
-            click() {
-              if (!player || isPlayerLocked(player)) return
-              setPlayerLock(player, true)
-              try {
-                player.controls.show = false
-              } catch {
-                /* ignore */
-              }
-            },
-          },
-        ],
-    // Full-area gesture layer sits above video (z40) but below controls (z60).
+    controls: [
+      {
+        name: 'screen-lock',
+        position: 'right',
+        index: 10,
+        html: '锁',
+        tooltip: '锁屏',
+        style: {
+          padding: '0 8px',
+          color: '#fff',
+        },
+        click() {
+          if (!player || isPlayerLocked(player)) return
+          setPlayerLock(player, true)
+          try {
+            player.controls.show = false
+          } catch {
+            /* ignore */
+          }
+        },
+      },
+    ],
+    // Full-area gesture layer sits above video but below controls.
     // Blocks Artplayer's built-in first-click toggle / dblclick fullscreen.
     layers: [
       {
@@ -399,10 +406,12 @@ function create() {
           /* intentional no-op */
         },
         mounted(el) {
+          gestureLayerEl = el
           bindGestureLayer(el)
         },
         beforeUnmount() {
           clearGestureCleanups()
+          gestureLayerEl = null
         },
       },
       {
@@ -417,16 +426,18 @@ function create() {
           display: 'none',
           alignItems: 'center',
           justifyContent: 'center',
-          minWidth: '44px',
-          height: '44px',
-          padding: '0 12px',
+          minWidth: '48px',
+          height: '48px',
+          padding: '0 14px',
           borderRadius: '999px',
-          background: 'rgba(0,0,0,.55)',
+          background: 'rgba(0,0,0,.6)',
           color: '#fff',
-          fontSize: '13px',
+          fontSize: '14px',
           cursor: 'pointer',
           userSelect: 'none',
-          pointerEvents: 'auto',
+          WebkitUserSelect: 'none',
+          touchAction: 'manipulation',
+          pointerEvents: 'none',
         },
         click() {
           if (!player) return
@@ -434,9 +445,28 @@ function create() {
         },
         mounted(el) {
           unlockFabEl = el
+          // Direct listeners: more reliable than Artplayer proxy click on mobile.
+          const unlock = (e: Event) => {
+            e.preventDefault()
+            e.stopPropagation()
+            if (!player || !isPlayerLocked(player)) return
+            setPlayerLock(player, false)
+          }
+          el.addEventListener('pointerup', unlock)
+          el.addEventListener('click', unlock)
+          ;(el as HTMLElement & { __unlockHandlers?: () => void }).__unlockHandlers = () => {
+            el.removeEventListener('pointerup', unlock)
+            el.removeEventListener('click', unlock)
+          }
           syncUnlockFab(isPlayerLocked(player))
         },
-        beforeUnmount() {
+        beforeUnmount(el) {
+          const node = el as HTMLElement & { __unlockHandlers?: () => void }
+          try {
+            node.__unlockHandlers?.()
+          } catch {
+            /* ignore */
+          }
           unlockFabEl = null
         },
       },
@@ -445,6 +475,7 @@ function create() {
 
   player.on('lock', (state: boolean) => {
     syncUnlockFab(state)
+    syncGestureLayer(state)
     if (state) {
       drag = null
       clearSingleTapTimer()
@@ -493,7 +524,7 @@ watch(
   <div class="player-wrap">
     <div ref="containerRef" class="player" />
     <p class="hint muted">
-      滑动快进/快退 · 双击左 -10s · 双击右 +10s · 双击中切换 · 单击显示/隐藏控制栏 · 控制栏「锁」锁屏
+      滑动快进/快退 · 双击左 -10s · 双击右 +10s · 双击中切换 · 单击显示/隐藏控制栏 · 「锁」锁屏 · 锁屏后点「开锁」
     </p>
   </div>
 </template>
