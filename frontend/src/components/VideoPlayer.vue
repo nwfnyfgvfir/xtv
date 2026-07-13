@@ -13,6 +13,8 @@ let gestureLayerEl: HTMLElement | null = null
 const DBLCLICK_MS = 300
 const DRAG_THRESHOLD_PX = 8
 const SEEK_RATIO = 0.5
+// Artplayer default is 3000ms; too short after single-tap show.
+const CONTROL_HIDE_MS = 6000
 
 type DragState = {
   pointerId: number
@@ -64,10 +66,13 @@ function syncUnlockFab(locked: boolean) {
   unlockFabEl.style.pointerEvents = locked ? 'auto' : 'none'
 }
 
-function syncGestureLayer(locked: boolean) {
-  // While locked, let unlock FAB receive taps; unlock restores gesture capture.
+function syncGestureLayer(_locked: boolean) {
+  // Keep the full-area gesture layer capturing while locked. Unlock FAB sits at a
+  // higher z-index and does not need the layer disabled; pointer-events:none lets
+  // clicks fall through to $video, where Artplayer's desktop click toggles play
+  // without checking isLock.
   if (gestureLayerEl) {
-    gestureLayerEl.style.pointerEvents = locked ? 'none' : 'auto'
+    gestureLayerEl.style.pointerEvents = 'auto'
   }
 }
 
@@ -189,7 +194,13 @@ function bindGestureLayer(el: HTMLElement) {
   ;(el.style as CSSStyleDeclaration & { webkitUserSelect?: string }).webkitUserSelect = 'none'
 
   const onPointerDown = (e: PointerEvent) => {
-    if (!player || isPlayerLocked(player) || e.button !== 0) return
+    if (!player || e.button !== 0) return
+    if (isPlayerLocked(player)) {
+      // Swallow so clicks never reach $video (Artplayer desktop click toggles play).
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
     // Only primary pointer
     if (drag) return
     const rect = el.getBoundingClientRect()
@@ -210,7 +221,12 @@ function bindGestureLayer(el: HTMLElement) {
   }
 
   const onPointerMove = (e: PointerEvent) => {
-    if (!player || isPlayerLocked(player) || !drag || e.pointerId !== drag.pointerId) return
+    if (!player || !drag || e.pointerId !== drag.pointerId) return
+    if (isPlayerLocked(player)) {
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
     const dx = e.clientX - drag.startX
     const dy = e.clientY - drag.startY
     if (!drag.dragging) {
@@ -240,8 +256,9 @@ function bindGestureLayer(el: HTMLElement) {
   }
 
   const endPointer = (e: PointerEvent) => {
-    if (!drag || e.pointerId !== drag.pointerId) return
     if (isPlayerLocked(player)) {
+      e.preventDefault()
+      e.stopPropagation()
       drag = null
       try {
         el.releasePointerCapture(e.pointerId)
@@ -252,6 +269,7 @@ function bindGestureLayer(el: HTMLElement) {
       clearSingleTapTimer()
       return
     }
+    if (!drag || e.pointerId !== drag.pointerId) return
     const wasDrag = drag.dragging
     const clientX = e.clientX
     const startTime = drag.startTime
@@ -295,13 +313,11 @@ function bindGestureLayer(el: HTMLElement) {
   }
 
   const onClick = (e: MouseEvent) => {
-    if (isPlayerLocked(player) || Date.now() < suppressClickUntil) {
-      e.preventDefault()
-      e.stopPropagation()
-      return
-    }
-    // Prevent Artplayer from treating residual events oddly; we own gestures.
+    // Always own clicks on the gesture layer (including while locked) so they
+    // never bubble/fall through to Artplayer's $video click → toggle.
     e.preventDefault()
+    e.stopPropagation()
+    if (isPlayerLocked(player) || Date.now() < suppressClickUntil) return
   }
 
   el.addEventListener('pointerdown', onPointerDown)
@@ -343,6 +359,7 @@ function create() {
 
   // Prefer custom seek gestures over Artplayer's default dblclick-fullscreen.
   Artplayer.DBCLICK_FULLSCREEN = false
+  Artplayer.CONTROL_HIDE_TIME = CONTROL_HIDE_MS
 
   player = new Artplayer({
     container: containerRef.value,
