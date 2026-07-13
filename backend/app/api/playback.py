@@ -178,21 +178,43 @@ def put_progress(
 
 @router.get("/images/proxy")
 async def proxy_image(url: str = Query(..., min_length=8)):
-    """Same-origin image proxy with SSRF guards and short LRU cache (no auth — for <img>)."""
+    """Same-origin image proxy with SSRF guards, memory LRU and optional disk cache (no auth — for <img>)."""
     import httpx
     from fastapi.responses import Response
 
-    from app.services.images import cache_get, cache_set, validate_proxy_url
+    from app.config import get_settings
+    from app.services.images import (
+        cache_get,
+        cache_set,
+        disk_cache_get,
+        disk_cache_set,
+        validate_proxy_url,
+    )
 
     try:
         url = validate_proxy_url(url)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
+    headers = {"Cache-Control": "public, max-age=3600"}
+
     cached = cache_get(url)
     if cached:
         ctype, body = cached
-        return Response(content=body, media_type=ctype, headers={"Cache-Control": "public, max-age=3600"})
+        return Response(content=body, media_type=ctype, headers=headers)
+
+    settings = get_settings()
+    if settings.image_local_cache:
+        disk = disk_cache_get(url)
+        if disk:
+            ctype, body = disk
+            if len(body) <= 5 * 1024 * 1024:
+                cache_set(url, ctype, body)
+            return Response(
+                content=body,
+                media_type=ctype,
+                headers={**headers, "Cache-Control": "public, max-age=604800"},
+            )
 
     try:
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
@@ -214,4 +236,6 @@ async def proxy_image(url: str = Query(..., min_length=8)):
     body = resp.content
     if len(body) <= 5 * 1024 * 1024:
         cache_set(url, content_type, body)
-    return Response(content=body, media_type=content_type, headers={"Cache-Control": "public, max-age=3600"})
+        if settings.image_local_cache:
+            disk_cache_set(url, content_type, body)
+    return Response(content=body, media_type=content_type, headers=headers)

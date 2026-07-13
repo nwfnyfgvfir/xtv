@@ -24,11 +24,13 @@ OVERRIDE_KEYS = {
     "auto_scrape",
     "auto_translate",
     "image_proxy_mode",
+    "image_external_proxy_url",
+    "image_local_cache",
     "scan_extensions",
 }
 
 _BOOL_TRUE = ("1", "true", "yes", "on")
-_IMAGE_PROXY_MODES = frozenset({"site", "metatube"})
+_IMAGE_PROXY_MODES = frozenset({"site", "metatube", "external"})
 
 
 def _db_map(db: Session) -> dict[str, str]:
@@ -58,6 +60,10 @@ def _apply_overrides_to_runtime(db_map: dict[str, str]) -> None:
         mode = (db_map["image_proxy_mode"] or "").strip().lower()
         if mode in _IMAGE_PROXY_MODES:
             s.image_proxy_mode = mode
+    if "image_external_proxy_url" in db_map:
+        s.image_external_proxy_url = db_map["image_external_proxy_url"] or ""
+    if "image_local_cache" in db_map:
+        s.image_local_cache = db_map["image_local_cache"].lower() in _BOOL_TRUE
     if "scan_extensions" in db_map and db_map["scan_extensions"]:
         s.scan_extensions = db_map["scan_extensions"]
 
@@ -100,6 +106,12 @@ async def get_app_settings(
     )
     mode_raw = (db_map.get("image_proxy_mode") or s.image_proxy_mode or "site").strip().lower()
     image_proxy_mode = mode_raw if mode_raw in _IMAGE_PROXY_MODES else "site"
+    local_cache_raw = db_map.get("image_local_cache")
+    image_local_cache = (
+        local_cache_raw.lower() in _BOOL_TRUE
+        if local_cache_raw is not None
+        else bool(s.image_local_cache)
+    )
     return SettingsOut(
         metatube_base_url=db_map.get("metatube_base_url") or s.metatube_base_url,
         metatube_token_set=bool(token),
@@ -111,6 +123,9 @@ async def get_app_settings(
         auto_scrape=s.auto_scrape,
         auto_translate=auto_translate,
         image_proxy_mode=image_proxy_mode,  # type: ignore[arg-type]
+        image_external_proxy_url=db_map.get("image_external_proxy_url", s.image_external_proxy_url)
+        or "",
+        image_local_cache=image_local_cache,
         scan_extensions=s.scan_extensions,
         cors_origins=s.cors_origins,
         auth_enabled=s.auth_enabled,

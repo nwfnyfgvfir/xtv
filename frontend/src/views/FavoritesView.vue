@@ -99,7 +99,12 @@ onMounted(() => {
       </el-select>
     </div>
     <SkeletonGrid v-if="loading && !items.length" />
-    <MediaGrid v-else :items="items" />
+    <MediaGrid
+      v-else
+      :items="items"
+      empty-title="暂无收藏"
+      empty-hint="在片库卡片或详情页点心形即可收藏"
+    />
     <AppPagination :total="total" :page="page" :page-size="PAGE_SIZE" @update:page="onPageChange" />
   </div>
 </template>

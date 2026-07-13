@@ -29,6 +29,13 @@ async def lifespan(_app: FastAPI):
     settings.media_root_path.mkdir(parents=True, exist_ok=True)
     (settings.media_root_path / "local").mkdir(parents=True, exist_ok=True)
     (settings.media_root_path / "strm").mkdir(parents=True, exist_ok=True)
+    if settings.image_local_cache:
+        try:
+            from app.services.images import ensure_image_cache_dir
+
+            ensure_image_cache_dir()
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to create image cache dir")
     if not settings.auth_enabled:
         logger.warning("ADMIN_PASSWORD empty — API auth is DISABLED (dev mode)")
     try:

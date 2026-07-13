@@ -64,8 +64,37 @@ async function toggleFav(e: Event) {
         :title="item.title"
         :filename="item.filename"
       />
-      <button class="fav" type="button" :disabled="favLoading" @click="toggleFav">
-        {{ favorited ? '♥' : '♡' }}
+      <button
+        class="fav"
+        type="button"
+        :class="{ on: favorited, loading: favLoading }"
+        :disabled="favLoading"
+        :aria-label="favorited ? '取消收藏' : '收藏'"
+        :aria-pressed="favorited"
+        @click="toggleFav"
+      >
+        <span v-if="favLoading" class="fav-spin" aria-hidden="true" />
+        <svg
+          v-else
+          class="fav-icon"
+          viewBox="0 0 24 24"
+          width="18"
+          height="18"
+          aria-hidden="true"
+        >
+          <path
+            v-if="favorited"
+            fill="currentColor"
+            d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"
+          />
+          <path
+            v-else
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            d="M12.1 8.64l-.1.1-.11-.11C10.14 6.6 7.1 6.48 5.4 8.2c-1.7 1.72-1.6 4.46.2 6.06L12 20.5l6.4-6.24c1.8-1.6 1.9-4.34.2-6.06-1.7-1.72-4.74-1.6-6.5.44z"
+          />
+        </svg>
       </button>
       <span v-if="isChineseSub" class="sub-badge">中字</span>
       <span v-if="item.number" class="badge">{{ item.number }}</span>
@@ -111,16 +140,57 @@ async function toggleFav(e: Event) {
   top: 8px;
   left: 8px;
   z-index: 2;
-  border: 0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
   width: 40px;
   height: 40px;
   min-width: 40px;
   border-radius: 999px;
-  background: rgba(0, 0, 0, 0.55);
-  color: var(--accent);
+  background: rgba(8, 10, 14, 0.58);
+  backdrop-filter: blur(6px);
+  color: var(--text);
   cursor: pointer;
-  font-size: 16px;
-  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition:
+    transform 0.16s ease,
+    color 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    background 0.16s ease;
+}
+.fav:hover:not(:disabled) {
+  transform: scale(1.08);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  box-shadow: 0 0 14px var(--accent-glow);
+}
+.fav.on {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 18%, rgba(8, 10, 14, 0.65));
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+.fav:disabled {
+  opacity: 0.75;
+  cursor: wait;
+}
+.fav-icon {
+  display: block;
+}
+.fav-spin {
+  width: 16px;
+  height: 16px;
+  border: 2px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: fav-rotate 0.7s linear infinite;
+}
+@keyframes fav-rotate {
+  to {
+    transform: rotate(360deg);
+  }
 }
 .sub-badge {
   position: absolute;
@@ -183,6 +253,17 @@ async function toggleFav(e: Event) {
   letter-spacing: 0.04em;
 }
 @media (max-width: 640px) {
+  .fav {
+    width: 34px;
+    height: 34px;
+    min-width: 34px;
+    top: 6px;
+    left: 6px;
+  }
+  .fav-icon {
+    width: 15px;
+    height: 15px;
+  }
   .meta {
     padding: 8px 8px 10px;
   }

@@ -166,10 +166,44 @@ watch(() => props.id, load)
           <span> · {{ item.source_type }}</span>
         </p>
         <div class="btns">
-          <el-button type="primary" :loading="playLoading" @click="onPlay">播放</el-button>
-          <el-button :loading="favLoading" @click="onToggleFav">
-            {{ item.favorited ? '取消收藏' : '收藏' }}
-          </el-button>
+          <button
+            type="button"
+            class="btn-play"
+            :disabled="playLoading"
+            :class="{ loading: playLoading }"
+            @click="onPlay"
+          >
+            <span v-if="playLoading" class="btn-spin" aria-hidden="true" />
+            <svg v-else class="btn-ico" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+              <path fill="currentColor" d="M8 5.14v14l11-7-11-7z" />
+            </svg>
+            <span>{{ playLoading ? '准备中…' : '播放' }}</span>
+          </button>
+          <button
+            type="button"
+            class="btn-fav"
+            :class="{ on: item.favorited, loading: favLoading }"
+            :disabled="favLoading"
+            :aria-pressed="item.favorited"
+            @click="onToggleFav"
+          >
+            <span v-if="favLoading" class="btn-spin dark" aria-hidden="true" />
+            <svg v-else class="btn-ico" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+              <path
+                v-if="item.favorited"
+                fill="currentColor"
+                d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"
+              />
+              <path
+                v-else
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                d="M12.1 8.64l-.1.1-.11-.11C10.14 6.6 7.1 6.48 5.4 8.2c-1.7 1.72-1.6 4.46.2 6.06L12 20.5l6.4-6.24c1.8-1.6 1.9-4.34.2-6.06-1.7-1.72-4.74-1.6-6.5.44z"
+              />
+            </svg>
+            <span>{{ item.favorited ? '已收藏' : '收藏' }}</span>
+          </button>
         </div>
         <div class="scrape-row">
           <el-select
@@ -300,6 +334,85 @@ h1 {
   flex-wrap: wrap;
   gap: 10px;
   margin: 16px 0 10px;
+  align-items: center;
+}
+.btn-play,
+.btn-fav {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 18px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease,
+    border-color 0.15s ease,
+    background 0.15s ease,
+    color 0.15s ease;
+}
+.btn-play {
+  background: var(--accent);
+  color: #1a1205;
+  box-shadow: 0 6px 18px var(--accent-glow);
+  min-width: 118px;
+}
+.btn-play:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 22px var(--accent-glow);
+}
+.btn-play:disabled {
+  opacity: 0.75;
+  cursor: wait;
+}
+.btn-fav {
+  background: var(--panel);
+  color: var(--text);
+  border-color: var(--border);
+  min-width: 112px;
+}
+.btn-fav:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.btn-fav.on {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.btn-fav:disabled {
+  opacity: 0.75;
+  cursor: wait;
+}
+.btn-ico {
+  display: block;
+  flex-shrink: 0;
+}
+.btn-spin {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(26, 18, 5, 0.25);
+  border-top-color: #1a1205;
+  border-radius: 50%;
+  animation: btn-rotate 0.7s linear infinite;
+  flex-shrink: 0;
+}
+.btn-spin.dark {
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  border-top-color: var(--accent);
+}
+@keyframes btn-rotate {
+  to {
+    transform: rotate(360deg);
+  }
 }
 .scrape-row {
   display: flex;

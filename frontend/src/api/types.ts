@@ -82,7 +82,7 @@ export interface Progress {
   updated_at?: string | null
 }
 
-export type ImageProxyMode = 'site' | 'metatube'
+export type ImageProxyMode = 'site' | 'metatube' | 'external'
 
 export type MediaSort =
   | 'number_asc'
@@ -103,6 +103,8 @@ export interface Settings {
   auto_scrape: boolean
   auto_translate?: boolean
   image_proxy_mode?: ImageProxyMode
+  image_external_proxy_url?: string
+  image_local_cache?: boolean
   scan_extensions: string
   cors_origins: string
   auth_enabled?: boolean

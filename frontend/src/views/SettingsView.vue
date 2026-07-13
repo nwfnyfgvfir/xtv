@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getHealth, getSettings, updateSettings } from '@/api/media'
 import type { Health, ImageProxyMode, Settings } from '@/api/types'
@@ -16,9 +16,18 @@ const form = ref({
   auto_scrape: true,
   auto_translate: true,
   image_proxy_mode: 'site' as ImageProxyMode,
+  image_external_proxy_url: '',
+  image_local_cache: false,
   scan_extensions: '',
 })
 const saving = ref(false)
+
+const showExternalTpl = computed(() => form.value.image_proxy_mode === 'external')
+
+function normalizeMode(mode: string | undefined): ImageProxyMode {
+  if (mode === 'metatube' || mode === 'external') return mode
+  return 'site'
+}
 
 async function load() {
   settings.value = await getSettings()
@@ -27,8 +36,9 @@ async function load() {
   form.value.alist_base_url = settings.value.alist_base_url
   form.value.auto_scrape = settings.value.auto_scrape
   form.value.auto_translate = settings.value.auto_translate !== false
-  form.value.image_proxy_mode =
-    settings.value.image_proxy_mode === 'metatube' ? 'metatube' : 'site'
+  form.value.image_proxy_mode = normalizeMode(settings.value.image_proxy_mode)
+  form.value.image_external_proxy_url = settings.value.image_external_proxy_url || ''
+  form.value.image_local_cache = Boolean(settings.value.image_local_cache)
   form.value.scan_extensions = settings.value.scan_extensions
   form.value.metatube_provider = settings.value.metatube_provider || ''
   form.value.metatube_fallback = settings.value.metatube_fallback !== false
@@ -45,6 +55,8 @@ async function save() {
       auto_scrape: form.value.auto_scrape,
       auto_translate: form.value.auto_translate,
       image_proxy_mode: form.value.image_proxy_mode,
+      image_external_proxy_url: form.value.image_external_proxy_url,
+      image_local_cache: form.value.image_local_cache,
       scan_extensions: form.value.scan_extensions,
       metatube_provider: form.value.metatube_provider,
       metatube_fallback: form.value.metatube_fallback,
@@ -153,7 +165,23 @@ onMounted(() => {
           <el-select v-model="form.image_proxy_mode" style="width: 100%">
             <el-option label="本站代理（/api/images/proxy）" value="site" />
             <el-option label="MetaTube 图片代理" value="metatube" />
+            <el-option label="外部代理（模板 {url}）" value="external" />
           </el-select>
+        </el-form-item>
+        <el-form-item v-if="showExternalTpl" label="外部代理模板">
+          <el-input
+            v-model="form.image_external_proxy_url"
+            placeholder="https://wsrv.nl/?url={url}"
+          />
+          <span class="field-hint muted block">
+            须包含 <code>{url}</code>，会替换为 URL-encode 后的原始图片地址
+          </span>
+        </el-form-item>
+        <el-form-item label="图片本地缓存">
+          <el-switch v-model="form.image_local_cache" />
+          <span class="field-hint muted">
+            仅对本站代理生效；写入 data/image-cache，优先读本地
+          </span>
         </el-form-item>
         <el-form-item label="扫描扩展名">
           <el-input v-model="form.scan_extensions" />
@@ -205,6 +233,11 @@ onMounted(() => {
 .field-hint {
   margin-left: 10px;
   font-size: 12px;
+}
+.field-hint.block {
+  display: block;
+  margin: 6px 0 0;
+  margin-left: 0;
 }
 code {
   color: var(--accent);

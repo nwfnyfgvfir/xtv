@@ -30,7 +30,10 @@ class Settings(BaseSettings):
     scan_extensions: str = "mp4,mkv,avi,wmv,m2ts,ts,mov,strm"
     auto_scrape: bool = True
     auto_translate: bool = True
-    image_proxy_mode: str = "site"  # site | metatube
+    image_proxy_mode: str = "site"  # site | metatube | external
+    image_external_proxy_url: str = ""  # template with {url}
+    image_local_cache: bool = False
+    image_cache_max_mb: int = 2048  # 0 = no prune
     log_level: str = "INFO"
     debug: bool = False
     admin_password: str = ""
@@ -61,6 +64,28 @@ class Settings(BaseSettings):
             if not p.is_absolute():
                 return f"sqlite:///{(ROOT_DIR / p).as_posix()}"
         return url
+
+    @property
+    def data_dir_path(self) -> Path:
+        """Directory holding app.db (Docker: /data); fallback ROOT_DIR/data."""
+        url = self.resolved_database_url
+        if url.startswith("sqlite:///"):
+            raw = url[len("sqlite:///") :]
+            # sqlite:////data/app.db → absolute /data/app.db
+            if url.startswith("sqlite:////"):
+                raw = "/" + url[len("sqlite:////") :]
+            p = Path(raw)
+            if not p.is_absolute():
+                p = ROOT_DIR / p
+            try:
+                return p.resolve().parent
+            except OSError:
+                return p.parent
+        return (ROOT_DIR / "data").resolve()
+
+    @property
+    def image_cache_path(self) -> Path:
+        return self.data_dir_path / "image-cache"
 
     @property
     def extension_set(self) -> set[str]:

@@ -2,7 +2,17 @@
 import type { MediaListItem } from '@/api/types'
 import MediaCard from './MediaCard.vue'
 
-defineProps<{ items: MediaListItem[] }>()
+withDefaults(
+  defineProps<{
+    items: MediaListItem[]
+    emptyTitle?: string
+    emptyHint?: string
+  }>(),
+  {
+    emptyTitle: '暂无媒体',
+    emptyHint: '请先添加媒体库并扫描本地 / strm 目录',
+  },
+)
 </script>
 
 <template>
@@ -11,8 +21,8 @@ defineProps<{ items: MediaListItem[] }>()
   </div>
   <div v-else class="empty">
     <div class="empty-mark">TV</div>
-    <p>暂无媒体</p>
-    <p class="muted">请先添加媒体库并扫描本地 / strm 目录</p>
+    <p>{{ emptyTitle }}</p>
+    <p class="muted">{{ emptyHint }}</p>
   </div>
 </template>
 
@@ -40,7 +50,7 @@ defineProps<{ items: MediaListItem[] }>()
   padding: 40px 16px;
   border: 1px dashed var(--border);
   border-radius: var(--radius);
-  background: rgba(20, 24, 32, 0.5);
+  background: color-mix(in srgb, var(--panel) 80%, transparent);
 }
 .empty-mark {
   font-family: var(--font-display);
