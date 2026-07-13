@@ -33,6 +33,9 @@ let lastTapAt = 0
 let lastTapX = 0
 let suppressClickUntil = 0
 let singleTapTimer: number | undefined
+// Snapshot at pointerdown so deferred single-tap is not flipped by desktop-path
+// mousemove (tablets often synthesize mousemove → Artplayer show=true before toggle).
+let controlsVisibleOnPointerDown = false
 const gestureCleanups: Array<() => void> = []
 
 function isPlayerLocked(art: Artplayer | null): boolean {
@@ -83,16 +86,15 @@ function clearSingleTapTimer() {
   }
 }
 
-function toggleControls() {
+function applySingleTapControls() {
   if (!player || isPlayerLocked(player)) return
+  // Use visibility at pointerdown, not live state — on desktop-classified tablets a
+  // compatibility mousemove may already have forced show=true before this runs.
+  const next = !controlsVisibleOnPointerDown
   try {
-    player.controls.toggle()
+    player.controls.show = next
   } catch {
-    try {
-      player.controls.show = !player.controls.show
-    } catch {
-      /* ignore */
-    }
+    /* ignore */
   }
 }
 
@@ -203,6 +205,11 @@ function bindGestureLayer(el: HTMLElement) {
     }
     // Only primary pointer
     if (drag) return
+    try {
+      controlsVisibleOnPointerDown = Boolean(player.controls.show)
+    } catch {
+      controlsVisibleOnPointerDown = false
+    }
     const rect = el.getBoundingClientRect()
     drag = {
       pointerId: e.pointerId,
@@ -307,7 +314,7 @@ function bindGestureLayer(el: HTMLElement) {
       singleTapTimer = window.setTimeout(() => {
         singleTapTimer = undefined
         lastTapAt = 0
-        toggleControls()
+        applySingleTapControls()
       }, DBLCLICK_MS)
     }
   }
