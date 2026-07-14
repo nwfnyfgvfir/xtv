@@ -1,4 +1,4 @@
-from app.services.naming import extract_number
+from app.services.naming import extract_number, normalize_number
 
 
 def test_standard():
@@ -41,3 +41,25 @@ def test_quality_noise():
 def test_no_match():
     p = extract_number("random_video.mp4")
     assert p.number is None
+
+
+def test_normalize_number_empty():
+    assert normalize_number(None) is None
+    assert normalize_number("") is None
+    assert normalize_number("   ") is None
+
+
+def test_normalize_number_standard():
+    assert normalize_number("ssis-001") == "SSIS-001"
+    assert normalize_number("SSIS_001") == "SSIS-001"
+    assert normalize_number(" ssis 001 ") == "SSIS-001"
+
+
+def test_normalize_number_fc2():
+    assert normalize_number("FC2-PPV-1234567") == "FC2-1234567"
+
+
+def test_normalize_number_fallback_and_truncate():
+    assert normalize_number("weird--code") == "WEIRD-CODE"
+    long = "A" * 80
+    assert normalize_number(long) == "A" * 64

@@ -11,6 +11,7 @@ from app.deps import require_auth
 from app.models import Favorite, MediaItem
 from app.schemas import MediaDetail, MediaListItem, PaginatedMedia, RescrapeIn
 from app.services.images import rewrite_image_url
+from app.services.naming import normalize_number
 from app.services.scrape import scrape_media_item
 from app.services.sorting import media_order_by
 
@@ -125,9 +126,17 @@ async def rescrape_media(
     )
     if not item:
         raise HTTPException(404, "media not found")
-    if not item.number:
-        raise HTTPException(400, "no number parsed; cannot scrape")
     body = body or RescrapeIn()
+    if body.number is not None and str(body.number).strip():
+        normalized = normalize_number(body.number)
+        if not normalized:
+            raise HTTPException(400, "invalid number")
+        item.number = normalized
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+    if not item.number:
+        raise HTTPException(400, "no number; provide number to scrape")
     ok = await scrape_media_item(
         db,
         item,

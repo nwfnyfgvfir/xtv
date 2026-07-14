@@ -100,6 +100,7 @@ class MediaDetail(MediaListItem):
 class RescrapeIn(BaseModel):
     provider: str | None = None
     fallback: bool | None = None
+    number: str | None = None  # optional override / fill-in 番号
 
 
 class PaginatedMedia(BaseModel):

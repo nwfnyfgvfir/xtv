@@ -66,7 +66,7 @@ export const getMedia = (id: number) => client.get<MediaDetail>(`/media/${id}`).
 
 export const rescrapeMedia = (
   id: number,
-  body?: { provider?: string; fallback?: boolean },
+  body?: { provider?: string; fallback?: boolean; number?: string },
 ) => client.post<MediaDetail>(`/media/${id}/rescrape`, body || {}).then((r) => r.data)
 
 export const favoriteMedia = (id: number) =>

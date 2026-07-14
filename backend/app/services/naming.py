@@ -75,3 +75,18 @@ def extract_number(filename: str) -> ParsedName:
         return ParsedName(number=number, disc=disc, subtitle_flag=subtitle_flag, raw_stem=raw_stem)
 
     return ParsedName(number=None, disc=disc, subtitle_flag=subtitle_flag, raw_stem=raw_stem)
+
+
+def normalize_number(raw: str | None) -> str | None:
+    """Normalize a user- or filename-sourced 番号 for storage / MetaTube search."""
+    s = (raw or "").strip()
+    if not s:
+        return None
+    # Prefer structured parse (works for free-typed codes like "ssis 001")
+    candidate = s if "." in s else f"{s}.mp4"
+    parsed = extract_number(candidate)
+    if parsed.number:
+        return parsed.number[:64]
+    s = re.sub(r"[\s_]+", "-", s.upper())
+    s = re.sub(r"-+", "-", s).strip("-")
+    return s[:64] if s else None

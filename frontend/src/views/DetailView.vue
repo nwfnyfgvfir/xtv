@@ -28,6 +28,7 @@ const scrapeLoading = ref(false)
 const providers = ref<string[]>([])
 const scrapeProvider = ref('')
 const scrapeFallback = ref(true)
+const scrapeNumber = ref('')
 
 const tags = computed(() => {
   if (!item.value?.tags_json) return [] as string[]
@@ -44,6 +45,13 @@ const showImage = computed(() => Boolean(cover.value) && !imgFailed.value)
 const isChineseSub = computed(
   () => item.value?.subtitle_flag === 'C' || tags.value.includes('中文字幕'),
 )
+const canRescrape = computed(() =>
+  Boolean((scrapeNumber.value || item.value?.number || '').trim()),
+)
+
+function syncScrapeNumber() {
+  scrapeNumber.value = item.value?.number || ''
+}
 
 async function load() {
   loading.value = true
@@ -52,6 +60,7 @@ async function load() {
   play.value = null
   try {
     item.value = await getMedia(Number(props.id))
+    syncScrapeNumber()
   } catch {
     ElMessage.error('加载详情失败')
   } finally {
@@ -84,12 +93,19 @@ async function onPlay() {
 }
 
 async function onRescrape() {
+  const number = (scrapeNumber.value || item.value?.number || '').trim()
+  if (!number) {
+    ElMessage.warning('请先填写番号')
+    return
+  }
   scrapeLoading.value = true
   try {
     item.value = await rescrapeMedia(Number(props.id), {
       provider: scrapeProvider.value || undefined,
       fallback: scrapeFallback.value,
+      number,
     })
+    syncScrapeNumber()
     imgFailed.value = false
     ElMessage.success('刮削完成')
   } catch (e: unknown) {
@@ -206,6 +222,14 @@ watch(() => props.id, load)
           </button>
         </div>
         <div class="scrape-row">
+          <el-input
+            v-model="scrapeNumber"
+            class="scrape-number"
+            clearable
+            maxlength="64"
+            placeholder="番号"
+            :disabled="scrapeLoading"
+          />
           <el-select
             v-model="scrapeProvider"
             clearable
@@ -219,7 +243,7 @@ watch(() => props.id, load)
           <el-switch v-model="scrapeFallback" active-text="fallback" />
           <el-button
             :loading="scrapeLoading"
-            :disabled="!item.number"
+            :disabled="!canRescrape"
             @click="onRescrape"
           >
             重新刮削
@@ -287,7 +311,8 @@ watch(() => props.id, load)
     flex-direction: column;
     align-items: stretch;
   }
-  .scrape-row :deep(.el-select) {
+  .scrape-row :deep(.el-select),
+  .scrape-row :deep(.scrape-number) {
     width: 100%;
   }
 }
@@ -420,6 +445,10 @@ h1 {
   gap: 10px;
   align-items: center;
   margin-bottom: 14px;
+}
+.scrape-number {
+  width: 140px;
+  flex: 0 0 140px;
 }
 .tags {
   display: flex;
