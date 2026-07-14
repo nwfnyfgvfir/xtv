@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     scan_extensions: str = "mp4,mkv,avi,wmv,m2ts,ts,mov,strm"
     auto_scrape: bool = True
     auto_translate: bool = True
+    translate_provider: str = "google"  # google | bing
     image_proxy_mode: str = "site"  # site | metatube | external
     image_external_proxy_url: str = ""  # template with {url}
     image_local_cache: bool = False

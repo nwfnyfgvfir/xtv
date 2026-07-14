@@ -23,6 +23,7 @@ OVERRIDE_KEYS = {
     "alist_token",
     "auto_scrape",
     "auto_translate",
+    "translate_provider",
     "image_proxy_mode",
     "image_external_proxy_url",
     "image_local_cache",
@@ -31,6 +32,7 @@ OVERRIDE_KEYS = {
 
 _BOOL_TRUE = ("1", "true", "yes", "on")
 _IMAGE_PROXY_MODES = frozenset({"site", "metatube", "external"})
+_TRANSLATE_PROVIDERS = frozenset({"google", "bing"})
 
 
 def _db_map(db: Session) -> dict[str, str]:
@@ -56,6 +58,10 @@ def _apply_overrides_to_runtime(db_map: dict[str, str]) -> None:
         s.auto_scrape = db_map["auto_scrape"].lower() in _BOOL_TRUE
     if "auto_translate" in db_map:
         s.auto_translate = db_map["auto_translate"].lower() in _BOOL_TRUE
+    if "translate_provider" in db_map:
+        provider = (db_map["translate_provider"] or "").strip().lower()
+        if provider in _TRANSLATE_PROVIDERS:
+            s.translate_provider = provider
     if "image_proxy_mode" in db_map:
         mode = (db_map["image_proxy_mode"] or "").strip().lower()
         if mode in _IMAGE_PROXY_MODES:
@@ -104,6 +110,10 @@ async def get_app_settings(
         if auto_translate_raw is not None
         else s.auto_translate
     )
+    provider_raw = (
+        db_map.get("translate_provider") or s.translate_provider or "google"
+    ).strip().lower()
+    translate_provider = provider_raw if provider_raw in _TRANSLATE_PROVIDERS else "google"
     mode_raw = (db_map.get("image_proxy_mode") or s.image_proxy_mode or "site").strip().lower()
     image_proxy_mode = mode_raw if mode_raw in _IMAGE_PROXY_MODES else "site"
     local_cache_raw = db_map.get("image_local_cache")
@@ -122,6 +132,7 @@ async def get_app_settings(
         media_root=str(s.media_root_path),
         auto_scrape=s.auto_scrape,
         auto_translate=auto_translate,
+        translate_provider=translate_provider,  # type: ignore[arg-type]
         image_proxy_mode=image_proxy_mode,  # type: ignore[arg-type]
         image_external_proxy_url=db_map.get("image_external_proxy_url", s.image_external_proxy_url)
         or "",

@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getHealth, getSettings, updateSettings } from '@/api/media'
-import type { Health, ImageProxyMode, Settings } from '@/api/types'
+import type { Health, ImageProxyMode, Settings, TranslateProvider } from '@/api/types'
 
 const settings = ref<Settings | null>(null)
 const health = ref<Health | null>(null)
@@ -15,6 +15,7 @@ const form = ref({
   alist_token: '',
   auto_scrape: true,
   auto_translate: true,
+  translate_provider: 'google' as TranslateProvider,
   image_proxy_mode: 'site' as ImageProxyMode,
   image_external_proxy_url: '',
   image_local_cache: false,
@@ -29,6 +30,10 @@ function normalizeMode(mode: string | undefined): ImageProxyMode {
   return 'site'
 }
 
+function normalizeProvider(mode: string | undefined): TranslateProvider {
+  return mode === 'bing' ? 'bing' : 'google'
+}
+
 async function load() {
   settings.value = await getSettings()
   health.value = await getHealth()
@@ -36,6 +41,7 @@ async function load() {
   form.value.alist_base_url = settings.value.alist_base_url
   form.value.auto_scrape = settings.value.auto_scrape
   form.value.auto_translate = settings.value.auto_translate !== false
+  form.value.translate_provider = normalizeProvider(settings.value.translate_provider)
   form.value.image_proxy_mode = normalizeMode(settings.value.image_proxy_mode)
   form.value.image_external_proxy_url = settings.value.image_external_proxy_url || ''
   form.value.image_local_cache = Boolean(settings.value.image_local_cache)
@@ -54,6 +60,7 @@ async function save() {
       alist_base_url: form.value.alist_base_url,
       auto_scrape: form.value.auto_scrape,
       auto_translate: form.value.auto_translate,
+      translate_provider: form.value.translate_provider,
       image_proxy_mode: form.value.image_proxy_mode,
       image_external_proxy_url: form.value.image_external_proxy_url,
       image_local_cache: form.value.image_local_cache,
@@ -159,7 +166,17 @@ onMounted(() => {
         </el-form-item>
         <el-form-item label="刮削后自动翻译">
           <el-switch v-model="form.auto_translate" />
-          <span class="field-hint muted">日文标题/简介/演员/标签 → 简中（免费 Google）</span>
+          <span class="field-hint muted">日文标题/简介/标签 → 简中（不翻译演员名）</span>
+        </el-form-item>
+        <el-form-item label="翻译服务">
+          <el-select
+            v-model="form.translate_provider"
+            style="width: 100%"
+            :disabled="!form.auto_translate"
+          >
+            <el-option label="免费 Google（gtx）" value="google" />
+            <el-option label="免费必应（Edge）" value="bing" />
+          </el-select>
         </el-form-item>
         <el-form-item label="图片代理">
           <el-select v-model="form.image_proxy_mode" style="width: 100%">

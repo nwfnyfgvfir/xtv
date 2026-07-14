@@ -145,6 +145,7 @@ class SettingsOut(BaseModel):
     media_root: str
     auto_scrape: bool
     auto_translate: bool = True
+    translate_provider: Literal["google", "bing"] = "google"
     image_proxy_mode: Literal["site", "metatube", "external"] = "site"
     image_external_proxy_url: str = ""
     image_local_cache: bool = False
@@ -164,6 +165,7 @@ class SettingsUpdate(BaseModel):
     alist_token: str | None = None
     auto_scrape: bool | None = None
     auto_translate: bool | None = None
+    translate_provider: Literal["google", "bing"] | None = None
     image_proxy_mode: Literal["site", "metatube", "external"] | None = None
     image_external_proxy_url: str | None = None
     image_local_cache: bool | None = None

@@ -84,6 +84,8 @@ export interface Progress {
 
 export type ImageProxyMode = 'site' | 'metatube' | 'external'
 
+export type TranslateProvider = 'google' | 'bing'
+
 export type MediaSort =
   | 'number_asc'
   | 'number_desc'
@@ -102,6 +104,7 @@ export interface Settings {
   media_root: string
   auto_scrape: boolean
   auto_translate?: boolean
+  translate_provider?: TranslateProvider
   image_proxy_mode?: ImageProxyMode
   image_external_proxy_url?: string
   image_local_cache?: boolean
