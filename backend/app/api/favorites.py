@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.db import get_db
 from app.deps import require_auth
-from app.models import Favorite, MediaItem
-from app.schemas import MediaListItem, PaginatedMedia
+from app.models import Actor, ActorFavorite, Favorite, MediaActor, MediaItem
+from app.schemas import ActorListItem, MediaListItem, PaginatedActors, PaginatedMedia
 from app.services.images import rewrite_image_url
 from app.services.sorting import media_order_by
 
@@ -26,6 +26,18 @@ def _to_item(item: MediaItem) -> MediaListItem:
     )
     data.favorited = True
     return data
+
+
+def _to_actor_item(actor: Actor, media_count: int) -> ActorListItem:
+    return ActorListItem(
+        id=actor.id,
+        name=actor.name,
+        provider=actor.provider,
+        provider_id=actor.provider_id,
+        image_url=rewrite_image_url(actor.image_url),
+        media_count=media_count,
+        favorited=True,
+    )
 
 
 @router.get("", response_model=PaginatedMedia)
@@ -48,6 +60,38 @@ def list_favorites(
     )
     return PaginatedMedia(
         items=[_to_item(i) for i in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get("/actors", response_model=PaginatedActors)
+def list_favorite_actors(
+    _: Annotated[dict, Depends(require_auth)],
+    page: int = Query(1, ge=1),
+    page_size: int = Query(48, ge=1, le=200),
+    db: Session = Depends(get_db),
+) -> PaginatedActors:
+    count_sub = (
+        db.query(MediaActor.actor_id, func.count(MediaActor.media_id).label("cnt"))
+        .group_by(MediaActor.actor_id)
+        .subquery()
+    )
+    query = (
+        db.query(Actor, func.coalesce(count_sub.c.cnt, 0).label("media_count"))
+        .join(ActorFavorite, ActorFavorite.actor_id == Actor.id)
+        .outerjoin(count_sub, Actor.id == count_sub.c.actor_id)
+    )
+    total = query.count()
+    rows = (
+        query.order_by(ActorFavorite.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return PaginatedActors(
+        items=[_to_actor_item(actor, int(cnt or 0)) for actor, cnt in rows],
         total=total,
         page=page,
         page_size=page_size,

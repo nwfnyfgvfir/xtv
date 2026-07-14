@@ -78,10 +78,19 @@ export const unfavoriteMedia = (id: number) =>
 export const listFavorites = (params?: { page?: number; page_size?: number; sort?: string }) =>
   client.get<PaginatedMedia>('/favorites', { params }).then((r) => r.data)
 
+export const listFavoriteActors = (params?: { page?: number; page_size?: number }) =>
+  client.get<PaginatedActors>('/favorites/actors', { params }).then((r) => r.data)
+
 export const listActors = (params?: { q?: string; page?: number; page_size?: number }) =>
   client.get<PaginatedActors>('/actors', { params }).then((r) => r.data)
 
 export const getActor = (id: number) => client.get<Actor>(`/actors/${id}`).then((r) => r.data)
+
+export const favoriteActor = (id: number) =>
+  client.post<Actor>(`/actors/${id}/favorite`).then((r) => r.data)
+
+export const unfavoriteActor = (id: number) =>
+  client.delete<Actor>(`/actors/${id}/favorite`).then((r) => r.data)
 
 export const rescrapeActorImage = (id: number) =>
   client.post<Actor>(`/actors/${id}/rescrape-image`).then((r) => r.data)

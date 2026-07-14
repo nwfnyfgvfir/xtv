@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 
 from app.db import SessionLocal, init_db
-from app.models import Actor, Library, MediaActor, MediaItem
+from datetime import datetime, timedelta, timezone
+
+from app.models import Actor, ActorFavorite, Library, MediaActor, MediaItem
 from app.services.actors import (
     dedupe_actors,
     delete_orphan_actors,
@@ -337,3 +339,96 @@ def test_pick_canonical_prefers_provider_then_image() -> None:
     keyed = Actor(id=3, name="x", provider="p", provider_id="1")
     assert pick_canonical([bare, imaged, keyed]).id == 3
     assert pick_canonical([bare, imaged]).id == 2
+
+
+def test_merge_actors_moves_drop_favorite_to_keep() -> None:
+    init_db()
+    db = SessionLocal()
+    try:
+        keep = Actor(name="FavA")
+        drop = Actor(name="FavA")
+        db.add_all([keep, drop])
+        db.flush()
+        earlier = datetime.now(timezone.utc) - timedelta(days=2)
+        db.add(ActorFavorite(actor_id=drop.id, created_at=earlier))
+        db.flush()
+
+        merge_actors(db, keep=keep, drop=drop)
+        db.commit()
+
+        assert db.get(Actor, drop.id) is None
+        favs = db.query(ActorFavorite).filter(ActorFavorite.actor_id == keep.id).all()
+        assert len(favs) == 1
+        # SQLite may drop tzinfo on DateTime; compare wall time.
+        assert favs[0].created_at.replace(tzinfo=None) == earlier.replace(tzinfo=None)
+        assert db.query(ActorFavorite).count() == 1
+    finally:
+        _cleanup(db)
+        db.close()
+
+
+def test_merge_actors_keeps_keep_favorite() -> None:
+    init_db()
+    db = SessionLocal()
+    try:
+        keep = Actor(name="FavB")
+        drop = Actor(name="FavB")
+        db.add_all([keep, drop])
+        db.flush()
+        db.add(ActorFavorite(actor_id=keep.id))
+        db.flush()
+
+        merge_actors(db, keep=keep, drop=drop)
+        db.commit()
+
+        favs = db.query(ActorFavorite).filter(ActorFavorite.actor_id == keep.id).all()
+        assert len(favs) == 1
+        assert db.query(ActorFavorite).count() == 1
+    finally:
+        _cleanup(db)
+        db.close()
+
+
+def test_merge_actors_both_favorited_single_row_earliest() -> None:
+    init_db()
+    db = SessionLocal()
+    try:
+        keep = Actor(name="FavC")
+        drop = Actor(name="FavC")
+        db.add_all([keep, drop])
+        db.flush()
+        earlier = datetime.now(timezone.utc) - timedelta(days=5)
+        later = datetime.now(timezone.utc) - timedelta(days=1)
+        db.add(ActorFavorite(actor_id=keep.id, created_at=later))
+        db.add(ActorFavorite(actor_id=drop.id, created_at=earlier))
+        db.flush()
+
+        merge_actors(db, keep=keep, drop=drop)
+        db.commit()
+
+        favs = db.query(ActorFavorite).all()
+        assert len(favs) == 1
+        assert favs[0].actor_id == keep.id
+        assert favs[0].created_at.replace(tzinfo=None) == earlier.replace(tzinfo=None)
+    finally:
+        _cleanup(db)
+        db.close()
+
+
+def test_merge_actors_neither_favorited() -> None:
+    init_db()
+    db = SessionLocal()
+    try:
+        keep = Actor(name="FavD")
+        drop = Actor(name="FavD")
+        db.add_all([keep, drop])
+        db.flush()
+
+        merge_actors(db, keep=keep, drop=drop)
+        db.commit()
+
+        assert db.query(ActorFavorite).count() == 0
+        assert db.get(Actor, keep.id) is not None
+    finally:
+        _cleanup(db)
+        db.close()

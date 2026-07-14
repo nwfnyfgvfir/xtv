@@ -38,6 +38,7 @@ export interface Actor {
   provider_id?: string | null
   image_url?: string | null
   media_count?: number
+  favorited?: boolean
 }
 
 export interface MediaDetail extends MediaListItem {

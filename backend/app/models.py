@@ -90,6 +90,9 @@ class Actor(Base):
     image_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
 
     media_items: Mapped[list[MediaItem]] = relationship(secondary="media_actors", back_populates="actors")
+    favorite: Mapped[ActorFavorite | None] = relationship(
+        back_populates="actor", uselist=False, cascade="all, delete-orphan"
+    )
 
 
 class MediaActor(Base):
@@ -121,6 +124,18 @@ class Favorite(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     media: Mapped[MediaItem] = relationship(back_populates="favorite")
+
+
+class ActorFavorite(Base):
+    __tablename__ = "actor_favorites"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    actor_id: Mapped[int] = mapped_column(
+        ForeignKey("actors.id", ondelete="CASCADE"), unique=True, nullable=False, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    actor: Mapped[Actor] = relationship(back_populates="favorite")
 
 
 class AppSetting(Base):

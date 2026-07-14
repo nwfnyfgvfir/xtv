@@ -3,9 +3,9 @@ import { onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import AppPagination from '@/components/AppPagination.vue'
+import ActorCard from '@/components/ActorCard.vue'
 import { listActors } from '@/api/media'
 import type { Actor } from '@/api/types'
-import { monogramChar, monogramStyle } from '@/utils/monogram'
 import {
   DEFAULT_PAGE_SIZE,
   pageQueryPatch,
@@ -62,6 +62,13 @@ function onPageChange(p: number) {
   void load()
 }
 
+function onActorRefreshed(updated: Actor) {
+  const idx = items.value.findIndex((a) => a.id === updated.id)
+  if (idx >= 0) {
+    items.value[idx] = { ...items.value[idx], ...updated }
+  }
+}
+
 watch(
   () => [route.query.page, route.query.q] as const,
   () => {
@@ -96,22 +103,12 @@ onMounted(() => {
     </div>
     <div v-if="loading && !items.length" class="muted">加载中…</div>
     <div v-else-if="items.length" class="grid">
-      <button
+      <ActorCard
         v-for="a in items"
         :key="a.id"
-        class="actor-card"
-        type="button"
-        @click="router.push(`/actors/${a.id}`)"
-      >
-        <img v-if="a.image_url" :src="a.image_url" :alt="a.name" loading="lazy" />
-        <div v-else class="mono" :style="monogramStyle(a.name)">
-          {{ monogramChar({ title: a.name }) }}
-        </div>
-        <div class="info">
-          <div class="name">{{ a.name }}</div>
-          <div class="muted count">{{ a.media_count ?? 0 }} 部作品</div>
-        </div>
-      </button>
+        :actor="a"
+        @refreshed="onActorRefreshed"
+      />
     </div>
     <el-empty v-else description="暂无演员，请先刮削媒体" />
     <AppPagination :total="total" :page="page" :page-size="PAGE_SIZE" @update:page="onPageChange" />
@@ -151,46 +148,5 @@ onMounted(() => {
     grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
     gap: 8px;
   }
-}
-.actor-card {
-  border: 1px solid var(--border);
-  background: var(--panel);
-  border-radius: 14px;
-  overflow: hidden;
-  cursor: pointer;
-  padding: 0;
-  text-align: left;
-  color: inherit;
-  box-shadow: var(--shadow-card);
-}
-.actor-card:hover {
-  border-color: var(--accent);
-}
-.actor-card img,
-.mono {
-  width: 100%;
-  aspect-ratio: 1;
-  object-fit: cover;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--font-display);
-  font-size: 42px;
-  color: var(--accent);
-  background: var(--bg-elevated);
-}
-.info {
-  padding: 10px;
-}
-.name {
-  font-weight: 600;
-  font-size: 14px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.count {
-  font-size: 12px;
-  margin-top: 2px;
 }
 </style>

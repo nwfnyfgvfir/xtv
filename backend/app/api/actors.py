@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.db import get_db
 from app.deps import require_auth
-from app.models import Actor, MediaActor, MediaItem
+from app.models import Actor, ActorFavorite, MediaActor, MediaItem
 from app.schemas import ActorDetail, ActorListItem, MediaListItem, PaginatedActors, PaginatedMedia
 from app.services.images import rewrite_image_url
 from app.services.scrape import enrich_actor_image
@@ -29,7 +29,7 @@ def _proxy_media(item: MediaItem, favorited_ids: set[int]) -> MediaListItem:
     return data
 
 
-def _actor_item(actor: Actor, media_count: int = 0) -> ActorListItem:
+def _actor_item(actor: Actor, media_count: int = 0, favorited: bool = False) -> ActorListItem:
     return ActorListItem(
         id=actor.id,
         name=actor.name,
@@ -38,7 +38,25 @@ def _actor_item(actor: Actor, media_count: int = 0) -> ActorListItem:
         # Actor portraits use site proxy (MetaTube primary is movie-oriented).
         image_url=rewrite_image_url(actor.image_url),
         media_count=media_count,
+        favorited=favorited,
     )
+
+
+def _media_count(db: Session, actor_id: int) -> int:
+    return db.query(func.count(MediaActor.media_id)).filter(MediaActor.actor_id == actor_id).scalar() or 0
+
+
+def _is_favorited(db: Session, actor_id: int) -> bool:
+    return (
+        db.query(ActorFavorite.id).filter(ActorFavorite.actor_id == actor_id).one_or_none() is not None
+    )
+
+
+def _actor_detail(db: Session, actor: Actor, favorited: bool | None = None) -> ActorDetail:
+    cnt = _media_count(db, actor.id)
+    fav = favorited if favorited is not None else _is_favorited(db, actor.id)
+    base = _actor_item(actor, int(cnt), favorited=fav)
+    return ActorDetail(**base.model_dump())
 
 
 @router.get("", response_model=PaginatedActors)
@@ -66,7 +84,18 @@ def list_actors(
         .limit(page_size)
         .all()
     )
-    items = [_actor_item(actor, int(cnt or 0)) for actor, cnt in rows]
+    actor_ids = [actor.id for actor, _ in rows]
+    fav_ids: set[int] = set()
+    if actor_ids:
+        fav_ids = {
+            aid
+            for (aid,) in db.query(ActorFavorite.actor_id)
+            .filter(ActorFavorite.actor_id.in_(actor_ids))
+            .all()
+        }
+    items = [
+        _actor_item(actor, int(cnt or 0), favorited=actor.id in fav_ids) for actor, cnt in rows
+    ]
     return PaginatedActors(items=items, total=total, page=page, page_size=page_size)
 
 
@@ -79,9 +108,41 @@ def get_actor(
     actor = db.get(Actor, actor_id)
     if not actor:
         raise HTTPException(404, "actor not found")
-    cnt = db.query(func.count(MediaActor.media_id)).filter(MediaActor.actor_id == actor_id).scalar() or 0
-    base = _actor_item(actor, int(cnt))
-    return ActorDetail(**base.model_dump())
+    return _actor_detail(db, actor)
+
+
+@router.post("/{actor_id}/favorite", response_model=ActorDetail)
+def favorite_actor(
+    actor_id: int,
+    _: Annotated[dict, Depends(require_auth)],
+    db: Session = Depends(get_db),
+) -> ActorDetail:
+    actor = db.get(Actor, actor_id)
+    if not actor:
+        raise HTTPException(404, "actor not found")
+    existing = db.query(ActorFavorite).filter(ActorFavorite.actor_id == actor_id).one_or_none()
+    if existing is None:
+        db.add(ActorFavorite(actor_id=actor_id))
+        db.commit()
+        db.refresh(actor)
+    return _actor_detail(db, actor, favorited=True)
+
+
+@router.delete("/{actor_id}/favorite", response_model=ActorDetail)
+def unfavorite_actor(
+    actor_id: int,
+    _: Annotated[dict, Depends(require_auth)],
+    db: Session = Depends(get_db),
+) -> ActorDetail:
+    actor = db.get(Actor, actor_id)
+    if not actor:
+        raise HTTPException(404, "actor not found")
+    fav = db.query(ActorFavorite).filter(ActorFavorite.actor_id == actor_id).one_or_none()
+    if fav:
+        db.delete(fav)
+        db.commit()
+        db.refresh(actor)
+    return _actor_detail(db, actor, favorited=False)
 
 
 @router.post("/{actor_id}/rescrape-image", response_model=ActorDetail)
@@ -101,9 +162,7 @@ async def rescrape_actor_image(
     db.refresh(actor)
     if not ok and not actor.image_url:
         raise HTTPException(502, "actor image not found")
-    cnt = db.query(func.count(MediaActor.media_id)).filter(MediaActor.actor_id == actor_id).scalar() or 0
-    base = _actor_item(actor, int(cnt))
-    return ActorDetail(**base.model_dump())
+    return _actor_detail(db, actor)
 
 
 @router.get("/{actor_id}/media", response_model=PaginatedMedia)

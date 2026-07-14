@@ -368,6 +368,10 @@ function create() {
   Artplayer.DBCLICK_FULLSCREEN = false
   Artplayer.CONTROL_HIDE_TIME = CONTROL_HIDE_MS
 
+  // Match Artplayer's own mobile detection so option pruning aligns with
+  // autoOrientation (only loaded when isMobile).
+  const isMobile = Boolean(Artplayer.utils?.isMobile)
+
   player = new Artplayer({
     container: containerRef.value,
     url: props.src,
@@ -379,9 +383,14 @@ function create() {
     setting: true,
     playbackRate: true,
     aspectRatio: true,
-    fullscreen: true,
+    // Mobile: web FS only — CSS rotate via autoOrientation works without
+    // orientation.lock (critical on iOS). Dual FS + pip crowd the bar.
+    fullscreen: !isMobile,
     fullscreenWeb: true,
-    pip: true,
+    pip: !isMobile,
+    // Landscape when video aspect mismatches phone orientation (web CSS
+    // rotate + native orientation.lock where the browser allows it).
+    autoOrientation: true,
     mutex: true,
     backdrop: true,
     playsInline: true,
@@ -580,6 +589,18 @@ watch(
   }
   .hint {
     font-size: 11px;
+  }
+  /* Slim Artplayer bar so 锁 + setting + fullscreen stay on-screen. */
+  .player :deep(.art-video-player) {
+    --art-control-height: 36px;
+    --art-control-icon-size: 32px;
+    --art-padding: 6px;
+  }
+}
+/* Very narrow phones: drop volume control (system volume still works). */
+@media (max-width: 400px) {
+  .player :deep(.art-control-volume) {
+    display: none;
   }
 }
 </style>

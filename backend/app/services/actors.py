@@ -6,7 +6,7 @@ from collections import defaultdict
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models import Actor, MediaActor
+from app.models import Actor, ActorFavorite, MediaActor
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +60,25 @@ def merge_actors(db: Session, keep: Actor, drop: Actor) -> Actor:
         drop.provider_id = None
         db.add(drop)
         db.flush()
+
+    # Preserve favorites: drop → keep (at most one row on keep).
+    keep_fav = (
+        db.query(ActorFavorite).filter(ActorFavorite.actor_id == keep_id).one_or_none()
+    )
+    drop_fav = (
+        db.query(ActorFavorite).filter(ActorFavorite.actor_id == drop_id).one_or_none()
+    )
+    if drop_fav is not None:
+        drop_created = drop_fav.created_at
+        db.delete(drop_fav)
+        db.flush()
+        if keep_fav is None:
+            db.add(ActorFavorite(actor_id=keep_id, created_at=drop_created))
+        elif drop_created is not None and (
+            keep_fav.created_at is None or drop_created < keep_fav.created_at
+        ):
+            keep_fav.created_at = drop_created
+            db.add(keep_fav)
 
     if not keep.image_url and drop_image:
         keep.image_url = drop_image

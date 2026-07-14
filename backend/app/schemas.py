@@ -51,6 +51,7 @@ class ActorOut(BaseModel):
     provider: str | None = None
     provider_id: str | None = None
     image_url: str | None = None
+    favorited: bool = False
 
 
 class ActorListItem(ActorOut):
