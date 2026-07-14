@@ -368,10 +368,6 @@ function create() {
   Artplayer.DBCLICK_FULLSCREEN = false
   Artplayer.CONTROL_HIDE_TIME = CONTROL_HIDE_MS
 
-  // Match Artplayer's own mobile detection so option pruning aligns with
-  // autoOrientation (only loaded when isMobile).
-  const isMobile = Boolean(Artplayer.utils?.isMobile)
-
   player = new Artplayer({
     container: containerRef.value,
     url: props.src,
@@ -383,13 +379,10 @@ function create() {
     setting: true,
     playbackRate: true,
     aspectRatio: true,
-    // Mobile: web FS only — CSS rotate via autoOrientation works without
-    // orientation.lock (critical on iOS). Dual FS + pip crowd the bar.
-    fullscreen: !isMobile,
+    fullscreen: true,
     fullscreenWeb: true,
-    pip: !isMobile,
-    // Landscape when video aspect mismatches phone orientation (web CSS
-    // rotate + native orientation.lock where the browser allows it).
+    pip: true,
+    // Mobile native fullscreen: try screen.orientation.lock when aspect mismatches.
     autoOrientation: true,
     mutex: true,
     backdrop: true,
