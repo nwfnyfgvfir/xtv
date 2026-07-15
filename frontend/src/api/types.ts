@@ -99,6 +99,7 @@ export interface Settings {
   metatube_base_url: string
   metatube_token_set: boolean
   metatube_provider?: string
+  metatube_provider_priority?: string[]
   metatube_fallback?: boolean
   alist_base_url: string
   alist_token_set: boolean
@@ -113,6 +114,8 @@ export interface Settings {
   cors_origins: string
   auth_enabled?: boolean
   movie_providers?: string[]
+  movie_providers_error?: string | null
+  movie_providers_from_cache?: boolean
   extra: Record<string, string>
 }
 

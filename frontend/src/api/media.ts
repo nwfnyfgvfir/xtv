@@ -50,6 +50,9 @@ export const deleteLibrary = (id: number) => client.delete(`/libraries/${id}`)
 export const scanLibrary = (id: number) =>
   client.post<ScanJob>(`/libraries/${id}/scan`).then((r) => r.data)
 
+export const rescrapePendingLibrary = (id: number) =>
+  client.post<ScanJob>(`/libraries/${id}/rescrape-pending`).then((r) => r.data)
+
 export const getScanJob = (jobId: string) =>
   client.get<ScanJob>(`/scan/jobs/${jobId}`).then((r) => r.data)
 
@@ -112,3 +115,13 @@ export const getSettings = () => client.get<Settings>('/settings').then((r) => r
 
 export const updateSettings = (body: Record<string, unknown>) =>
   client.put<Settings>('/settings', body).then((r) => r.data)
+
+export const getMovieProviders = () =>
+  client
+    .get<{
+      movie_providers?: string[]
+      count?: number
+      data?: unknown
+      from_cache?: boolean
+    }>('/settings/providers')
+    .then((r) => r.data)

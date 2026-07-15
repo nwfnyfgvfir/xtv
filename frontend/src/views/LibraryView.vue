@@ -10,6 +10,7 @@ import {
   getScanJob,
   listLibraries,
   listMedia,
+  rescrapePendingLibrary,
   scanLibrary,
   deleteLibrary,
   updateLibrary,
@@ -270,7 +271,7 @@ async function onScan(lib: Library) {
   try {
     const job = await scanLibrary(lib.id)
     ElMessage.info(`扫描已开始: ${job.job_id}`)
-    await pollJob(job.job_id)
+    await pollJob(job.job_id, '扫描')
     await loadLibraries()
     if (currentLibraryId.value === lib.id) await loadMedia()
   } catch (e: unknown) {
@@ -282,30 +283,49 @@ async function onScan(lib: Library) {
   }
 }
 
-async function pollJob(jobId: string) {
+async function onRescrapePending(lib: Library) {
+  if (scanningId.value) return
+  scanningId.value = lib.id
+  scanProgress.value = null
+  try {
+    const job = await rescrapePendingLibrary(lib.id)
+    ElMessage.info(`补刮已开始: ${job.job_id}`)
+    await pollJob(job.job_id, '补刮')
+    await loadLibraries()
+    if (currentLibraryId.value === lib.id) await loadMedia()
+  } catch (e: unknown) {
+    const msg = (e as { message?: string })?.message
+    ElMessage.error(msg || '补刮失败')
+  } finally {
+    scanningId.value = null
+    scanProgress.value = null
+  }
+}
+
+async function pollJob(jobId: string, kind = '扫描') {
   const max = 600 // up to ~10 min with 1s interval
   for (let i = 0; i < max; i++) {
     try {
       const job = await getScanJob(jobId)
       scanProgress.value = job
       if (job.status === 'done') {
-        ElMessage.success(job.message || '扫描完成')
+        ElMessage.success(job.message || `${kind}完成`)
         return
       }
       if (job.status === 'error') {
-        throw new Error(job.message || '扫描出错')
+        throw new Error(job.message || `${kind}出错`)
       }
     } catch (e: unknown) {
       const status = (e as { response?: { status?: number } })?.response?.status
-      if (status === 404) throw new Error('扫描任务丢失（服务可能已重启）')
-      if (e instanceof Error && e.message !== '扫描出错' && !String(e).includes('Network')) {
+      if (status === 404) throw new Error(`${kind}任务丢失（服务可能已重启）`)
+      if (e instanceof Error && !e.message.includes(kind) && !String(e).includes('Network')) {
         // continue on transient
       }
-      if (e instanceof Error && (e.message.includes('扫描') || e.message.includes('任务'))) throw e
+      if (e instanceof Error && (e.message.includes(kind) || e.message.includes('任务'))) throw e
     }
     await new Promise((r) => setTimeout(r, 1000))
   }
-  throw new Error('扫描超时，请稍后刷新查看结果')
+  throw new Error(`${kind}超时，请稍后刷新查看结果`)
 }
 
 async function onDelete(lib: Library) {
@@ -451,9 +471,20 @@ onBeforeUnmount(stopSoftRefresh)
           size="small"
           type="warning"
           :loading="scanningId === currentLibrary.id"
+          :disabled="scanningId != null && scanningId !== currentLibrary.id"
           @click="onScan(currentLibrary)"
         >
           扫描
+        </el-button>
+        <el-button
+          size="small"
+          type="primary"
+          plain
+          :loading="scanningId === currentLibrary.id"
+          :disabled="scanningId != null && scanningId !== currentLibrary.id"
+          @click="onRescrapePending(currentLibrary)"
+        >
+          刮削未刮削
         </el-button>
         <el-button size="small" type="danger" plain @click="onDelete(currentLibrary)">删除</el-button>
       </div>
@@ -461,7 +492,7 @@ onBeforeUnmount(stopSoftRefresh)
 
     <div v-if="scanProgress && scanningId" class="scan-banner">
       <div class="scan-text">
-        扫描中 · scanned {{ scanProgress.scanned }} · created {{ scanProgress.created }} · scraped
+        任务进行中 · scanned {{ scanProgress.scanned }} · created {{ scanProgress.created }} · scraped
         {{ scanProgress.scraped }}
       </div>
       <div class="scan-msg muted">{{ scanProgress.message || scanProgress.status }}</div>

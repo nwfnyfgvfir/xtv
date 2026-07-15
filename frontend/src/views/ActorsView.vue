@@ -110,7 +110,10 @@ onMounted(() => {
         @refreshed="onActorRefreshed"
       />
     </div>
-    <el-empty v-else description="暂无演员，请先刮削媒体" />
+    <el-empty
+      v-else
+      :description="q ? '未找到匹配演员' : '暂无演员，请先刮削媒体'"
+    />
     <AppPagination :total="total" :page="page" :page-size="PAGE_SIZE" @update:page="onPageChange" />
   </div>
 </template>
@@ -137,6 +140,18 @@ onMounted(() => {
   .bar {
     max-width: none;
     width: 100%;
+  }
+  .bar :deep(.el-input) {
+    flex: 1 1 100%;
+  }
+  .bar :deep(.el-input__wrapper) {
+    min-height: 40px;
+    font-size: 16px;
+  }
+  .bar .el-button {
+    flex: 1 1 auto;
+    width: 100%;
+    min-height: 40px;
   }
   .grid {
     grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));

@@ -141,6 +141,7 @@ class SettingsOut(BaseModel):
     metatube_base_url: str
     metatube_token_set: bool
     metatube_provider: str = ""
+    metatube_provider_priority: list[str] = []
     metatube_fallback: bool = True
     alist_base_url: str
     alist_token_set: bool
@@ -155,6 +156,8 @@ class SettingsOut(BaseModel):
     cors_origins: str
     auth_enabled: bool = False
     movie_providers: list[str] = []
+    movie_providers_error: str | None = None
+    movie_providers_from_cache: bool = False
     extra: dict[str, str] = {}
 
 
@@ -162,6 +165,7 @@ class SettingsUpdate(BaseModel):
     metatube_base_url: str | None = None
     metatube_token: str | None = None
     metatube_provider: str | None = None
+    metatube_provider_priority: list[str] | None = None
     metatube_fallback: bool | None = None
     alist_base_url: str | None = None
     alist_token: str | None = None

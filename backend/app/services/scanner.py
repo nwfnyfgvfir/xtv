@@ -422,3 +422,64 @@ def run_scan_job(job_id: str, library_id: int) -> None:
         job.errors.append(str(exc))
     finally:
         db.close()
+
+
+def run_rescrape_pending_job(job_id: str, library_id: int) -> None:
+    """Background: scrape all unscraped items that have a number in the library."""
+    job = job_store.get(job_id)
+    if not job:
+        return
+    job.status = "running"
+    job.library_id = library_id
+    db = SessionLocal()
+    try:
+        lib = db.get(Library, library_id)
+        if not lib:
+            job.status = "error"
+            job.message = "library not found"
+            job.errors.append(job.message)
+            return
+
+        items = (
+            db.query(MediaItem)
+            .filter(
+                MediaItem.library_id == library_id,
+                MediaItem.number.isnot(None),
+                MediaItem.scraped_at.is_(None),
+            )
+            .order_by(MediaItem.id.asc())
+            .all()
+        )
+        total = len(items)
+        job.scanned = total
+        if total == 0:
+            job.status = "done"
+            job.message = "no pending items (need number + unscraped)"
+            return
+
+        scraped_ok = 0
+        for idx, item in enumerate(items, start=1):
+            number = item.number or "?"
+            job.message = f"scraping {idx}/{total}: {number}"
+            try:
+                ok = asyncio.run(scrape_media_item(db, item, force=False))
+                if ok:
+                    scraped_ok += 1
+                    job.scraped = scraped_ok
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("pending scrape failed %s", number)
+                job.errors.append(f"scrape {number}: {exc}")
+
+        if scraped_ok:
+            bump_revision(library_id)
+
+        job.status = "done"
+        job.scraped = scraped_ok
+        job.message = f"pending scrape done: scraped={scraped_ok}/{total}"
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("rescrape pending job failed")
+        job.status = "error"
+        job.message = str(exc)
+        job.errors.append(str(exc))
+    finally:
+        db.close()

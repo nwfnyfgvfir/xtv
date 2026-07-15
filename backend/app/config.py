@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     metatube_base_url: str = "https://openai-proxy.caowxj.eu.org"
     metatube_token: str = ""
     metatube_provider: str = ""  # empty = auto
+    metatube_provider_priority: str = ""  # JSON array string e.g. '["JavBus","FANZA"]'
     metatube_fallback: bool = True
     alist_base_url: str = "http://127.0.0.1:5244"
     alist_token: str = ""

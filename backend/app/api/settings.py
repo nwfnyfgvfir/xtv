@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
+import logging
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -10,14 +12,20 @@ from app.db import get_db
 from app.deps import require_auth
 from app.models import AppSetting
 from app.schemas import SettingsOut, SettingsUpdate
-from app.services.metatube import MetaTubeClient
+from app.services.metatube import MetaTubeClient, MetaTubeError, parse_movie_provider_names
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+_PROVIDERS_CACHE_KEY = "metatube_movie_providers_cache"
+_MAX_PRIORITY = 50
+_MAX_PROVIDER_NAME_LEN = 64
 
 OVERRIDE_KEYS = {
     "metatube_base_url",
     "metatube_token",
     "metatube_provider",
+    "metatube_provider_priority",
     "metatube_fallback",
     "alist_base_url",
     "alist_token",
@@ -40,6 +48,41 @@ def _db_map(db: Session) -> dict[str, str]:
     return {r.key: r.value for r in rows}
 
 
+def parse_priority_list(raw: str | list[str] | None) -> list[str]:
+    """Parse provider priority from JSON string or list; invalid → []."""
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        data = raw
+    else:
+        text = str(raw).strip()
+        if not text:
+            return []
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(data, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in data:
+        name = str(item).strip()
+        if not name or len(name) > _MAX_PROVIDER_NAME_LEN or name in seen:
+            continue
+        seen.add(name)
+        out.append(name)
+        if len(out) >= _MAX_PRIORITY:
+            break
+    return out
+
+
+def _sanitize_priority(value: list[Any] | None) -> list[str]:
+    if not value:
+        return []
+    return parse_priority_list(value)
+
+
 def _apply_overrides_to_runtime(db_map: dict[str, str]) -> None:
     s = get_settings()
     if "metatube_base_url" in db_map and db_map["metatube_base_url"]:
@@ -48,6 +91,8 @@ def _apply_overrides_to_runtime(db_map: dict[str, str]) -> None:
         s.metatube_token = db_map["metatube_token"]
     if "metatube_provider" in db_map:
         s.metatube_provider = db_map["metatube_provider"]
+    if "metatube_provider_priority" in db_map:
+        s.metatube_provider_priority = db_map["metatube_provider_priority"] or ""
     if "metatube_fallback" in db_map:
         s.metatube_fallback = db_map["metatube_fallback"].lower() in _BOOL_TRUE
     if "alist_base_url" in db_map and db_map["alist_base_url"]:
@@ -74,17 +119,48 @@ def _apply_overrides_to_runtime(db_map: dict[str, str]) -> None:
         s.scan_extensions = db_map["scan_extensions"]
 
 
-async def _providers() -> list[str]:
+def _load_providers_cache(db: Session) -> list[str]:
+    row = db.get(AppSetting, _PROVIDERS_CACHE_KEY)
+    if not row or not row.value:
+        return []
+    try:
+        data = json.loads(row.value)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, list):
+        return []
+    return [str(x).strip() for x in data if str(x).strip()]
+
+
+def _save_providers_cache(db: Session, names: list[str]) -> None:
+    payload = json.dumps(names, ensure_ascii=False)
+    row = db.get(AppSetting, _PROVIDERS_CACHE_KEY)
+    if row is None:
+        row = AppSetting(key=_PROVIDERS_CACHE_KEY, value=payload)
+    else:
+        row.value = payload
+    db.add(row)
+    db.commit()
+
+
+async def _providers_with_status(db: Session) -> tuple[list[str], str | None, bool]:
+    """Return (names, error, from_cache)."""
     try:
         data = await MetaTubeClient().list_providers()
-        movies = data.get("movie_providers") or {}
-        if isinstance(movies, dict):
-            return sorted(movies.keys())
-        if isinstance(movies, list):
-            return sorted(str(x) for x in movies)
-    except Exception:  # noqa: BLE001
-        return []
-    return []
+        names = parse_movie_provider_names(data)
+        if names:
+            try:
+                _save_providers_cache(db, names)
+            except Exception:  # noqa: BLE001
+                logger.debug("failed to cache movie providers", exc_info=True)
+        return names, None, False
+    except Exception as exc:  # noqa: BLE001
+        err = str(exc)[:200] or "MetaTube providers unavailable"
+        logger.warning("list movie providers failed: %s", err)
+        cached = _load_providers_cache(db)
+        if cached:
+            return cached, err, True
+        return [], err, False
 
 
 @router.get("", response_model=SettingsOut)
@@ -98,8 +174,15 @@ async def get_app_settings(
     s = get_settings()
     token = db_map.get("metatube_token", s.metatube_token)
     alist_token = db_map.get("alist_token", s.alist_token)
-    extra = {k: v for k, v in db_map.items() if k not in OVERRIDE_KEYS}
+    extra = {
+        k: v
+        for k, v in db_map.items()
+        if k not in OVERRIDE_KEYS and k != _PROVIDERS_CACHE_KEY
+    }
     provider = db_map.get("metatube_provider", s.metatube_provider)
+    priority = parse_priority_list(
+        db_map.get("metatube_provider_priority", s.metatube_provider_priority)
+    )
     fallback_raw = db_map.get("metatube_fallback")
     fallback = (
         fallback_raw.lower() in _BOOL_TRUE if fallback_raw is not None else s.metatube_fallback
@@ -122,10 +205,12 @@ async def get_app_settings(
         if local_cache_raw is not None
         else bool(s.image_local_cache)
     )
+    movie_providers, providers_error, from_cache = await _providers_with_status(db)
     return SettingsOut(
         metatube_base_url=db_map.get("metatube_base_url") or s.metatube_base_url,
         metatube_token_set=bool(token),
         metatube_provider=provider or "",
+        metatube_provider_priority=priority,
         metatube_fallback=fallback,
         alist_base_url=db_map.get("alist_base_url") or s.alist_base_url,
         alist_token_set=bool(alist_token),
@@ -140,7 +225,9 @@ async def get_app_settings(
         scan_extensions=s.scan_extensions,
         cors_origins=s.cors_origins,
         auth_enabled=s.auth_enabled,
-        movie_providers=await _providers(),
+        movie_providers=movie_providers,
+        movie_providers_error=providers_error,
+        movie_providers_from_cache=from_cache,
         extra=extra,
     )
 
@@ -156,7 +243,14 @@ async def update_app_settings(
     for key, value in data.items():
         if value is None:
             continue
-        store_val = str(value).lower() if isinstance(value, bool) else str(value)
+        if key == "metatube_provider_priority":
+            store_val = json.dumps(_sanitize_priority(value if isinstance(value, list) else []), ensure_ascii=False)
+        elif isinstance(value, list):
+            store_val = json.dumps(value, ensure_ascii=False)
+        elif isinstance(value, bool):
+            store_val = str(value).lower()
+        else:
+            store_val = str(value)
         row = db.get(AppSetting, key)
         if row is None:
             row = AppSetting(key=key, value=store_val)
@@ -165,6 +259,8 @@ async def update_app_settings(
         db.add(row)
     if extra:
         for k, v in extra.items():
+            if k == _PROVIDERS_CACHE_KEY:
+                continue
             row = db.get(AppSetting, k)
             if row is None:
                 row = AppSetting(key=k, value=str(v))
@@ -179,6 +275,23 @@ async def update_app_settings(
 @router.get("/providers")
 async def list_movie_providers(
     _: Annotated[dict, Depends(require_auth)],
+    db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    data = await MetaTubeClient().list_providers()
-    return data
+    try:
+        data = await MetaTubeClient().list_providers()
+    except MetaTubeError as exc:
+        raise HTTPException(502, str(exc) or "MetaTube providers unavailable") from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, f"MetaTube providers unavailable: {exc}") from exc
+    names = parse_movie_provider_names(data)
+    if names:
+        try:
+            _save_providers_cache(db, names)
+        except Exception:  # noqa: BLE001
+            logger.debug("failed to cache movie providers", exc_info=True)
+    return {
+        "data": data,
+        "movie_providers": names,
+        "count": len(names),
+        "from_cache": False,
+    }

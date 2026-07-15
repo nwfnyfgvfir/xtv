@@ -7,7 +7,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.models import Actor, MediaItem
 from app.services.actors import merge_actors, normalize_actor_name, pick_canonical
 from app.services.metatube import MetaTubeClient, MetaTubeError
@@ -28,6 +28,69 @@ def _pick_best(results: list[dict[str, Any]], number: str) -> dict[str, Any] | N
         if rid == n or n in rid:
             return r
     return results[0]
+
+
+def _priority_list_from_settings(settings: Settings | Any) -> list[str]:
+    raw = getattr(settings, "metatube_provider_priority", "") or ""
+    if isinstance(raw, list):
+        data = raw
+    else:
+        text = str(raw).strip()
+        if not text:
+            return []
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(data, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in data:
+        name = str(item).strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        out.append(name)
+    return out
+
+
+async def _search_with_chain(
+    client: MetaTubeClient,
+    number: str,
+    *,
+    chain: list[str],
+    use_fallback: bool,
+    force_auto: bool,
+) -> list[dict[str, Any]]:
+    """
+    Search MetaTube using an ordered provider chain.
+
+    force_auto=True → single search provider="" with fallback=use_fallback.
+    Else try each chain entry with fallback=False; stop on first _pick_best hit.
+    If no hit and (not chain or use_fallback): final search provider="" fallback=True
+    (or use_fallback when chain empty and not force_auto).
+    """
+    if force_auto:
+        logger.info("scrape try %s provider=auto fallback=%s", number, use_fallback)
+        return await client.search_movie(number, provider="", fallback=use_fallback)
+
+    results: list[dict[str, Any]] = []
+    for p in chain:
+        logger.info("scrape try %s provider=%s", number, p)
+        results = await client.search_movie(number, provider=p, fallback=False)
+        if _pick_best(results, number):
+            return results
+
+    if not chain:
+        logger.info("scrape try %s provider=auto fallback=%s", number, use_fallback)
+        return await client.search_movie(number, provider="", fallback=use_fallback)
+
+    if use_fallback:
+        logger.info("scrape try %s provider=auto fallback=true (after chain)", number)
+        return await client.search_movie(number, provider="", fallback=True)
+
+    return results
 
 
 def _first_image(v: Any) -> str | None:
@@ -91,18 +154,38 @@ async def scrape_media_item(
 
     try:
         settings = get_settings()
-        provider_q = (
-            provider_override
-            if provider_override is not None
-            else (settings.metatube_provider or "")
-        )
-        fallback = (
+        priority = _priority_list_from_settings(settings)
+        default_fallback = (
             fallback_override if fallback_override is not None else settings.metatube_fallback
         )
-        results = await client.search_movie(
+
+        if provider_override is not None:
+            if provider_override == "":
+                force_auto = True
+                chain: list[str] = []
+            else:
+                force_auto = False
+                chain = [provider_override]
+            use_fallback = default_fallback
+        elif priority:
+            force_auto = False
+            chain = priority
+            use_fallback = default_fallback
+        elif settings.metatube_provider:
+            force_auto = False
+            chain = [settings.metatube_provider]
+            use_fallback = default_fallback
+        else:
+            force_auto = False
+            chain = []
+            use_fallback = True if fallback_override is None else bool(fallback_override)
+
+        results = await _search_with_chain(
+            client,
             item.number,
-            provider=provider_q or "",
-            fallback=fallback,
+            chain=chain,
+            use_fallback=use_fallback,
+            force_auto=force_auto,
         )
         best = _pick_best(results, item.number)
         if not best:

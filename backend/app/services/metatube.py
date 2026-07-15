@@ -132,3 +132,45 @@ class MetaTubeClient:
         from app.services.images import rewrite_image_url
 
         return rewrite_image_url(url, provider=provider, provider_id=provider_id)
+
+
+def parse_movie_provider_names(data: Any) -> list[str]:
+    """Extract sorted unique movie provider names from MetaTube /v1/providers payload."""
+    if not isinstance(data, dict):
+        return []
+
+    movies: Any = None
+    for key, value in data.items():
+        if str(key).lower() in {"movie_providers", "movieproviders"}:
+            movies = value
+            break
+    if movies is None:
+        movies = data.get("movie_providers") or data.get("MovieProviders")
+
+    names: list[str] = []
+    if isinstance(movies, dict):
+        names = [str(k).strip() for k in movies.keys() if str(k).strip()]
+    elif isinstance(movies, list):
+        for item in movies:
+            if isinstance(item, str) and item.strip():
+                names.append(item.strip())
+            elif isinstance(item, dict):
+                label = (
+                    item.get("name")
+                    or item.get("Name")
+                    or item.get("provider")
+                    or item.get("Provider")
+                    or item.get("id")
+                    or item.get("ID")
+                )
+                if label is not None and str(label).strip():
+                    names.append(str(label).strip())
+
+    # Preserve order while deduping, then sort for stable UI.
+    seen: set[str] = set()
+    unique: list[str] = []
+    for n in names:
+        if n not in seen:
+            seen.add(n)
+            unique.append(n)
+    return sorted(unique)

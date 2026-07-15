@@ -71,8 +71,16 @@ async function load() {
 async function loadProviders() {
   try {
     const s = await getSettings()
-    providers.value = s.movie_providers || []
-    scrapeProvider.value = s.metatube_provider || ''
+    const list = [...(s.movie_providers || [])]
+    const pri = s.metatube_provider_priority || []
+    for (const p of pri) {
+      if (p && !list.includes(p)) list.push(p)
+    }
+    if (s.metatube_provider && !list.includes(s.metatube_provider)) {
+      list.push(s.metatube_provider)
+    }
+    providers.value = list
+    scrapeProvider.value = pri[0] || s.metatube_provider || ''
     scrapeFallback.value = s.metatube_fallback !== false
   } catch {
     /* ignore */
@@ -101,7 +109,8 @@ async function onRescrape() {
   scrapeLoading.value = true
   try {
     item.value = await rescrapeMedia(Number(props.id), {
-      provider: scrapeProvider.value || undefined,
+      // Always send provider (including "") so「自动」does not inherit global preferred source.
+      provider: scrapeProvider.value,
       fallback: scrapeFallback.value,
       number,
     })
@@ -232,16 +241,19 @@ watch(() => props.id, load)
           />
           <el-select
             v-model="scrapeProvider"
+            class="scrape-provider"
             clearable
             filterable
+            allow-create
+            default-first-option
             placeholder="刮削源（自动）"
-            style="min-width: 160px; flex: 1"
           >
             <el-option label="自动" value="" />
             <el-option v-for="p in providers" :key="p" :label="p" :value="p" />
           </el-select>
-          <el-switch v-model="scrapeFallback" active-text="fallback" />
+          <el-switch v-model="scrapeFallback" active-text="fallback" class="scrape-fallback" />
           <el-button
+            class="scrape-btn"
             :loading="scrapeLoading"
             :disabled="!canRescrape"
             @click="onRescrape"
@@ -311,9 +323,28 @@ watch(() => props.id, load)
     flex-direction: column;
     align-items: stretch;
   }
-  .scrape-row :deep(.el-select),
-  .scrape-row :deep(.scrape-number) {
+  .scrape-number {
+    width: 100% !important;
+    flex: 1 1 100% !important;
+    max-width: none;
+  }
+  .scrape-row :deep(.scrape-number),
+  .scrape-row :deep(.el-select.scrape-provider),
+  .scrape-row :deep(.el-input) {
     width: 100%;
+    flex: 1 1 100%;
+  }
+  .scrape-row :deep(.el-input__wrapper),
+  .scrape-row :deep(.el-select__wrapper) {
+    min-height: 44px;
+    font-size: 16px;
+  }
+  .scrape-row .scrape-btn {
+    width: 100%;
+    min-height: 44px;
+  }
+  .scrape-fallback {
+    align-self: flex-start;
   }
 }
 .cover-wrap {
@@ -449,6 +480,10 @@ h1 {
 .scrape-number {
   width: 140px;
   flex: 0 0 140px;
+}
+.scrape-provider {
+  min-width: 160px;
+  flex: 1 1 160px;
 }
 .tags {
   display: flex;

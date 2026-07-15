@@ -13,7 +13,7 @@ from app.schemas import LibraryCreate, LibraryOut, LibraryUpdate, ScanJobOut
 from app.services.actors import delete_orphan_actors
 from app.services.jobs import job_store
 from app.services.library_revision import get_revision
-from app.services.scanner import run_scan_job
+from app.services.scanner import run_rescrape_pending_job, run_scan_job
 from app.services.scheduler import reload_library_jobs
 
 router = APIRouter()
@@ -111,4 +111,20 @@ def scan_library(
         raise HTTPException(404, "library not found")
     job = job_store.create(library_id)
     background_tasks.add_task(run_scan_job, job.job_id, library_id)
+    return ScanJobOut(**job.to_dict())
+
+
+@router.post("/{library_id}/rescrape-pending", response_model=ScanJobOut)
+def rescrape_pending_library(
+    library_id: int,
+    background_tasks: BackgroundTasks,
+    _: Annotated[dict, Depends(require_auth)],
+    db: Session = Depends(get_db),
+) -> ScanJobOut:
+    """Scrape all unscraped items (with number) in the library — no filesystem scan."""
+    lib = db.get(Library, library_id)
+    if not lib:
+        raise HTTPException(404, "library not found")
+    job = job_store.create(library_id)
+    background_tasks.add_task(run_rescrape_pending_job, job.job_id, library_id)
     return ScanJobOut(**job.to_dict())

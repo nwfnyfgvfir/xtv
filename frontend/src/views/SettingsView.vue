@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getHealth, getSettings, updateSettings } from '@/api/media'
+import { getHealth, getMovieProviders, getSettings, updateSettings } from '@/api/media'
 import type { Health, ImageProxyMode, Settings, TranslateProvider } from '@/api/types'
 
 const settings = ref<Settings | null>(null)
@@ -10,6 +10,7 @@ const form = ref({
   metatube_base_url: '',
   metatube_token: '',
   metatube_provider: '',
+  metatube_provider_priority: [] as string[],
   metatube_fallback: true,
   alist_base_url: '',
   alist_token: '',
@@ -22,8 +23,22 @@ const form = ref({
   scan_extensions: '',
 })
 const saving = ref(false)
+const providersRefreshing = ref(false)
+const priorityPick = ref<string[]>([])
 
 const showExternalTpl = computed(() => form.value.image_proxy_mode === 'external')
+const movieProviders = computed(() => settings.value?.movie_providers || [])
+const providerCount = computed(() => movieProviders.value.length)
+const hasPriority = computed(() => form.value.metatube_provider_priority.length > 0)
+
+const allProviderOptions = computed(() => {
+  const set = new Set(movieProviders.value)
+  for (const p of form.value.metatube_provider_priority) {
+    if (p) set.add(p)
+  }
+  if (form.value.metatube_provider) set.add(form.value.metatube_provider)
+  return Array.from(set).sort((a, b) => a.localeCompare(b))
+})
 
 function normalizeMode(mode: string | undefined): ImageProxyMode {
   if (mode === 'metatube' || mode === 'external') return mode
@@ -34,22 +49,81 @@ function normalizeProvider(mode: string | undefined): TranslateProvider {
   return mode === 'bing' ? 'bing' : 'google'
 }
 
+function applySettingsToForm(s: Settings) {
+  form.value.metatube_base_url = s.metatube_base_url
+  form.value.alist_base_url = s.alist_base_url
+  form.value.auto_scrape = s.auto_scrape
+  form.value.auto_translate = s.auto_translate !== false
+  form.value.translate_provider = normalizeProvider(s.translate_provider)
+  form.value.image_proxy_mode = normalizeMode(s.image_proxy_mode)
+  form.value.image_external_proxy_url = s.image_external_proxy_url || ''
+  form.value.image_local_cache = Boolean(s.image_local_cache)
+  form.value.scan_extensions = s.scan_extensions
+  form.value.metatube_provider = s.metatube_provider || ''
+  form.value.metatube_provider_priority = [...(s.metatube_provider_priority || [])]
+  form.value.metatube_fallback = s.metatube_fallback !== false
+  form.value.metatube_token = ''
+  form.value.alist_token = ''
+  priorityPick.value = [...form.value.metatube_provider_priority]
+}
+
 async function load() {
   settings.value = await getSettings()
   health.value = await getHealth()
-  form.value.metatube_base_url = settings.value.metatube_base_url
-  form.value.alist_base_url = settings.value.alist_base_url
-  form.value.auto_scrape = settings.value.auto_scrape
-  form.value.auto_translate = settings.value.auto_translate !== false
-  form.value.translate_provider = normalizeProvider(settings.value.translate_provider)
-  form.value.image_proxy_mode = normalizeMode(settings.value.image_proxy_mode)
-  form.value.image_external_proxy_url = settings.value.image_external_proxy_url || ''
-  form.value.image_local_cache = Boolean(settings.value.image_local_cache)
-  form.value.scan_extensions = settings.value.scan_extensions
-  form.value.metatube_provider = settings.value.metatube_provider || ''
-  form.value.metatube_fallback = settings.value.metatube_fallback !== false
-  form.value.metatube_token = ''
-  form.value.alist_token = ''
+  applySettingsToForm(settings.value)
+}
+
+async function refreshProviders() {
+  providersRefreshing.value = true
+  try {
+    try {
+      const data = await getMovieProviders()
+      if (data.movie_providers?.length && settings.value) {
+        settings.value = {
+          ...settings.value,
+          movie_providers: data.movie_providers,
+          movie_providers_error: null,
+          movie_providers_from_cache: Boolean(data.from_cache),
+        }
+      }
+    } catch {
+      /* fall through to full settings reload */
+    }
+    settings.value = await getSettings()
+    ElMessage.success(`已刷新：共 ${settings.value.movie_providers?.length || 0} 个源`)
+  } catch {
+    ElMessage.error('刷新源列表失败')
+  } finally {
+    providersRefreshing.value = false
+  }
+}
+
+function onPriorityPickChange(vals: string[]) {
+  const prev = form.value.metatube_provider_priority
+  const next: string[] = []
+  for (const p of prev) {
+    if (vals.includes(p)) next.push(p)
+  }
+  for (const p of vals) {
+    if (!next.includes(p)) next.push(p)
+  }
+  form.value.metatube_provider_priority = next
+  priorityPick.value = [...next]
+}
+
+function movePriority(index: number, dir: -1 | 1) {
+  const list = [...form.value.metatube_provider_priority]
+  const j = index + dir
+  if (j < 0 || j >= list.length) return
+  ;[list[index], list[j]] = [list[j], list[index]]
+  form.value.metatube_provider_priority = list
+  priorityPick.value = [...list]
+}
+
+function removePriority(index: number) {
+  const list = form.value.metatube_provider_priority.filter((_, i) => i !== index)
+  form.value.metatube_provider_priority = list
+  priorityPick.value = [...list]
 }
 
 async function save() {
@@ -66,11 +140,13 @@ async function save() {
       image_local_cache: form.value.image_local_cache,
       scan_extensions: form.value.scan_extensions,
       metatube_provider: form.value.metatube_provider,
+      metatube_provider_priority: form.value.metatube_provider_priority,
       metatube_fallback: form.value.metatube_fallback,
     }
     if (form.value.metatube_token) body.metatube_token = form.value.metatube_token
     if (form.value.alist_token) body.alist_token = form.value.alist_token
     settings.value = await updateSettings(body)
+    applySettingsToForm(settings.value)
     health.value = await getHealth()
     ElMessage.success('已保存')
   } catch {
@@ -130,25 +206,95 @@ onMounted(() => {
             placeholder="留空则不修改"
           />
         </el-form-item>
-        <el-form-item label="优先刮削源">
+
+        <el-form-item label="源列表">
+          <div class="providers-meta">
+            <span class="muted">共 {{ providerCount }} 个源</span>
+            <el-button size="small" :loading="providersRefreshing" @click="refreshProviders">
+              刷新源列表
+            </el-button>
+          </div>
+          <p v-if="settings?.movie_providers_error" class="warn-line">
+            实时拉取失败：{{ settings.movie_providers_error }}
+            <span v-if="settings.movie_providers_from_cache">（已使用缓存列表）</span>
+          </p>
+        </el-form-item>
+
+        <el-form-item label="刮削源优先级">
+          <div class="priority-block">
+            <el-select
+              :model-value="priorityPick"
+              multiple
+              filterable
+              allow-create
+              default-first-option
+              clearable
+              placeholder="从全部源中选择并按顺序排列"
+              style="width: 100%"
+              @update:model-value="onPriorityPickChange"
+            >
+              <el-option
+                v-for="p in allProviderOptions"
+                :key="p"
+                :label="p"
+                :value="p"
+              />
+            </el-select>
+            <ul v-if="form.metatube_provider_priority.length" class="priority-list">
+              <li v-for="(p, i) in form.metatube_provider_priority" :key="`${p}-${i}`">
+                <span class="pri-idx">{{ i + 1 }}</span>
+                <span class="pri-name">{{ p }}</span>
+                <span class="pri-actions">
+                  <el-button size="small" text :disabled="i === 0" @click="movePriority(i, -1)">
+                    ↑
+                  </el-button>
+                  <el-button
+                    size="small"
+                    text
+                    :disabled="i === form.metatube_provider_priority.length - 1"
+                    @click="movePriority(i, 1)"
+                  >
+                    ↓
+                  </el-button>
+                  <el-button size="small" text type="danger" @click="removePriority(i)">
+                    ×
+                  </el-button>
+                </span>
+              </li>
+            </ul>
+            <span class="field-hint muted block">
+              刮削时按顺序尝试；全部未命中后由下方 fallback 决定是否再搜其余源。为空时走兼容单源。
+            </span>
+          </div>
+        </el-form-item>
+
+        <el-form-item label="兼容单源">
           <el-select
             v-model="form.metatube_provider"
             clearable
             filterable
-            placeholder="自动（全部源 fallback）"
+            allow-create
+            default-first-option
+            :disabled="hasPriority"
+            placeholder="自动（优先级为空时生效）"
             style="width: 100%"
           >
             <el-option label="自动" value="" />
             <el-option
-              v-for="p in settings?.movie_providers || []"
+              v-for="p in allProviderOptions"
               :key="p"
               :label="p"
               :value="p"
             />
           </el-select>
+          <span class="field-hint muted block">
+            优先级列表为空时生效；非空时刮削按优先级顺序尝试
+          </span>
         </el-form-item>
+
         <el-form-item label="失败时 fallback">
           <el-switch v-model="form.metatube_fallback" />
+          <span class="field-hint muted">优先级全部未命中后是否再搜索其余源</span>
         </el-form-item>
         <el-form-item label="Alist URL">
           <el-input v-model="form.alist_base_url" />
@@ -256,7 +402,79 @@ onMounted(() => {
   margin: 6px 0 0;
   margin-left: 0;
 }
+.providers-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.warn-line {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--danger);
+  line-height: 1.45;
+}
+.priority-block {
+  width: 100%;
+}
+.priority-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.priority-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+.priority-list li:last-child {
+  border-bottom: none;
+}
+.pri-idx {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--accent-soft);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.pri-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.pri-actions {
+  display: inline-flex;
+  gap: 0;
+  flex-shrink: 0;
+}
 code {
   color: var(--accent);
+}
+@media (max-width: 640px) {
+  :deep(.el-form-item) {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  :deep(.el-form-item__label) {
+    justify-content: flex-start;
+    height: auto;
+    line-height: 1.4;
+    margin-bottom: 6px;
+  }
 }
 </style>
