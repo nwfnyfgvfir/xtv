@@ -246,13 +246,13 @@ onMounted(() => {
 }
 @media (max-width: 640px) {
   .actor-grid {
-    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    grid-template-columns: repeat(4, 1fr);
     gap: 10px;
   }
 }
 @media (max-width: 380px) {
   .actor-grid {
-    grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+    grid-template-columns: repeat(4, 1fr);
     gap: 8px;
   }
 }

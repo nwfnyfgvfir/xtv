@@ -28,12 +28,13 @@ withDefaults(
 }
 @media (max-width: 640px) {
   .skeleton-grid.actor {
-    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    grid-template-columns: repeat(4, 1fr);
   }
 }
 @media (max-width: 380px) {
   .skeleton-grid.actor {
-    grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
   }
 }
 </style>
