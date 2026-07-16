@@ -34,23 +34,8 @@ export default defineConfig({
   build: {
     sourcemap: false,
     chunkSizeWarningLimit: 900,
-    rollupOptions: {
-      output: {
-        manualChunks(id) {
-          if (!id.includes('node_modules')) return
-          if (id.includes('artplayer')) return 'artplayer'
-          if (id.includes('element-plus')) return 'element-plus'
-          if (id.includes('axios')) return 'axios'
-          if (
-            id.includes('node_modules/vue/') ||
-            id.includes('node_modules/@vue/') ||
-            id.includes('vue-router') ||
-            id.includes('pinia')
-          ) {
-            return 'vue-vendor'
-          }
-        },
-      },
-    },
+    // Do NOT force-split axios/vue/element-plus — causes circular ESM init
+    // (TypeError: e is not a function → black screen). Route lazy-load is enough;
+    // artplayer stays in the detail async chunk via dynamic import.
   },
 })
