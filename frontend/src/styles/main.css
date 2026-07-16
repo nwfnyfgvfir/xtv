@@ -241,8 +241,33 @@ textarea {
 .el-pagination {
   --el-pagination-bg-color: transparent;
   --el-pagination-button-bg-color: var(--panel);
+  --el-pagination-button-color: var(--text);
+  --el-pagination-text-color: var(--text);
   --el-pagination-hover-color: var(--accent);
+  --el-pagination-button-disabled-color: var(--muted);
+  --el-pagination-button-disabled-bg-color: var(--panel);
   --el-text-color-primary: var(--text);
+  --el-text-color-regular: var(--muted);
+  --el-text-color-secondary: var(--muted);
+  --el-text-color-placeholder: var(--muted);
+  --el-color-primary: var(--accent);
+  --el-color-white: #1a1205;
+  --el-disabled-bg-color: var(--panel-hover, var(--panel));
+  --el-fill-color-blank: var(--bg-elevated, var(--panel));
+}
+
+.el-pagination .el-pager li {
+  color: var(--text);
+}
+
+.el-pagination.is-background .el-pager li.is-active {
+  background-color: var(--accent);
+  color: #1a1205;
+}
+
+.el-pagination__total,
+.el-pagination__jump {
+  color: var(--muted);
 }
 
 @media (max-width: 640px) {

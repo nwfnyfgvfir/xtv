@@ -95,6 +95,8 @@ export type MediaSort =
   | 'release_asc'
   | 'release_desc'
 
+export type ActorSort = 'media_count_desc' | 'debut_asc' | 'debut_desc'
+
 export interface Settings {
   metatube_base_url: string
   metatube_token_set: boolean

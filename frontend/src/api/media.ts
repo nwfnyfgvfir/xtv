@@ -86,8 +86,12 @@ export const listFavorites = (params?: { page?: number; page_size?: number; sort
 export const listFavoriteActors = (params?: { page?: number; page_size?: number }) =>
   client.get<PaginatedActors>('/favorites/actors', { params }).then((r) => r.data)
 
-export const listActors = (params?: { q?: string; page?: number; page_size?: number }) =>
-  client.get<PaginatedActors>('/actors', { params }).then((r) => r.data)
+export const listActors = (params?: {
+  q?: string
+  sort?: string
+  page?: number
+  page_size?: number
+}) => client.get<PaginatedActors>('/actors', { params }).then((r) => r.data)
 
 export const getActor = (id: number) => client.get<Actor>(`/actors/${id}`).then((r) => r.data)
 

@@ -291,8 +291,8 @@ onMounted(async () => {
 }
 .actor-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 16px;
 }
 .tip {
   margin-top: 24px;
@@ -318,13 +318,13 @@ onMounted(async () => {
     min-height: 40px;
   }
   .actor-grid {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 10px;
   }
 }
 @media (max-width: 380px) {
   .actor-grid {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 8px;
   }
 }

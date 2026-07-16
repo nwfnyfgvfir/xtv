@@ -21,19 +21,19 @@ withDefaults(
 
 <style scoped>
 .skeleton-grid.actor {
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
 }
 .skeleton-grid.actor .skeleton-poster {
   aspect-ratio: 1;
 }
 @media (max-width: 640px) {
   .skeleton-grid.actor {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(3, 1fr);
   }
 }
 @media (max-width: 380px) {
   .skeleton-grid.actor {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 8px;
   }
 }

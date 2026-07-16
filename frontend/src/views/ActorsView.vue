@@ -7,8 +7,9 @@ import AppPagination from '@/components/AppPagination.vue'
 import ActorCard from '@/components/ActorCard.vue'
 import SkeletonGrid from '@/components/SkeletonGrid.vue'
 import { listActors } from '@/api/media'
-import type { Actor } from '@/api/types'
+import type { Actor, ActorSort } from '@/api/types'
 import { usePagedRoute } from '@/composables/usePagedRoute'
+import { ACTOR_SORT_OPTIONS, loadActorSort, saveActorSort } from '@/utils/actorSort'
 import { getErrorMessage } from '@/utils/errors'
 import { DEFAULT_PAGE_SIZE, queryString } from '@/utils/pageQuery'
 
@@ -16,6 +17,7 @@ const { route, page, replaceQuery, goPage, syncPageFromRoute } = usePagedRoute()
 const items = ref<Actor[]>([])
 const total = ref(0)
 const q = ref(queryString(route.query, 'q'))
+const sort = ref<ActorSort>(loadActorSort())
 const loading = ref(false)
 const PAGE_SIZE = DEFAULT_PAGE_SIZE
 
@@ -24,6 +26,7 @@ async function load() {
   try {
     const data = await listActors({
       q: q.value || undefined,
+      sort: sort.value,
       page: page.value,
       page_size: PAGE_SIZE,
     })
@@ -37,6 +40,13 @@ async function load() {
 }
 
 function onSearch() {
+  replaceQuery({ q: q.value || undefined }, 1)
+  void load()
+}
+
+function onSortChange(v: ActorSort) {
+  sort.value = v
+  saveActorSort(v)
   replaceQuery({ q: q.value || undefined }, 1)
   void load()
 }
@@ -77,6 +87,19 @@ onMounted(() => {
     <h1 class="page-title">演员</h1>
     <div class="bar">
       <el-input v-model="q" placeholder="搜索演员" clearable @keyup.enter="onSearch" />
+      <el-select
+        class="sort-select"
+        :model-value="sort"
+        size="default"
+        @change="onSortChange"
+      >
+        <el-option
+          v-for="opt in ACTOR_SORT_OPTIONS"
+          :key="opt.value"
+          :label="opt.label"
+          :value="opt.value"
+        />
+      </el-select>
       <el-button type="primary" :loading="loading" @click="onSearch">搜索</el-button>
     </div>
     <SkeletonGrid v-if="loading && !items.length" variant="actor" :count="12" />
@@ -100,7 +123,7 @@ onMounted(() => {
 .bar {
   display: flex;
   gap: 10px;
-  max-width: 520px;
+  max-width: 640px;
   margin-bottom: 18px;
   flex-wrap: wrap;
   align-items: center;
@@ -109,10 +132,14 @@ onMounted(() => {
   flex: 1 1 180px;
   min-width: 0;
 }
+.sort-select {
+  width: 168px;
+  flex: 0 0 auto;
+}
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 16px;
 }
 @media (max-width: 640px) {
   .bar {
@@ -126,19 +153,24 @@ onMounted(() => {
     min-height: 40px;
     font-size: 16px;
   }
+  .sort-select {
+    flex: 1 1 calc(50% - 5px);
+    width: auto;
+    min-width: 0;
+  }
   .bar .el-button {
     flex: 1 1 auto;
     width: 100%;
     min-height: 40px;
   }
   .grid {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 10px;
   }
 }
 @media (max-width: 380px) {
   .grid {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 8px;
   }
 }

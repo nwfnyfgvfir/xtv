@@ -12,7 +12,7 @@ from app.models import Actor, ActorFavorite, MediaActor, MediaItem
 from app.schemas import ActorDetail, ActorListItem, MediaListItem, PaginatedActors, PaginatedMedia
 from app.services.images import rewrite_image_url
 from app.services.scrape import enrich_actor_image
-from app.services.sorting import media_order_by
+from app.services.sorting import actor_order_by, media_order_by
 
 router = APIRouter(prefix="/actors", tags=["actors"])
 
@@ -63,6 +63,7 @@ def _actor_detail(db: Session, actor: Actor, favorited: bool | None = None) -> A
 def list_actors(
     _: Annotated[dict, Depends(require_auth)],
     q: str | None = None,
+    sort: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(48, ge=1, le=200),
     db: Session = Depends(get_db),
@@ -72,14 +73,29 @@ def list_actors(
         .group_by(MediaActor.actor_id)
         .subquery()
     )
-    query = db.query(Actor, func.coalesce(count_sub.c.cnt, 0).label("media_count")).outerjoin(
-        count_sub, Actor.id == count_sub.c.actor_id
+    # Library first-work date as proxy for 出道日期.
+    debut_sub = (
+        db.query(
+            MediaActor.actor_id,
+            func.min(MediaItem.release_date).label("debut_date"),
+        )
+        .join(MediaItem, MediaItem.id == MediaActor.media_id)
+        .filter(MediaItem.release_date.isnot(None), MediaItem.release_date != "")
+        .group_by(MediaActor.actor_id)
+        .subquery()
+    )
+    media_count_col = func.coalesce(count_sub.c.cnt, 0)
+    debut_col = debut_sub.c.debut_date
+    query = (
+        db.query(Actor, media_count_col.label("media_count"))
+        .outerjoin(count_sub, Actor.id == count_sub.c.actor_id)
+        .outerjoin(debut_sub, Actor.id == debut_sub.c.actor_id)
     )
     if q:
         query = query.filter(Actor.name.ilike(f"%{q}%"))
     total = query.count()
     rows = (
-        query.order_by(func.coalesce(count_sub.c.cnt, 0).desc(), Actor.name.asc())
+        query.order_by(*actor_order_by(sort, media_count_col, debut_col))
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()
