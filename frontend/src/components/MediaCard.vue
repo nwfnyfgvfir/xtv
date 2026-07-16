@@ -15,7 +15,7 @@ const favLoading = ref(false)
 const favorited = ref(Boolean(props.item.favorited))
 
 const title = computed(() => props.item.title || props.item.number || props.item.filename)
-// Prefer portrait thumb for 2:3 cards; cover is often a landscape jacket.
+// Prefer portrait thumb for 3:4 cards; cover is often a landscape jacket.
 const cover = computed(() => props.item.thumb_url || props.item.cover_url || '')
 const showImage = computed(() => Boolean(cover.value) && !imgFailed.value)
 const isChineseSub = computed(() => props.item.subtitle_flag === 'C')
@@ -63,7 +63,7 @@ async function toggleFav(e: Event) {
         :src="cover"
         :alt="title"
         width="200"
-        height="300"
+        height="267"
         loading="lazy"
         decoding="async"
         @error="onImgError"
@@ -139,8 +139,8 @@ async function toggleFav(e: Event) {
 }
 .poster img {
   width: 100%;
-  aspect-ratio: 2 / 3;
-  object-fit: contain;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
   object-position: center center;
   display: block;
   background: var(--bg);

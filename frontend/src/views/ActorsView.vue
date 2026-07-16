@@ -132,13 +132,13 @@ onMounted(() => {
     min-height: 40px;
   }
   .grid {
-    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
     gap: 10px;
   }
 }
 @media (max-width: 380px) {
   .grid {
-    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
     gap: 8px;
   }
 }

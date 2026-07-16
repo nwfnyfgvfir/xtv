@@ -30,7 +30,7 @@ const caption = computed(() => props.number || props.title || '')
 <style scoped>
 .cover-placeholder {
   width: 100%;
-  aspect-ratio: 2 / 3;
+  aspect-ratio: 3 / 4;
   display: flex;
   flex-direction: column;
   align-items: center;

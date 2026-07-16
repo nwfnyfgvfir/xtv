@@ -2,7 +2,7 @@
 withDefaults(
   defineProps<{
     count?: number
-    /** media = 2:3 poster grid; actor = square portrait grid */
+    /** media = 3:4 poster grid; actor = square portrait grid */
     variant?: 'media' | 'actor'
   }>(),
   { count: 12, variant: 'media' },
@@ -28,12 +28,12 @@ withDefaults(
 }
 @media (max-width: 640px) {
   .skeleton-grid.actor {
-    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
   }
 }
 @media (max-width: 380px) {
   .skeleton-grid.actor {
-    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
   }
 }
 </style>

@@ -111,14 +111,14 @@ textarea {
   }
 
   .skeleton-grid {
-    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
     gap: 10px;
   }
 }
 
 @media (max-width: 380px) {
   .skeleton-grid {
-    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
     gap: 8px;
   }
 }
@@ -167,7 +167,7 @@ textarea {
   background: var(--panel);
 }
 .skeleton-poster {
-  aspect-ratio: 2 / 3;
+  aspect-ratio: 3 / 4;
   background: linear-gradient(90deg, var(--skeleton), var(--skeleton-shine), var(--skeleton));
   background-size: 200% 100%;
   animation: shimmer 1.2s ease-in-out infinite;

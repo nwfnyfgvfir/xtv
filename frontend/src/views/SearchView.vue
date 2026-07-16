@@ -318,8 +318,14 @@ onMounted(async () => {
     min-height: 40px;
   }
   .actor-grid {
-    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
     gap: 10px;
+  }
+}
+@media (max-width: 380px) {
+  .actor-grid {
+    grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+    gap: 8px;
   }
 }
 </style>
