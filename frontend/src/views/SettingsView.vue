@@ -433,6 +433,7 @@ onMounted(() => {
   padding: 8px 10px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-elevated);
+  color: var(--text);
 }
 .priority-list li:last-child {
   border-bottom: none;
@@ -457,11 +458,28 @@ onMounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
 }
 .pri-actions {
   display: inline-flex;
   gap: 0;
   flex-shrink: 0;
+}
+.pri-actions :deep(.el-button.is-text) {
+  color: var(--muted) !important;
+  min-width: 28px;
+  padding: 4px 6px;
+}
+.pri-actions :deep(.el-button.is-text:not(.is-disabled):hover) {
+  color: var(--accent) !important;
+}
+.pri-actions :deep(.el-button.is-text.is-disabled) {
+  color: var(--muted) !important;
+  opacity: 0.4;
+}
+.pri-actions :deep(.el-button.is-text.el-button--danger) {
+  color: var(--danger) !important;
 }
 code {
   color: var(--accent);
