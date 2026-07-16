@@ -125,26 +125,44 @@ async function toggleFav(e: Event) {
   background: var(--panel);
   border: 1px solid var(--border);
   box-shadow: var(--shadow-card);
+  /* GPU layer + clip: avoids 1px light fringe on rounded corners */
+  transform: translateZ(0);
+  backface-visibility: hidden;
   transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
 }
 .card:hover,
 .card:focus-visible {
-  transform: translateY(-3px);
+  transform: translateY(-3px) translateZ(0);
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
   outline: none;
 }
 .poster {
   position: relative;
-  background: var(--bg);
+  aspect-ratio: 3 / 4;
+  overflow: hidden;
+  background: var(--bg-elevated);
 }
 .poster img {
+  position: absolute;
+  inset: 0;
   width: 100%;
-  height: auto; /* override HTML height presentational hint so aspect-ratio works */
-  aspect-ratio: 3 / 4;
+  height: 100%;
   object-fit: cover;
   object-position: center center;
   display: block;
-  background: var(--bg);
+  /* Crop thin white margins common in scraped package art */
+  transform: scale(1.04);
+  transform-origin: center center;
+  background: var(--bg-elevated);
+}
+.poster :deep(.cover-placeholder) {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+  border: none;
+  border-radius: 0;
 }
 .fav {
   position: absolute;
