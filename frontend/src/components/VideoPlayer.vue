@@ -461,7 +461,7 @@ function create() {
           fontSize: '14px',
           cursor: 'pointer',
           userSelect: 'none',
-          WebkitUserSelect: 'none',
+          webkitUserSelect: 'none',
           touchAction: 'manipulation',
           pointerEvents: 'none',
         },

@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getHealth, getMovieProviders, getSettings, updateSettings } from '@/api/media'
 import type { Health, ImageProxyMode, Settings, TranslateProvider } from '@/api/types'
+import { getErrorMessage } from '@/utils/errors'
 
 const settings = ref<Settings | null>(null)
 const health = ref<Health | null>(null)
@@ -91,8 +92,8 @@ async function refreshProviders() {
     }
     settings.value = await getSettings()
     ElMessage.success(`已刷新：共 ${settings.value.movie_providers?.length || 0} 个源`)
-  } catch {
-    ElMessage.error('刷新源列表失败')
+  } catch (e: unknown) {
+    ElMessage.error(getErrorMessage(e, '刷新源列表失败'))
   } finally {
     providersRefreshing.value = false
   }
@@ -149,15 +150,15 @@ async function save() {
     applySettingsToForm(settings.value)
     health.value = await getHealth()
     ElMessage.success('已保存')
-  } catch {
-    ElMessage.error('保存失败')
+  } catch (e: unknown) {
+    ElMessage.error(getErrorMessage(e, '保存失败'))
   } finally {
     saving.value = false
   }
 }
 
 onMounted(() => {
-  void load().catch(() => ElMessage.error('无法读取设置'))
+  void load().catch((e: unknown) => ElMessage.error(getErrorMessage(e, '无法读取设置')))
 })
 </script>
 

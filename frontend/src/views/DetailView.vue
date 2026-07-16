@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import VideoPlayer from '@/components/VideoPlayer.vue'
@@ -13,6 +13,7 @@ import {
   unfavoriteMedia,
 } from '@/api/media'
 import type { MediaDetail, PlayInfo } from '@/api/types'
+import { getErrorMessage } from '@/utils/errors'
 import { monogramChar, monogramStyle } from '@/utils/monogram'
 
 const props = defineProps<{ id: string }>()
@@ -29,6 +30,7 @@ const providers = ref<string[]>([])
 const scrapeProvider = ref('')
 const scrapeFallback = ref(true)
 const scrapeNumber = ref('')
+const playerWrap = ref<HTMLElement | null>(null)
 
 const tags = computed(() => {
   if (!item.value?.tags_json) return [] as string[]
@@ -61,8 +63,8 @@ async function load() {
   try {
     item.value = await getMedia(Number(props.id))
     syncScrapeNumber()
-  } catch {
-    ElMessage.error('加载详情失败')
+  } catch (e: unknown) {
+    ElMessage.error(getErrorMessage(e, '加载详情失败'))
   } finally {
     loading.value = false
   }
@@ -92,9 +94,10 @@ async function onPlay() {
   try {
     play.value = await playMedia(Number(props.id))
     playing.value = true
+    await nextTick()
+    playerWrap.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   } catch (e: unknown) {
-    const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-    ElMessage.error(msg || '获取播放地址失败')
+    ElMessage.error(getErrorMessage(e, '获取播放地址失败'))
   } finally {
     playLoading.value = false
   }
@@ -118,8 +121,7 @@ async function onRescrape() {
     imgFailed.value = false
     ElMessage.success('刮削完成')
   } catch (e: unknown) {
-    const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-    ElMessage.error(msg || '刮削失败')
+    ElMessage.error(getErrorMessage(e, '刮削失败'))
   } finally {
     scrapeLoading.value = false
   }
@@ -132,8 +134,8 @@ async function onToggleFav() {
     item.value = item.value.favorited
       ? await unfavoriteMedia(item.value.id)
       : await favoriteMedia(item.value.id)
-  } catch {
-    ElMessage.error('收藏操作失败')
+  } catch (e: unknown) {
+    ElMessage.error(getErrorMessage(e, '收藏操作失败'))
   } finally {
     favLoading.value = false
   }
@@ -287,7 +289,7 @@ watch(() => props.id, load)
       </div>
     </div>
 
-    <div v-if="playing && play" class="player-wrap">
+    <div v-if="playing && play" ref="playerWrap" class="player-wrap">
       <VideoPlayer :media-id="Number(id)" :src="play.play_url" :autoplay="true" />
       <p class="muted">播放类型: {{ play.kind }}</p>
     </div>

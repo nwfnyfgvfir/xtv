@@ -52,6 +52,7 @@ def list_media(
     library_id: int | None = None,
     scraped: bool | None = None,
     favorited: bool | None = None,
+    subtitle_flag: str | None = Query(None, description="e.g. C for Chinese subtitle"),
     sort: str | None = Query(None, description="number_asc|number_desc|created_asc|created_desc|release_asc|release_desc"),
     page: int = Query(1, ge=1),
     page_size: int = Query(40, ge=1, le=200),
@@ -77,6 +78,8 @@ def list_media(
         query = query.join(Favorite, Favorite.media_id == MediaItem.id)
     elif favorited is False:
         query = query.outerjoin(Favorite, Favorite.media_id == MediaItem.id).filter(Favorite.id.is_(None))
+    if subtitle_flag:
+        query = query.filter(MediaItem.subtitle_flag == subtitle_flag)
 
     total = query.with_entities(func.count(MediaItem.id)).scalar() or 0
     items = (

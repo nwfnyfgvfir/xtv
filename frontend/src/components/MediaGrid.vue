@@ -13,11 +13,17 @@ withDefaults(
     emptyHint: '请先添加媒体库并扫描本地 / strm 目录',
   },
 )
+
+const emit = defineEmits<{ refreshed: [MediaListItem] }>()
+
+function onRefreshed(item: MediaListItem) {
+  emit('refreshed', item)
+}
 </script>
 
 <template>
   <div v-if="items.length" class="grid">
-    <MediaCard v-for="item in items" :key="item.id" :item="item" />
+    <MediaCard v-for="item in items" :key="item.id" :item="item" @refreshed="onRefreshed" />
   </div>
   <div v-else class="empty">
     <div class="empty-mark">TV</div>
@@ -59,6 +65,7 @@ withDefaults(
   color: var(--accent);
   opacity: 0.85;
   margin-bottom: 8px;
+  font-weight: 700;
 }
 .empty p {
   margin: 6px 0;

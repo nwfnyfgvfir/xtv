@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { setupAuthInterceptor, useAuth } from '@/composables/useAuth'
 import { useTheme } from '@/composables/useTheme'
@@ -7,8 +7,10 @@ import { useTheme } from '@/composables/useTheme'
 const route = useRoute()
 const router = useRouter()
 const { theme, toggle } = useTheme()
-const { authEnabled, isAuthenticated, logout, refreshStatus, ready } = useAuth()
+const { authEnabled, isAuthenticated, logout } = useAuth()
 const navigating = ref(false)
+
+const KEEP_ALIVE_NAMES = ['LibraryView', 'SearchView', 'ActorsView', 'FavoritesView']
 
 const active = computed(() => {
   if (route.path.startsWith('/settings')) return 'settings'
@@ -25,23 +27,14 @@ setupAuthInterceptor(() => {
   if (route.name !== 'login') router.push({ name: 'login', query: { redirect: route.fullPath } })
 })
 
-router.beforeEach((to, _from, next) => {
+router.beforeEach(() => {
   navigating.value = true
-  if (ready.value && authEnabled.value && !isAuthenticated.value && to.name !== 'login') {
-    next({ name: 'login', query: { redirect: to.fullPath } })
-    return
-  }
-  next()
 })
 
 router.afterEach(() => {
   setTimeout(() => {
     navigating.value = false
   }, 250)
-})
-
-onMounted(() => {
-  void refreshStatus()
 })
 
 function onLogout() {
@@ -62,12 +55,12 @@ function go(path: string) {
         <span class="brand-mark">TV</span>
         <span class="brand-sub">CINEMA</span>
       </div>
-      <nav class="nav desktop-nav">
-        <button :class="{ on: active === 'library' }" @click="go('/')">媒体库</button>
-        <button :class="{ on: active === 'actors' }" @click="go('/actors')">演员</button>
-        <button :class="{ on: active === 'favorites' }" @click="go('/favorites')">收藏</button>
-        <button :class="{ on: active === 'search' }" @click="go('/search')">搜索</button>
-        <button :class="{ on: active === 'settings' }" @click="go('/settings')">设置</button>
+      <nav class="nav desktop-nav" aria-label="主导航">
+        <button type="button" :class="{ on: active === 'library' }" :aria-current="active === 'library' ? 'page' : undefined" @click="go('/')">媒体库</button>
+        <button type="button" :class="{ on: active === 'actors' }" :aria-current="active === 'actors' ? 'page' : undefined" @click="go('/actors')">演员</button>
+        <button type="button" :class="{ on: active === 'favorites' }" :aria-current="active === 'favorites' ? 'page' : undefined" @click="go('/favorites')">收藏</button>
+        <button type="button" :class="{ on: active === 'search' }" :aria-current="active === 'search' ? 'page' : undefined" @click="go('/search')">搜索</button>
+        <button type="button" :class="{ on: active === 'settings' }" :aria-current="active === 'settings' ? 'page' : undefined" @click="go('/settings')">设置</button>
       </nav>
       <div class="tools">
         <button class="icon-btn" type="button" :title="theme === 'dark' ? '切换白天' : '切换暗色'" @click="toggle">
@@ -87,23 +80,27 @@ function go(path: string) {
       </div>
     </header>
     <main class="main">
-      <router-view />
+      <router-view v-slot="{ Component, route: r }">
+        <keep-alive :include="KEEP_ALIVE_NAMES">
+          <component :is="Component" :key="r.name" />
+        </keep-alive>
+      </router-view>
     </main>
     <nav v-if="showChrome" class="bottom-nav" aria-label="主导航">
-      <button :class="{ on: active === 'library' }" type="button" @click="go('/')">
-        <span class="ico">▣</span><span>库</span>
+      <button type="button" :class="{ on: active === 'library' }" :aria-current="active === 'library' ? 'page' : undefined" @click="go('/')">
+        <span class="ico" aria-hidden="true">▣</span><span>库</span>
       </button>
-      <button :class="{ on: active === 'actors' }" type="button" @click="go('/actors')">
-        <span class="ico">◎</span><span>演员</span>
+      <button type="button" :class="{ on: active === 'actors' }" :aria-current="active === 'actors' ? 'page' : undefined" @click="go('/actors')">
+        <span class="ico" aria-hidden="true">◎</span><span>演员</span>
       </button>
-      <button :class="{ on: active === 'favorites' }" type="button" @click="go('/favorites')">
-        <span class="ico">♥</span><span>收藏</span>
+      <button type="button" :class="{ on: active === 'favorites' }" :aria-current="active === 'favorites' ? 'page' : undefined" @click="go('/favorites')">
+        <span class="ico" aria-hidden="true">♥</span><span>收藏</span>
       </button>
-      <button :class="{ on: active === 'search' }" type="button" @click="go('/search')">
-        <span class="ico">⌕</span><span>搜索</span>
+      <button type="button" :class="{ on: active === 'search' }" :aria-current="active === 'search' ? 'page' : undefined" @click="go('/search')">
+        <span class="ico" aria-hidden="true">⌕</span><span>搜索</span>
       </button>
-      <button :class="{ on: active === 'settings' }" type="button" @click="go('/settings')">
-        <span class="ico">⚙</span><span>设置</span>
+      <button type="button" :class="{ on: active === 'settings' }" :aria-current="active === 'settings' ? 'page' : undefined" @click="go('/settings')">
+        <span class="ico" aria-hidden="true">⚙</span><span>设置</span>
       </button>
     </nav>
   </div>
@@ -152,6 +149,7 @@ function go(path: string) {
   color: var(--accent);
   text-shadow: 0 0 24px var(--accent-glow);
   line-height: 1;
+  font-weight: 700;
 }
 .brand-sub {
   font-size: 11px;

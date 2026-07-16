@@ -4,6 +4,7 @@ import { ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { favoriteActor, unfavoriteActor } from '@/api/media'
+import { getErrorMessage } from '@/utils/errors'
 import { monogramChar, monogramStyle } from '@/utils/monogram'
 
 const props = defineProps<{ actor: Actor }>()
@@ -43,8 +44,8 @@ async function toggleFav(e: Event) {
       : await favoriteActor(props.actor.id)
     favorited.value = Boolean(res.favorited)
     emit('refreshed', res)
-  } catch {
-    ElMessage.error('收藏操作失败')
+  } catch (e: unknown) {
+    ElMessage.error(getErrorMessage(e, '收藏操作失败'))
   } finally {
     favLoading.value = false
   }
@@ -58,7 +59,10 @@ async function toggleFav(e: Event) {
         v-if="actor.image_url && !imgFailed"
         :src="actor.image_url"
         :alt="actor.name"
+        width="200"
+        height="200"
         loading="lazy"
+        decoding="async"
         @error="onImgError"
       />
       <div v-else class="mono" :style="monogramStyle(actor.name)">

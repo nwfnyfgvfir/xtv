@@ -1,6 +1,7 @@
 <script setup lang="ts">
+defineOptions({ name: 'FavoritesView' })
+
 import { onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import AppPagination from '@/components/AppPagination.vue'
 import ActorCard from '@/components/ActorCard.vue'
@@ -8,38 +9,21 @@ import MediaGrid from '@/components/MediaGrid.vue'
 import SkeletonGrid from '@/components/SkeletonGrid.vue'
 import { listFavoriteActors, listFavorites } from '@/api/media'
 import type { Actor, MediaListItem, MediaSort } from '@/api/types'
+import { usePagedRoute } from '@/composables/usePagedRoute'
+import { getErrorMessage } from '@/utils/errors'
 import { loadMediaSort, MEDIA_SORT_OPTIONS, saveMediaSort } from '@/utils/mediaSort'
-import {
-  DEFAULT_PAGE_SIZE,
-  pageQueryPatch,
-  parsePage,
-  scrollListTop,
-} from '@/utils/pageQuery'
+import { DEFAULT_PAGE_SIZE, queryString } from '@/utils/pageQuery'
 
 type FavTab = 'media' | 'actors'
 
-const route = useRoute()
-const router = useRouter()
+const { route, page, replaceQuery, goPage, syncPageFromRoute } = usePagedRoute()
 const tab = ref<FavTab>(route.query.tab === 'actors' ? 'actors' : 'media')
 const mediaItems = ref<MediaListItem[]>([])
 const actorItems = ref<Actor[]>([])
 const total = ref(0)
-const page = ref(parsePage(route.query))
 const sort = ref<MediaSort>(loadMediaSort())
 const loading = ref(false)
 const PAGE_SIZE = DEFAULT_PAGE_SIZE
-
-function syncQuery(nextPage: number, nextTab: FavTab = tab.value) {
-  page.value = nextPage
-  tab.value = nextTab
-  router.replace({
-    query: {
-      ...route.query,
-      tab: nextTab === 'media' ? undefined : nextTab,
-      ...pageQueryPatch(nextPage),
-    },
-  })
-}
 
 async function load() {
   loading.value = true
@@ -62,8 +46,8 @@ async function load() {
       actorItems.value = []
       total.value = data.total
     }
-  } catch {
-    ElMessage.error('加载收藏失败')
+  } catch (e: unknown) {
+    ElMessage.error(getErrorMessage(e, '加载收藏失败'))
   } finally {
     loading.value = false
   }
@@ -71,22 +55,33 @@ async function load() {
 
 function onTabChange(next: FavTab) {
   if (next === tab.value) return
-  syncQuery(1, next)
+  tab.value = next
+  replaceQuery({ tab: next === 'media' ? undefined : next }, 1)
   void load()
 }
 
 function onSortChange(v: MediaSort) {
   sort.value = v
   saveMediaSort(v)
-  syncQuery(1)
+  replaceQuery({ tab: tab.value === 'media' ? undefined : tab.value }, 1)
   void load()
 }
 
 function onPageChange(p: number) {
-  if (p === page.value) return
-  syncQuery(p)
-  scrollListTop()
+  if (!goPage(p)) return
   void load()
+}
+
+function onMediaRefreshed(updated: MediaListItem) {
+  if (!updated.favorited) {
+    mediaItems.value = mediaItems.value.filter((i) => i.id !== updated.id)
+    total.value = Math.max(0, total.value - 1)
+    return
+  }
+  const idx = mediaItems.value.findIndex((i) => i.id === updated.id)
+  if (idx >= 0) {
+    mediaItems.value[idx] = { ...mediaItems.value[idx], ...updated }
+  }
 }
 
 function onActorRefreshed(updated: Actor) {
@@ -104,13 +99,8 @@ function onActorRefreshed(updated: Actor) {
 watch(
   () => [route.query.page, route.query.tab] as const,
   () => {
-    const p = parsePage(route.query)
     const nextTab: FavTab = route.query.tab === 'actors' ? 'actors' : 'media'
-    let changed = false
-    if (p !== page.value) {
-      page.value = p
-      changed = true
-    }
+    let changed = syncPageFromRoute()
     if (nextTab !== tab.value) {
       tab.value = nextTab
       changed = true
@@ -120,8 +110,7 @@ watch(
 )
 
 onMounted(() => {
-  page.value = parsePage(route.query)
-  tab.value = route.query.tab === 'actors' ? 'actors' : 'media'
+  tab.value = queryString(route.query, 'tab') === 'actors' ? 'actors' : 'media'
   void load()
 })
 </script>
@@ -181,10 +170,11 @@ onMounted(() => {
         :items="mediaItems"
         empty-title="暂无收藏"
         empty-hint="在片库卡片或详情页点心形即可收藏"
+        @refreshed="onMediaRefreshed"
       />
     </template>
     <template v-else>
-      <div v-if="loading && !actorItems.length" class="muted">加载中…</div>
+      <SkeletonGrid v-if="loading && !actorItems.length" variant="actor" :count="12" />
       <div v-else-if="actorItems.length" class="actor-grid">
         <ActorCard
           v-for="a in actorItems"
@@ -193,10 +183,7 @@ onMounted(() => {
           @refreshed="onActorRefreshed"
         />
       </div>
-      <el-empty
-        v-else
-        description="暂无收藏演员"
-      >
+      <el-empty v-else description="暂无收藏演员">
         <template #description>
           <p>暂无收藏演员</p>
           <p class="muted empty-hint">在演员列表或详情页点心形即可收藏</p>
@@ -216,6 +203,10 @@ onMounted(() => {
   gap: 12px;
   flex-wrap: wrap;
   margin-bottom: 8px;
+}
+.intro {
+  margin: 0;
+  font-size: 13px;
 }
 .tabs {
   display: inline-flex;

@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+defineOptions({ name: 'LibraryView' })
+
+import { computed, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import AppPagination from '@/components/AppPagination.vue'
 import MediaGrid from '@/components/MediaGrid.vue'
 import SkeletonGrid from '@/components/SkeletonGrid.vue'
@@ -16,31 +17,30 @@ import {
   updateLibrary,
 } from '@/api/media'
 import type { Library, MediaListItem, MediaSort, ScanJob } from '@/api/types'
+import { usePagedRoute } from '@/composables/usePagedRoute'
+import { getErrorMessage } from '@/utils/errors'
 import { loadMediaSort, MEDIA_SORT_OPTIONS, saveMediaSort } from '@/utils/mediaSort'
-import {
-  DEFAULT_PAGE_SIZE,
-  pageQueryPatch,
-  parsePage,
-  scrollListTop,
-} from '@/utils/pageQuery'
+import { DEFAULT_PAGE_SIZE, parsePage, queryString } from '@/utils/pageQuery'
 
-const route = useRoute()
-const router = useRouter()
+type MediaFilter = '' | 'unscraped' | 'chinese' | 'favorited'
+
+const { route, page, replaceQuery, goPage, syncPageFromRoute } = usePagedRoute()
 
 const items = ref<MediaListItem[]>([])
 const libraries = ref<Library[]>([])
 const total = ref(0)
-const page = ref(parsePage(route.query))
 const sort = ref<MediaSort>(loadMediaSort())
+const filter = ref<MediaFilter>(parseFilter(queryString(route.query, 'filter')))
 const PAGE_SIZE = DEFAULT_PAGE_SIZE
 const loading = ref(false)
 const scanningId = ref<number | null>(null)
 const scanProgress = ref<ScanJob | null>(null)
 const currentLibraryId = ref<number | null>(null)
-const SOFT_REFRESH_MS = 5000
+const SOFT_REFRESH_MS = 20000
 let softRefreshTimer: number | undefined
 /** Fingerprint of last known library content for soft-refresh. */
 let lastSoftFingerprint = ''
+let loadedOnce = false
 
 const showCreate = ref(false)
 const form = ref({
@@ -51,6 +51,11 @@ const form = ref({
   interval_value: 24,
   interval_unit: 'hours' as 'seconds' | 'minutes' | 'hours',
 })
+
+function parseFilter(raw: string): MediaFilter {
+  if (raw === 'unscraped' || raw === 'chinese' || raw === 'favorited') return raw
+  return ''
+}
 
 function toSeconds(value: number, unit: 'seconds' | 'minutes' | 'hours') {
   if (unit === 'seconds') return Math.max(30, value)
@@ -94,6 +99,19 @@ function libraryFingerprint(libs: Library[], libId: number | null, mediaTotal: n
   return `${libPart}#${libId ?? ''}:${mediaTotal}:${ids.join(',')}`
 }
 
+function mediaListParams() {
+  const params: Parameters<typeof listMedia>[0] = {
+    page: page.value,
+    page_size: PAGE_SIZE,
+    library_id: currentLibraryId.value ?? undefined,
+    sort: sort.value,
+  }
+  if (filter.value === 'unscraped') params.scraped = false
+  else if (filter.value === 'chinese') params.subtitle_flag = 'C'
+  else if (filter.value === 'favorited') params.favorited = true
+  return params
+}
+
 async function loadLibraries() {
   libraries.value = await listLibraries()
   const qLib = Number(route.query.library || 0) || null
@@ -121,18 +139,14 @@ async function loadMedia(opts?: { quiet?: boolean }) {
   const quiet = Boolean(opts?.quiet) && items.value.length > 0
   if (!quiet) loading.value = true
   try {
-    const data = await listMedia({
-      page: page.value,
-      page_size: PAGE_SIZE,
-      library_id: currentLibraryId.value,
-      sort: sort.value,
-    })
+    const data = await listMedia(mediaListParams())
     const nextIds = data.items.map((i) => i.id)
     const prevIds = items.value.map((i) => i.id)
     const changed =
       data.total !== total.value ||
       nextIds.length !== prevIds.length ||
-      nextIds.some((id, idx) => id !== prevIds[idx])
+      nextIds.some((id, idx) => id !== prevIds[idx]) ||
+      data.items.some((it, idx) => it.favorited !== items.value[idx]?.favorited)
     if (changed || !quiet) {
       items.value = data.items
       total.value = data.total
@@ -143,8 +157,8 @@ async function loadMedia(opts?: { quiet?: boolean }) {
       data.total,
       nextIds,
     )
-  } catch {
-    if (!quiet) ElMessage.error('加载媒体失败')
+  } catch (e: unknown) {
+    if (!quiet) ElMessage.error(getErrorMessage(e, '加载媒体失败'))
   } finally {
     if (!quiet) loading.value = false
   }
@@ -204,42 +218,54 @@ async function load() {
   try {
     await loadLibraries()
     await loadMedia()
-  } catch {
-    ElMessage.error('加载失败，请确认后端已启动并已登录')
+    loadedOnce = true
+  } catch (e: unknown) {
+    ElMessage.error(getErrorMessage(e, '加载失败，请确认后端已启动并已登录'))
   }
-}
-
-function syncPageQuery(nextPage: number, extra: Record<string, string | undefined> = {}) {
-  page.value = nextPage
-  router.replace({
-    query: {
-      ...route.query,
-      ...extra,
-      ...pageQueryPatch(nextPage),
-    },
-  })
 }
 
 function selectLibrary(id: number) {
   currentLibraryId.value = id
   const lib = libraries.value.find((l) => l.id === id) || null
   syncIntervalForm(lib)
-  syncPageQuery(1, { library: String(id) })
+  replaceQuery(
+    {
+      library: String(id),
+      filter: filter.value || undefined,
+    },
+    1,
+  )
   void loadMedia()
 }
 
 function onSortChange(v: MediaSort) {
   sort.value = v
   saveMediaSort(v)
-  syncPageQuery(1)
+  replaceQuery({ filter: filter.value || undefined }, 1)
+  void loadMedia()
+}
+
+function onFilterChange(next: MediaFilter) {
+  if (next === filter.value) return
+  filter.value = next
+  replaceQuery({ filter: next || undefined }, 1)
   void loadMedia()
 }
 
 function onPageChange(p: number) {
-  if (p === page.value) return
-  syncPageQuery(p)
-  scrollListTop()
+  if (!goPage(p)) return
   void loadMedia()
+}
+
+function onItemRefreshed(updated: MediaListItem) {
+  const idx = items.value.findIndex((i) => i.id === updated.id)
+  if (idx < 0) return
+  if (filter.value === 'favorited' && !updated.favorited) {
+    items.value = items.value.filter((i) => i.id !== updated.id)
+    total.value = Math.max(0, total.value - 1)
+    return
+  }
+  items.value[idx] = { ...items.value[idx], ...updated }
 }
 
 async function onCreate() {
@@ -259,8 +285,8 @@ async function onCreate() {
     ElMessage.success('媒体库已创建')
     await loadLibraries()
     selectLibrary(lib.id)
-  } catch {
-    ElMessage.error('创建失败')
+  } catch (e: unknown) {
+    ElMessage.error(getErrorMessage(e, '创建失败'))
   }
 }
 
@@ -275,8 +301,7 @@ async function onScan(lib: Library) {
     await loadLibraries()
     if (currentLibraryId.value === lib.id) await loadMedia()
   } catch (e: unknown) {
-    const msg = (e as { message?: string })?.message
-    ElMessage.error(msg || '扫描失败')
+    ElMessage.error(getErrorMessage(e, '扫描失败'))
   } finally {
     scanningId.value = null
     scanProgress.value = null
@@ -294,8 +319,7 @@ async function onRescrapePending(lib: Library) {
     await loadLibraries()
     if (currentLibraryId.value === lib.id) await loadMedia()
   } catch (e: unknown) {
-    const msg = (e as { message?: string })?.message
-    ElMessage.error(msg || '补刮失败')
+    ElMessage.error(getErrorMessage(e, '补刮失败'))
   } finally {
     scanningId.value = null
     scanProgress.value = null
@@ -318,9 +342,6 @@ async function pollJob(jobId: string, kind = '扫描') {
     } catch (e: unknown) {
       const status = (e as { response?: { status?: number } })?.response?.status
       if (status === 404) throw new Error(`${kind}任务丢失（服务可能已重启）`)
-      if (e instanceof Error && !e.message.includes(kind) && !String(e).includes('Network')) {
-        // continue on transient
-      }
       if (e instanceof Error && (e.message.includes(kind) || e.message.includes('任务'))) throw e
     }
     await new Promise((r) => setTimeout(r, 1000))
@@ -329,10 +350,28 @@ async function pollJob(jobId: string, kind = '扫描') {
 }
 
 async function onDelete(lib: Library) {
-  await deleteLibrary(lib.id)
-  ElMessage.success('已删除')
-  if (currentLibraryId.value === lib.id) currentLibraryId.value = null
-  await load()
+  try {
+    await ElMessageBox.confirm(
+      `确定删除媒体库「${lib.name}」？将移除该库的索引记录（不会删除磁盘上的媒体文件）。`,
+      '删除媒体库',
+      {
+        type: 'warning',
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        confirmButtonClass: 'el-button--danger',
+      },
+    )
+  } catch {
+    return
+  }
+  try {
+    await deleteLibrary(lib.id)
+    ElMessage.success('已删除')
+    if (currentLibraryId.value === lib.id) currentLibraryId.value = null
+    await load()
+  } catch (e: unknown) {
+    ElMessage.error(getErrorMessage(e, '删除失败'))
+  }
 }
 
 async function toggleAutoScan(lib: Library) {
@@ -351,8 +390,8 @@ async function toggleAutoScan(lib: Library) {
         ? '已开启定时全量扫描（目录实时监听始终开启）'
         : '已关闭定时全量扫描（目录实时监听仍开启）',
     )
-  } catch {
-    ElMessage.error('更新失败')
+  } catch (e: unknown) {
+    ElMessage.error(getErrorMessage(e, '更新失败'))
   }
 }
 
@@ -366,9 +405,16 @@ async function saveInterval(lib: Library) {
     })
     await loadLibraries()
     ElMessage.success(`定时间隔已设为 ${secs}s`)
-  } catch {
-    ElMessage.error('更新间隔失败')
+  } catch (e: unknown) {
+    ElMessage.error(getErrorMessage(e, '更新间隔失败'))
   }
+}
+
+function onMoreCommand(cmd: string) {
+  const lib = currentLibrary.value
+  if (!lib) return
+  if (cmd === 'toggle-auto') void toggleAutoScan(lib)
+  else if (cmd === 'delete') void onDelete(lib)
 }
 
 watch(
@@ -384,10 +430,17 @@ watch(
 
 watch(
   () => route.query.page,
+  () => {
+    if (syncPageFromRoute()) void loadMedia()
+  },
+)
+
+watch(
+  () => route.query.filter,
   (v) => {
-    const p = parsePage({ page: v })
-    if (p !== page.value) {
-      page.value = p
+    const next = parseFilter(typeof v === 'string' ? v : '')
+    if (next !== filter.value) {
+      filter.value = next
       void loadMedia()
     }
   },
@@ -395,9 +448,15 @@ watch(
 
 onMounted(() => {
   page.value = parsePage(route.query)
+  filter.value = parseFilter(queryString(route.query, 'filter'))
   void load()
   startSoftRefresh()
 })
+
+onActivated(() => {
+  if (loadedOnce) void softRefreshTick()
+})
+
 onBeforeUnmount(stopSoftRefresh)
 </script>
 
@@ -414,6 +473,7 @@ onBeforeUnmount(stopSoftRefresh)
       <button
         v-for="lib in libraries"
         :key="lib.id"
+        type="button"
         class="lib-tab"
         :class="{ on: lib.id === currentLibraryId }"
         @click="selectLibrary(lib.id)"
@@ -449,24 +509,6 @@ onBeforeUnmount(stopSoftRefresh)
             :value="opt.value"
           />
         </el-select>
-        <div v-if="currentLibrary.auto_scan_enabled" class="interval-inline">
-          <el-input-number
-            v-model="form.interval_value"
-            size="small"
-            :min="1"
-            :max="999999"
-            controls-position="right"
-          />
-          <el-select v-model="form.interval_unit" size="small" class="unit-select">
-            <el-option label="秒" value="seconds" />
-            <el-option label="分" value="minutes" />
-            <el-option label="时" value="hours" />
-          </el-select>
-          <el-button size="small" plain @click="saveInterval(currentLibrary)">应用间隔</el-button>
-        </div>
-        <el-button size="small" @click="toggleAutoScan(currentLibrary)">
-          {{ currentLibrary.auto_scan_enabled ? '关闭定时' : '开启定时' }}
-        </el-button>
         <el-button
           size="small"
           type="warning"
@@ -486,8 +528,71 @@ onBeforeUnmount(stopSoftRefresh)
         >
           刮削未刮削
         </el-button>
-        <el-button size="small" type="danger" plain @click="onDelete(currentLibrary)">删除</el-button>
+        <div class="actions-more desktop-more">
+          <div v-if="currentLibrary.auto_scan_enabled" class="interval-inline">
+            <el-input-number
+              v-model="form.interval_value"
+              size="small"
+              :min="1"
+              :max="999999"
+              controls-position="right"
+            />
+            <el-select v-model="form.interval_unit" size="small" class="unit-select">
+              <el-option label="秒" value="seconds" />
+              <el-option label="分" value="minutes" />
+              <el-option label="时" value="hours" />
+            </el-select>
+            <el-button size="small" plain @click="saveInterval(currentLibrary)">应用间隔</el-button>
+          </div>
+          <el-button size="small" @click="toggleAutoScan(currentLibrary)">
+            {{ currentLibrary.auto_scan_enabled ? '关闭定时' : '开启定时' }}
+          </el-button>
+          <el-button size="small" type="danger" plain @click="onDelete(currentLibrary)">删除</el-button>
+        </div>
+        <el-dropdown class="mobile-more" trigger="click" @command="onMoreCommand">
+          <el-button size="small">更多</el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="toggle-auto">
+                {{ currentLibrary.auto_scan_enabled ? '关闭定时' : '开启定时' }}
+              </el-dropdown-item>
+              <el-dropdown-item command="delete" divided>
+                <span class="danger-text">删除媒体库</span>
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </div>
+    </div>
+
+    <div v-if="currentLibrary" class="filter-chips" role="toolbar" aria-label="列表筛选">
+      <button type="button" class="chip" :class="{ on: filter === '' }" @click="onFilterChange('')">
+        全部
+      </button>
+      <button
+        type="button"
+        class="chip"
+        :class="{ on: filter === 'unscraped' }"
+        @click="onFilterChange('unscraped')"
+      >
+        未刮削
+      </button>
+      <button
+        type="button"
+        class="chip"
+        :class="{ on: filter === 'chinese' }"
+        @click="onFilterChange('chinese')"
+      >
+        中字
+      </button>
+      <button
+        type="button"
+        class="chip"
+        :class="{ on: filter === 'favorited' }"
+        @click="onFilterChange('favorited')"
+      >
+        已收藏
+      </button>
     </div>
 
     <div v-if="scanProgress && scanningId" class="scan-banner">
@@ -500,7 +605,7 @@ onBeforeUnmount(stopSoftRefresh)
     </div>
 
     <SkeletonGrid v-if="loading && !items.length" />
-    <MediaGrid v-else :items="items" />
+    <MediaGrid v-else :items="items" @refreshed="onItemRefreshed" />
 
     <AppPagination :total="total" :page="page" :page-size="PAGE_SIZE" @update:page="onPageChange" />
 
@@ -596,7 +701,7 @@ onBeforeUnmount(stopSoftRefresh)
   justify-content: space-between;
   gap: 12px;
   align-items: center;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
   padding: 10px 12px;
   background: var(--panel);
   border: 1px solid var(--border);
@@ -617,6 +722,15 @@ onBeforeUnmount(stopSoftRefresh)
   flex-wrap: wrap;
   align-items: center;
 }
+.actions-more {
+  display: inline-flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.mobile-more {
+  display: none;
+}
 .sort-select {
   width: 168px;
 }
@@ -628,6 +742,35 @@ onBeforeUnmount(stopSoftRefresh)
   gap: 6px;
   align-items: center;
   flex-wrap: wrap;
+}
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.chip {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  min-height: 34px;
+}
+.chip.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+.chip:hover:not(.on) {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.danger-text {
+  color: var(--danger);
 }
 .scan-banner {
   margin-bottom: 16px;
@@ -696,8 +839,11 @@ code {
     width: min(168px, 100%);
     flex: 1 1 140px;
   }
-  .interval-inline {
-    width: 100%;
+  .desktop-more {
+    display: none;
+  }
+  .mobile-more {
+    display: inline-flex;
   }
   .add-lib-btn {
     flex-shrink: 0;

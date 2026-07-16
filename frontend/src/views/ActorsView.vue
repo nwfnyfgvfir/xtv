@@ -1,37 +1,23 @@
 <script setup lang="ts">
+defineOptions({ name: 'ActorsView' })
+
 import { onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import AppPagination from '@/components/AppPagination.vue'
 import ActorCard from '@/components/ActorCard.vue'
+import SkeletonGrid from '@/components/SkeletonGrid.vue'
 import { listActors } from '@/api/media'
 import type { Actor } from '@/api/types'
-import {
-  DEFAULT_PAGE_SIZE,
-  pageQueryPatch,
-  parsePage,
-  scrollListTop,
-} from '@/utils/pageQuery'
+import { usePagedRoute } from '@/composables/usePagedRoute'
+import { getErrorMessage } from '@/utils/errors'
+import { DEFAULT_PAGE_SIZE, queryString } from '@/utils/pageQuery'
 
-const route = useRoute()
-const router = useRouter()
+const { route, page, replaceQuery, goPage, syncPageFromRoute } = usePagedRoute()
 const items = ref<Actor[]>([])
 const total = ref(0)
-const page = ref(parsePage(route.query))
-const q = ref(typeof route.query.q === 'string' ? route.query.q : '')
+const q = ref(queryString(route.query, 'q'))
 const loading = ref(false)
 const PAGE_SIZE = DEFAULT_PAGE_SIZE
-
-function syncQuery(nextPage: number, nextQ = q.value) {
-  page.value = nextPage
-  router.replace({
-    query: {
-      ...route.query,
-      q: nextQ || undefined,
-      ...pageQueryPatch(nextPage),
-    },
-  })
-}
 
 async function load() {
   loading.value = true
@@ -43,22 +29,20 @@ async function load() {
     })
     items.value = data.items
     total.value = data.total
-  } catch {
-    ElMessage.error('加载演员失败')
+  } catch (e: unknown) {
+    ElMessage.error(getErrorMessage(e, '加载演员失败'))
   } finally {
     loading.value = false
   }
 }
 
 function onSearch() {
-  syncQuery(1, q.value)
+  replaceQuery({ q: q.value || undefined }, 1)
   void load()
 }
 
 function onPageChange(p: number) {
-  if (p === page.value) return
-  syncQuery(p)
-  scrollListTop()
+  if (!goPage(p)) return
   void load()
 }
 
@@ -72,13 +56,8 @@ function onActorRefreshed(updated: Actor) {
 watch(
   () => [route.query.page, route.query.q] as const,
   () => {
-    const p = parsePage(route.query)
-    const nextQ = typeof route.query.q === 'string' ? route.query.q : ''
-    let changed = false
-    if (p !== page.value) {
-      page.value = p
-      changed = true
-    }
+    const nextQ = queryString(route.query, 'q')
+    let changed = syncPageFromRoute()
     if (nextQ !== q.value) {
       q.value = nextQ
       changed = true
@@ -88,8 +67,7 @@ watch(
 )
 
 onMounted(() => {
-  page.value = parsePage(route.query)
-  if (typeof route.query.q === 'string') q.value = route.query.q
+  q.value = queryString(route.query, 'q')
   void load()
 })
 </script>
@@ -101,7 +79,7 @@ onMounted(() => {
       <el-input v-model="q" placeholder="搜索演员" clearable @keyup.enter="onSearch" />
       <el-button type="primary" :loading="loading" @click="onSearch">搜索</el-button>
     </div>
-    <div v-if="loading && !items.length" class="muted">加载中…</div>
+    <SkeletonGrid v-if="loading && !items.length" variant="actor" :count="12" />
     <div v-else-if="items.length" class="grid">
       <ActorCard
         v-for="a in items"

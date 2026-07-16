@@ -6,6 +6,7 @@ const TOKEN_KEY = 'tv-token'
 const token = ref<string | null>(localStorage.getItem(TOKEN_KEY))
 const authEnabled = ref(false)
 const ready = ref(false)
+let statusPromise: Promise<void> | null = null
 
 export function useAuth() {
   const isAuthenticated = computed(() => {
@@ -64,6 +65,18 @@ export function useAuth() {
     setToken,
     authHeader,
   }
+}
+
+/** Single-flight auth bootstrap for router guards (avoids first-nav race). */
+export function ensureAuthReady(): Promise<void> {
+  const { ready, refreshStatus } = useAuth()
+  if (ready.value) return Promise.resolve()
+  if (!statusPromise) {
+    statusPromise = refreshStatus().finally(() => {
+      /* ready is set inside refreshStatus */
+    })
+  }
+  return statusPromise
 }
 
 // attach axios interceptor once

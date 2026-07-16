@@ -1,6 +1,7 @@
 <script setup lang="ts">
+defineOptions({ name: 'SearchView' })
+
 import { onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import AppPagination from '@/components/AppPagination.vue'
 import ActorCard from '@/components/ActorCard.vue'
@@ -8,44 +9,37 @@ import MediaGrid from '@/components/MediaGrid.vue'
 import SkeletonGrid from '@/components/SkeletonGrid.vue'
 import { listActors, listLibraries, listMedia } from '@/api/media'
 import type { Actor, Library, MediaListItem, MediaSort } from '@/api/types'
+import { usePagedRoute } from '@/composables/usePagedRoute'
+import { getErrorMessage } from '@/utils/errors'
 import { loadMediaSort, MEDIA_SORT_OPTIONS, saveMediaSort } from '@/utils/mediaSort'
-import {
-  DEFAULT_PAGE_SIZE,
-  pageQueryPatch,
-  parsePage,
-  scrollListTop,
-} from '@/utils/pageQuery'
+import { DEFAULT_PAGE_SIZE, queryString } from '@/utils/pageQuery'
 
 type SearchTab = 'media' | 'actors'
 
-const route = useRoute()
-const router = useRouter()
+const { route, page, replaceQuery, goPage, syncPageFromRoute } = usePagedRoute()
 
 const tab = ref<SearchTab>(route.query.tab === 'actors' ? 'actors' : 'media')
-const q = ref(typeof route.query.q === 'string' ? route.query.q : '')
+const q = ref(queryString(route.query, 'q'))
 const libraryId = ref<number | null>(Number(route.query.library || 0) || null)
 const libraries = ref<Library[]>([])
 const items = ref<MediaListItem[]>([])
 const actorItems = ref<Actor[]>([])
 const total = ref(0)
-const page = ref(parsePage(route.query))
 const sort = ref<MediaSort>(loadMediaSort())
 const loading = ref(false)
 const searched = ref(Boolean(route.query.q || route.query.library || route.query.tab))
 const PAGE_SIZE = DEFAULT_PAGE_SIZE
 
 function syncSearchQuery(nextPage: number, nextTab: SearchTab = tab.value) {
-  page.value = nextPage
   tab.value = nextTab
-  router.replace({
-    query: {
-      ...route.query,
+  replaceQuery(
+    {
       tab: nextTab === 'media' ? undefined : nextTab,
       q: q.value || undefined,
       library: nextTab === 'media' && libraryId.value ? String(libraryId.value) : undefined,
-      ...pageQueryPatch(nextPage),
     },
-  })
+    nextPage,
+  )
 }
 
 async function runSearch() {
@@ -73,8 +67,8 @@ async function runSearch() {
       actorItems.value = []
       total.value = data.total
     }
-  } catch {
-    ElMessage.error('搜索失败')
+  } catch (e: unknown) {
+    ElMessage.error(getErrorMessage(e, '搜索失败'))
   } finally {
     loading.value = false
   }
@@ -101,10 +95,13 @@ function onSortChange(v: MediaSort) {
 }
 
 function onPageChange(p: number) {
-  if (p === page.value) return
-  syncSearchQuery(p)
-  scrollListTop()
+  if (!goPage(p)) return
   void runSearch()
+}
+
+function onMediaRefreshed(updated: MediaListItem) {
+  const idx = items.value.findIndex((i) => i.id === updated.id)
+  if (idx >= 0) items.value[idx] = { ...items.value[idx], ...updated }
 }
 
 function onActorRefreshed(updated: Actor) {
@@ -117,15 +114,10 @@ function onActorRefreshed(updated: Actor) {
 watch(
   () => [route.query.page, route.query.q, route.query.library, route.query.tab] as const,
   () => {
-    const p = parsePage(route.query)
-    const nextQ = typeof route.query.q === 'string' ? route.query.q : ''
+    const nextQ = queryString(route.query, 'q')
     const nextLib = Number(route.query.library || 0) || null
     const nextTab: SearchTab = route.query.tab === 'actors' ? 'actors' : 'media'
-    let changed = false
-    if (p !== page.value) {
-      page.value = p
-      changed = true
-    }
+    let changed = syncPageFromRoute()
     if (nextQ !== q.value) {
       q.value = nextQ
       changed = true
@@ -151,8 +143,7 @@ onMounted(async () => {
   } catch {
     /* ignore */
   }
-  page.value = parsePage(route.query)
-  if (typeof route.query.q === 'string') q.value = route.query.q
+  q.value = queryString(route.query, 'q')
   libraryId.value = Number(route.query.library || 0) || null
   tab.value = route.query.tab === 'actors' ? 'actors' : 'media'
   if (q.value || libraryId.value || route.query.page || tab.value === 'actors') {
@@ -223,7 +214,7 @@ onMounted(async () => {
     <template v-if="tab === 'media'">
       <SkeletonGrid v-if="loading && !items.length" :count="8" />
       <template v-else-if="searched || items.length">
-        <MediaGrid :items="items" />
+        <MediaGrid :items="items" @refreshed="onMediaRefreshed" />
         <AppPagination
           :total="total"
           :page="page"
@@ -235,7 +226,7 @@ onMounted(async () => {
     </template>
 
     <template v-else>
-      <div v-if="loading && !actorItems.length" class="muted">加载中…</div>
+      <SkeletonGrid v-if="loading && !actorItems.length" variant="actor" :count="8" />
       <template v-else-if="searched || actorItems.length">
         <div v-if="actorItems.length" class="actor-grid">
           <ActorCard

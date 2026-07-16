@@ -1,7 +1,7 @@
 import type { LocationQuery, LocationQueryRaw } from 'vue-router'
 
-/** Default page size for media / actor lists. */
-export const DEFAULT_PAGE_SIZE = 48
+/** Default page size for media / actor lists (balance covers vs. requests). */
+export const DEFAULT_PAGE_SIZE = 36
 
 /** Parse 1-based page from route query; invalid / missing → 1. */
 export function parsePage(query: LocationQuery | LocationQueryRaw, key = 'page'): number {
@@ -19,6 +19,16 @@ export function parsePage(query: LocationQuery | LocationQueryRaw, key = 'page')
 export function pageQueryPatch(page: number, key = 'page'): LocationQueryRaw {
   if (!page || page <= 1) return { [key]: undefined }
   return { [key]: String(page) }
+}
+
+/** Read a single string query param (first value if array). */
+export function queryString(
+  query: LocationQuery | LocationQueryRaw,
+  key: string,
+): string {
+  const raw = query[key]
+  const v = Array.isArray(raw) ? raw[0] : raw
+  return typeof v === 'string' ? v : ''
 }
 
 export function scrollListTop() {

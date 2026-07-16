@@ -59,7 +59,9 @@ export const getScanJob = (jobId: string) =>
 export const listMedia = (params: {
   q?: string
   library_id?: number
+  scraped?: boolean
   favorited?: boolean
+  subtitle_flag?: string
   sort?: string
   page?: number
   page_size?: number

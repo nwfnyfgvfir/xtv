@@ -13,6 +13,7 @@ import {
   unfavoriteActor,
 } from '@/api/media'
 import type { Actor, MediaListItem, MediaSort } from '@/api/types'
+import { getErrorMessage } from '@/utils/errors'
 import { monogramChar, monogramStyle } from '@/utils/monogram'
 import { loadMediaSort, MEDIA_SORT_OPTIONS, saveMediaSort } from '@/utils/mediaSort'
 import {
@@ -58,8 +59,8 @@ async function load() {
     })
     items.value = data.items
     total.value = data.total
-  } catch {
-    ElMessage.error('加载演员详情失败')
+  } catch (e: unknown) {
+    ElMessage.error(getErrorMessage(e, '加载演员详情失败'))
   } finally {
     loading.value = false
   }
@@ -87,8 +88,7 @@ async function onRescrapeImage() {
     imgFailed.value = false
     ElMessage.success('头像已更新')
   } catch (e: unknown) {
-    const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-    ElMessage.error(msg || '头像刮削失败')
+    ElMessage.error(getErrorMessage(e, '头像刮削失败'))
   } finally {
     imgLoading.value = false
   }
@@ -101,8 +101,8 @@ async function onToggleFav() {
     actor.value = actor.value.favorited
       ? await unfavoriteActor(actor.value.id)
       : await favoriteActor(actor.value.id)
-  } catch {
-    ElMessage.error('收藏操作失败')
+  } catch (e: unknown) {
+    ElMessage.error(getErrorMessage(e, '收藏操作失败'))
   } finally {
     favLoading.value = false
   }

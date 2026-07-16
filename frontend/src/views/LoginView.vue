@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useAuth } from '@/composables/useAuth'
+import { getErrorMessage } from '@/utils/errors'
 
 const password = ref('')
 const loading = ref(false)
@@ -17,8 +18,8 @@ async function onSubmit() {
     ElMessage.success('登录成功')
     const redirect = (route.query.redirect as string) || '/'
     await router.replace(redirect)
-  } catch {
-    ElMessage.error('密码错误或登录失败')
+  } catch (e: unknown) {
+    ElMessage.error(getErrorMessage(e, '密码错误或登录失败'))
   } finally {
     loading.value = false
   }

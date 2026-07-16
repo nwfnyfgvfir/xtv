@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import CoverPlaceholder from './CoverPlaceholder.vue'
 import { favoriteMedia, unfavoriteMedia } from '@/api/media'
+import { getErrorMessage } from '@/utils/errors'
 
 const props = defineProps<{ item: MediaListItem }>()
 const emit = defineEmits<{ refreshed: [MediaListItem] }>()
@@ -46,8 +47,8 @@ async function toggleFav(e: Event) {
       : await favoriteMedia(props.item.id)
     favorited.value = Boolean(res.favorited)
     emit('refreshed', res)
-  } catch {
-    ElMessage.error('收藏操作失败')
+  } catch (e: unknown) {
+    ElMessage.error(getErrorMessage(e, '收藏操作失败'))
   } finally {
     favLoading.value = false
   }
@@ -57,7 +58,16 @@ async function toggleFav(e: Event) {
 <template>
   <article class="card" @click="open" role="button" tabindex="0" @keyup.enter="open">
     <div class="poster">
-      <img v-if="showImage" :src="cover" :alt="title" loading="lazy" @error="onImgError" />
+      <img
+        v-if="showImage"
+        :src="cover"
+        :alt="title"
+        width="200"
+        height="300"
+        loading="lazy"
+        decoding="async"
+        @error="onImgError"
+      />
       <CoverPlaceholder
         v-else
         :number="item.number"
