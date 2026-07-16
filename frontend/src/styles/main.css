@@ -238,36 +238,78 @@ textarea {
   color: var(--text) !important;
 }
 
+/*
+  Element Plus defines its own --el-pagination-* vars on .el-pagination after our
+  bridge stylesheet, so variables alone are unreliable. Force colors with direct
+  properties (+ !important where EP hard-codes fill colors).
+*/
 .el-pagination {
-  --el-pagination-bg-color: transparent;
-  --el-pagination-button-bg-color: var(--panel);
-  --el-pagination-button-color: var(--text);
-  --el-pagination-text-color: var(--text);
-  --el-pagination-hover-color: var(--accent);
-  --el-pagination-button-disabled-color: var(--muted);
-  --el-pagination-button-disabled-bg-color: var(--panel);
-  --el-text-color-primary: var(--text);
-  --el-text-color-regular: var(--muted);
-  --el-text-color-secondary: var(--muted);
-  --el-text-color-placeholder: var(--muted);
-  --el-color-primary: var(--accent);
-  --el-color-white: #1a1205;
-  --el-disabled-bg-color: var(--panel-hover, var(--panel));
-  --el-fill-color-blank: var(--bg-elevated, var(--panel));
-}
-
-.el-pagination .el-pager li {
+  --el-pagination-bg-color: transparent !important;
+  --el-pagination-button-bg-color: var(--panel) !important;
+  --el-pagination-button-color: var(--text) !important;
+  --el-pagination-text-color: var(--text) !important;
+  --el-pagination-hover-color: var(--accent) !important;
+  --el-pagination-button-disabled-color: var(--muted) !important;
+  --el-pagination-button-disabled-bg-color: var(--panel) !important;
+  --el-text-color-primary: var(--text) !important;
+  --el-text-color-regular: var(--muted) !important;
+  --el-text-color-secondary: var(--muted) !important;
+  --el-text-color-placeholder: var(--muted) !important;
+  --el-color-primary: var(--accent) !important;
+  --el-color-white: #1a1205 !important;
+  --el-disabled-bg-color: var(--panel-hover) !important;
+  --el-fill-color: var(--panel) !important;
+  --el-fill-color-blank: var(--bg-elevated) !important;
+  --el-fill-color-dark: var(--panel-hover) !important;
   color: var(--text);
 }
 
+.el-pagination .btn-prev,
+.el-pagination .btn-next,
+.el-pagination .el-pager li {
+  background-color: var(--panel) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.el-pagination .btn-prev:hover:not(:disabled):not(.is-disabled),
+.el-pagination .btn-next:hover:not(:disabled):not(.is-disabled),
+.el-pagination .el-pager li:hover:not(.is-active):not(.is-disabled) {
+  color: var(--accent) !important;
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+
+.el-pagination .btn-prev:disabled,
+.el-pagination .btn-prev.is-disabled,
+.el-pagination .btn-next:disabled,
+.el-pagination .btn-next.is-disabled,
+.el-pagination .el-pager li.is-disabled {
+  color: var(--muted) !important;
+  background-color: var(--panel) !important;
+  border-color: var(--border);
+  opacity: 0.65;
+}
+
 .el-pagination.is-background .el-pager li.is-active {
-  background-color: var(--accent);
-  color: #1a1205;
+  background-color: var(--accent) !important;
+  color: #1a1205 !important;
+  border-color: var(--accent);
+  font-weight: 700;
 }
 
 .el-pagination__total,
 .el-pagination__jump {
-  color: var(--muted);
+  color: var(--muted) !important;
+}
+
+.el-pagination__editor.el-input .el-input__wrapper {
+  background-color: var(--panel) !important;
+  box-shadow: 0 0 0 1px var(--border) inset !important;
+}
+
+.el-pagination__editor.el-input .el-input__inner {
+  color: var(--text) !important;
 }
 
 @media (max-width: 640px) {
