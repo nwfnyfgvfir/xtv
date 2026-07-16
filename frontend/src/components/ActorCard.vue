@@ -128,7 +128,14 @@ async function toggleFav(e: Event) {
 .portrait {
   position: relative;
 }
-.portrait img,
+.portrait img {
+  width: 100%;
+  height: auto; /* override HTML height presentational hint so aspect-ratio works */
+  aspect-ratio: 1;
+  object-fit: cover;
+  display: block;
+  background: var(--bg-elevated);
+}
 .mono {
   width: 100%;
   aspect-ratio: 1;

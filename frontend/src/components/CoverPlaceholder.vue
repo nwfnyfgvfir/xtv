@@ -83,10 +83,4 @@ const caption = computed(() => props.number || props.title || '')
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Card (sm) only — keep detail (lg) portrait on mobile */
-@media (max-width: 640px) {
-  .cover-placeholder.sm {
-    aspect-ratio: 1;
-  }
-}
 </style>

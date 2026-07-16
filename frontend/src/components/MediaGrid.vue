@@ -40,13 +40,13 @@ function onRefreshed(item: MediaListItem) {
 }
 @media (max-width: 640px) {
   .grid {
-    grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+    grid-template-columns: repeat(3, 1fr);
     gap: 10px;
   }
 }
 @media (max-width: 380px) {
   .grid {
-    grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+    grid-template-columns: repeat(3, 1fr);
     gap: 8px;
   }
 }

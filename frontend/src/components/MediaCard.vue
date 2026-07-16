@@ -139,6 +139,7 @@ async function toggleFav(e: Event) {
 }
 .poster img {
   width: 100%;
+  height: auto; /* override HTML height presentational hint so aspect-ratio works */
   aspect-ratio: 3 / 4;
   object-fit: cover;
   object-position: center center;
@@ -263,12 +264,6 @@ async function toggleFav(e: Event) {
   letter-spacing: 0.04em;
 }
 @media (max-width: 640px) {
-  .poster img {
-    aspect-ratio: 1;
-  }
-  :deep(.cover-placeholder) {
-    aspect-ratio: 1;
-  }
   .fav {
     width: 34px;
     height: 34px;
