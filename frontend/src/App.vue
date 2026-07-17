@@ -51,9 +51,9 @@ function go(path: string) {
   <div class="layout" :class="{ 'has-bottom': showChrome }">
     <div class="route-progress" :class="{ on: navigating }"><div class="bar" /></div>
     <header v-if="showChrome" class="topbar">
-      <div class="brand" @click="go('/')">
+      <div class="brand" @click="go('/')" title="TV影院">
         <span class="brand-mark">TV</span>
-        <span class="brand-sub">CINEMA</span>
+        <span class="brand-sub">影院</span>
       </div>
       <nav class="nav desktop-nav" aria-label="主导航">
         <button type="button" :class="{ on: active === 'library' }" :aria-current="active === 'library' ? 'page' : undefined" @click="go('/')">媒体库</button>
@@ -152,8 +152,8 @@ function go(path: string) {
   font-weight: 700;
 }
 .brand-sub {
-  font-size: 11px;
-  letter-spacing: 0.28em;
+  font-size: 14px;
+  letter-spacing: 0.12em;
   color: var(--muted);
   font-weight: 600;
 }
@@ -208,8 +208,7 @@ function go(path: string) {
 }
 @media (max-width: 860px) {
   .desktop-nav,
-  .desktop-only,
-  .brand-sub {
+  .desktop-only {
     display: none !important;
   }
   .topbar {
@@ -218,7 +217,11 @@ function go(path: string) {
     gap: 10px;
   }
   .brand-mark {
-    font-size: 24px;
+    font-size: 22px;
+  }
+  .brand-sub {
+    font-size: 13px;
+    letter-spacing: 0.08em;
   }
   .bottom-nav {
     display: grid;

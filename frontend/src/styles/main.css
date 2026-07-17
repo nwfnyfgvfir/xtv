@@ -490,13 +490,25 @@ textarea {
 }
 
 .el-tag {
-  --el-tag-bg-color: var(--panel-hover) !important;
-  --el-tag-border-color: var(--border) !important;
+  --el-tag-bg-color: color-mix(in srgb, var(--panel-hover) 88%, var(--accent-soft)) !important;
+  --el-tag-border-color: color-mix(in srgb, var(--border) 78%, var(--accent) 22%) !important;
   --el-tag-text-color: var(--text) !important;
   --el-tag-hover-color: var(--accent) !important;
-  background-color: var(--panel-hover) !important;
-  border-color: var(--border) !important;
+  background-color: color-mix(in srgb, var(--panel-hover) 88%, var(--accent-soft)) !important;
+  border-color: color-mix(in srgb, var(--border) 78%, var(--accent) 22%) !important;
   color: var(--text) !important;
+  border-radius: 999px !important;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.el-tag--dark {
+  --el-tag-bg-color: var(--accent-soft) !important;
+  --el-tag-border-color: color-mix(in srgb, var(--accent) 40%, var(--border)) !important;
+  --el-tag-text-color: var(--accent) !important;
+  background-color: var(--accent-soft) !important;
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border)) !important;
+  color: var(--accent) !important;
 }
 
 .el-tag .el-tag__close {
@@ -509,7 +521,8 @@ textarea {
 }
 
 .el-select__selection .el-tag {
-  background-color: var(--panel-hover) !important;
-  border-color: var(--border) !important;
+  background-color: color-mix(in srgb, var(--panel-hover) 88%, var(--accent-soft)) !important;
+  border-color: color-mix(in srgb, var(--border) 78%, var(--accent) 22%) !important;
   color: var(--text) !important;
+  border-radius: 999px !important;
 }

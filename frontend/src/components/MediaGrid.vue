@@ -26,7 +26,7 @@ function onRefreshed(item: MediaListItem) {
     <MediaCard v-for="item in items" :key="item.id" :item="item" @refreshed="onRefreshed" />
   </div>
   <div v-else class="empty">
-    <div class="empty-mark">TV</div>
+    <div class="empty-mark">TV影院</div>
     <p>{{ emptyTitle }}</p>
     <p class="muted">{{ emptyHint }}</p>
   </div>
@@ -60,8 +60,8 @@ function onRefreshed(item: MediaListItem) {
 }
 .empty-mark {
   font-family: var(--font-display);
-  font-size: 42px;
-  letter-spacing: 0.2em;
+  font-size: 32px;
+  letter-spacing: 0.08em;
   color: var(--accent);
   opacity: 0.85;
   margin-bottom: 8px;

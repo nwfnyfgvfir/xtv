@@ -263,8 +263,14 @@ watch(() => props.id, load)
             重新刮削
           </el-button>
         </div>
-        <div v-if="tags.length" class="tags">
-          <el-tag v-for="t in tags" :key="t" size="small" effect="dark" class="tag">{{ t }}</el-tag>
+        <div v-if="tags.length" class="tags" role="list" aria-label="标签">
+          <span
+            v-for="t in tags"
+            :key="t"
+            class="tag"
+            :class="{ accent: t === '中文字幕' || t === '中字' }"
+            role="listitem"
+          >{{ t }}</span>
         </div>
         <p v-if="item.plot" class="plot">{{ item.plot }}</p>
         <div v-if="item.actors?.length" class="actors">
@@ -490,8 +496,45 @@ h1 {
 .tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 14px;
+  gap: 8px;
+  margin: 2px 0 16px;
+}
+.tag {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  line-height: 1.35;
+  color: color-mix(in srgb, var(--text) 92%, var(--muted));
+  background: color-mix(in srgb, var(--panel-hover) 88%, var(--accent-soft));
+  border: 1px solid color-mix(in srgb, var(--border) 78%, var(--accent) 22%);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--accent) 8%, transparent);
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tag:hover {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent);
+  transform: translateY(-1px);
+}
+.tag.accent {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  font-weight: 600;
 }
 .plot {
   white-space: pre-wrap;
