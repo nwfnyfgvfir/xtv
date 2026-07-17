@@ -4,6 +4,7 @@ defineOptions({ name: 'LibraryView' })
 import { computed, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import AppPagination from '@/components/AppPagination.vue'
+import DirectoryPickerDialog from '@/components/DirectoryPickerDialog.vue'
 import MediaGrid from '@/components/MediaGrid.vue'
 import SkeletonGrid from '@/components/SkeletonGrid.vue'
 import {
@@ -43,6 +44,7 @@ let lastSoftFingerprint = ''
 let loadedOnce = false
 
 const showCreate = ref(false)
+const showPathPicker = ref(false)
 const form = ref({
   name: '番号',
   path: 'local',
@@ -51,6 +53,10 @@ const form = ref({
   interval_value: 24,
   interval_unit: 'hours' as 'seconds' | 'minutes' | 'hours',
 })
+
+function onPathPicked(path: string) {
+  form.value.path = path
+}
 
 function parseFilter(raw: string): MediaFilter {
   if (raw === 'unscraped' || raw === 'chinese' || raw === 'favorited') return raw
@@ -615,7 +621,11 @@ onBeforeUnmount(stopSoftRefresh)
           <el-input v-model="form.name" />
         </el-form-item>
         <el-form-item label="路径">
-          <el-input v-model="form.path" placeholder="local 或 strm" />
+          <div class="path-row">
+            <el-input v-model="form.path" placeholder="local 或 strm" clearable />
+            <el-button @click="showPathPicker = true">浏览</el-button>
+          </div>
+          <div class="muted tip">相对 MEDIA_ROOT 的路径可点浏览选择；绝对路径请手填</div>
         </el-form-item>
         <el-form-item label="类型">
           <el-select v-model="form.type" style="width: 100%">
@@ -646,6 +656,12 @@ onBeforeUnmount(stopSoftRefresh)
         <el-button type="primary" @click="onCreate">创建</el-button>
       </template>
     </el-dialog>
+
+    <DirectoryPickerDialog
+      v-model="showPathPicker"
+      :initial-path="form.path"
+      @select="onPathPicked"
+    />
   </div>
 </template>
 
@@ -821,6 +837,16 @@ code {
   gap: 8px;
   align-items: center;
   width: 100%;
+}
+.path-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+}
+.path-row .el-input {
+  flex: 1;
+  min-width: 0;
 }
 .tip {
   margin-top: 6px;

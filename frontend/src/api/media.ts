@@ -2,6 +2,7 @@ import client from './client'
 import type {
   Actor,
   AuthStatus,
+  BrowseDirsOut,
   Health,
   Library,
   LoginResult,
@@ -22,6 +23,10 @@ export const login = (password: string) =>
   client.post<LoginResult>('/auth/login', { password }).then((r) => r.data)
 
 export const listLibraries = () => client.get<Library[]>('/libraries').then((r) => r.data)
+
+/** List subdirectories under MEDIA_ROOT for the library path picker. */
+export const browseLibraryDirs = (path = '') =>
+  client.get<BrowseDirsOut>('/libraries/browse', { params: { path } }).then((r) => r.data)
 
 export const createLibrary = (body: {
   name: string

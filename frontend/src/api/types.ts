@@ -13,6 +13,18 @@ export interface Library {
   created_at: string
 }
 
+/** Subdirectory entry under MEDIA_ROOT (library path picker). */
+export interface BrowseDirEntry {
+  name: string
+  path: string
+}
+
+export interface BrowseDirsOut {
+  path: string
+  parent: string | null
+  directories: BrowseDirEntry[]
+}
+
 export interface MediaListItem {
   id: number
   library_id: number

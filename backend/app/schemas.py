@@ -43,6 +43,17 @@ class LibraryOut(BaseModel):
     created_at: datetime
 
 
+class BrowseDirEntry(BaseModel):
+    name: str
+    path: str  # relative to MEDIA_ROOT, posix
+
+
+class BrowseDirsOut(BaseModel):
+    path: str
+    parent: str | None = None
+    directories: list[BrowseDirEntry]
+
+
 class ActorOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

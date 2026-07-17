@@ -9,8 +9,9 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.deps import require_auth
 from app.models import Library, MediaItem
-from app.schemas import LibraryCreate, LibraryOut, LibraryUpdate, ScanJobOut
+from app.schemas import BrowseDirEntry, BrowseDirsOut, LibraryCreate, LibraryOut, LibraryUpdate, ScanJobOut
 from app.services.actors import delete_orphan_actors
+from app.services.fs_browse import BrowseError, list_subdirectories
 from app.services.jobs import job_store
 from app.services.library_revision import get_revision
 from app.services.scanner import run_rescrape_pending_job, run_scan_job
@@ -25,6 +26,23 @@ def _library_out(db: Session, lib: Library) -> LibraryOut:
     data.media_count = int(count)
     data.content_revision = get_revision(lib.id)
     return data
+
+
+@router.get("/browse", response_model=BrowseDirsOut)
+def browse_directories(
+    _: Annotated[dict, Depends(require_auth)],
+    path: str = "",
+) -> BrowseDirsOut:
+    """List subdirectories under MEDIA_ROOT for the library path picker."""
+    try:
+        result = list_subdirectories(path)
+    except BrowseError as e:
+        raise HTTPException(e.status_code, e.message) from e
+    return BrowseDirsOut(
+        path=result.path,
+        parent=result.parent,
+        directories=[BrowseDirEntry(name=d.name, path=d.path) for d in result.directories],
+    )
 
 
 @router.get("", response_model=list[LibraryOut])
