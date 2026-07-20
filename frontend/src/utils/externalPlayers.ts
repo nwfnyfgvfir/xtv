@@ -259,16 +259,47 @@ export function filterPlayers(showAll: boolean): ExternalPlayer[] {
   return EXTERNAL_PLAYERS.filter((p) => p.platforms.includes(platform))
 }
 
+/**
+ * Chrome Android requires intent://host/path#Intent;scheme=http;... form.
+ * OpenList-style intent:http://host/path#Intent;... is often ignored after async clicks.
+ */
+export function normalizeAndroidIntent(href: string): string {
+  const m = href.match(/^intent:(https?):\/\/([^#]+)(#Intent;[\s\S]*)$/i)
+  if (!m) return href
+  const httpScheme = m[1].toLowerCase()
+  const hostAndPath = m[2]
+  let intentPart = m[3]
+  if (!/;\s*scheme=/i.test(intentPart) && !intentPart.includes('scheme=')) {
+    intentPart = intentPart.replace(/#Intent;/, `#Intent;scheme=${httpScheme};`)
+  }
+  if (!/;\s*type=/i.test(intentPart) && !intentPart.includes('type=')) {
+    intentPart = intentPart.replace(/#Intent;/, '#Intent;type=video/*;')
+  }
+  return `intent://${hostAndPath}${intentPart}`
+}
+
 export function buildPlayerHref(
   player: ExternalPlayer,
   absUrl: string,
   name: string,
 ): string {
-  return convertURL(player.scheme, {
+  const raw = convertURL(player.scheme, {
     d_url: absUrl,
     raw_url: absUrl,
     name: name || 'video',
   })
+  if (raw.startsWith('intent:')) {
+    return normalizeAndroidIntent(raw)
+  }
+  return raw
+}
+
+/** True when browser enforces user-gesture for custom schemes (mobile). */
+export function isMobileBrowser(): boolean {
+  if (typeof navigator === 'undefined') return false
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+    navigator.userAgent,
+  )
 }
 
 export function playerIconSrc(icon: string): string {
