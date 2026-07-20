@@ -149,12 +149,16 @@ export function convertURL(scheme: string, args: ConvertURLArgs): string {
   return ans
 }
 
-/** Base origin for local /api/stream URLs (Vite proxy is not usable by external apps). */
+/**
+ * Base origin for local /api/stream URLs.
+ * External apps cannot use the Vite :5173 proxy — point at backend :8000.
+ * Prefer current hostname (LAN IP) over hard-coded 127.0.0.1 so intranet clients work.
+ */
 export function streamBaseOrigin(): string {
   if (typeof window === 'undefined') return ''
-  const { origin, port } = window.location
-  if (import.meta.env.DEV && (port === '5173' || origin.includes(':5173'))) {
-    return 'http://127.0.0.1:8000'
+  const { origin, port, protocol, hostname } = window.location
+  if (import.meta.env.DEV && (port === '5173' || port === '5174')) {
+    return `${protocol}//${hostname}:8000`
   }
   return origin
 }
@@ -163,9 +167,89 @@ export function toAbsolutePlayUrl(play: PlayInfo): string {
   const url = (play.play_url || '').trim()
   if (!url) throw new Error('empty play_url')
   if (play.kind === 'local' || url.startsWith('/')) {
-    return new URL(url, streamBaseOrigin() || window.location.origin).href
+    const base = streamBaseOrigin() || window.location.origin
+    // Ensure single leading slash path join via URL
+    return new URL(url.startsWith('/') ? url : `/${url}`, base.endsWith('/') ? base : `${base}/`)
+      .href
   }
   return url
+}
+
+/**
+ * Launch a custom-protocol URL (potplayer://, vlc://, …).
+ *
+ * Chromium often rewrites nested URLs when assigning to location/href on an <a>
+ * (potplayer://http://host → potplayer://http//host, dropping the colon). Keep the
+ * raw scheme string out of the HTML parser by using an iframe + location.assign.
+ */
+export function launchScheme(href: string): void {
+  if (!href) throw new Error('empty scheme href')
+
+  // 1) Hidden iframe — does not parse href as a nested URL attribute as aggressively
+  try {
+    const iframe = document.createElement('iframe')
+    iframe.style.cssText = 'display:none;width:0;height:0;border:0;position:absolute'
+    iframe.setAttribute('aria-hidden', 'true')
+    document.body.appendChild(iframe)
+    const idoc = iframe.contentWindow
+    if (idoc) {
+      idoc.location.href = href
+    } else {
+      iframe.src = href
+    }
+    window.setTimeout(() => iframe.remove(), 3000)
+  } catch {
+    /* fall through */
+  }
+
+  // 2) Temporary anchor with the scheme written via setAttribute (string, not URL API)
+  try {
+    const a = document.createElement('a')
+    a.setAttribute('href', href)
+    a.rel = 'noopener noreferrer'
+    a.style.display = 'none'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Copy text that works on plain HTTP intranet (Clipboard API needs secure context).
+ */
+export async function copyText(text: string): Promise<void> {
+  if (!text) throw new Error('empty text')
+
+  const canUseClipboardApi =
+    typeof window !== 'undefined' &&
+    window.isSecureContext &&
+    typeof navigator !== 'undefined' &&
+    !!navigator.clipboard &&
+    typeof navigator.clipboard.writeText === 'function'
+
+  if (canUseClipboardApi) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+
+  // Fallback: execCommand('copy') works on HTTP LAN pages
+  const ta = document.createElement('textarea')
+  ta.value = text
+  ta.setAttribute('readonly', '')
+  ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0'
+  document.body.appendChild(ta)
+  ta.focus()
+  ta.select()
+  ta.setSelectionRange(0, ta.value.length)
+  let ok = false
+  try {
+    ok = document.execCommand('copy')
+  } finally {
+    ta.remove()
+  }
+  if (!ok) throw new Error('clipboard unavailable')
 }
 
 export function filterPlayers(showAll: boolean): ExternalPlayer[] {

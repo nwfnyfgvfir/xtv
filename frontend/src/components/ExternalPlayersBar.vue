@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { playMedia } from '@/api/media'
 import type { PlayInfo } from '@/api/types'
 import { getErrorMessage } from '@/utils/errors'
 import {
   type ExternalPlayer,
   buildPlayerHref,
+  copyText,
   filterPlayers,
+  launchScheme,
   loadShowAllPlayers,
   playerIconSrc,
   saveShowAllPlayers,
@@ -66,12 +68,26 @@ async function onLaunch(player: ExternalPlayer) {
   try {
     const abs = await resolveAbsUrl()
     const href = buildPlayerHref(player, abs, props.name || 'video')
-    window.location.href = href
-    ElMessage.info(`正在打开 ${player.name}…若未响应请确认已安装并注册协议`)
+    launchScheme(href)
+    ElMessage.info(
+      `正在打开 ${player.name}…若未响应请确认已安装；也可「复制链接」后手动打开`,
+    )
   } catch (e: unknown) {
     ElMessage.error(getErrorMessage(e, '打开外部播放器失败'))
   } finally {
     busy.value = false
+  }
+}
+
+async function showUrlFallback(abs: string, title = '播放链接') {
+  try {
+    await ElMessageBox.alert(abs, title, {
+      confirmButtonText: '关闭',
+      closeOnClickModal: true,
+      dangerouslyUseHTMLString: false,
+    })
+  } catch {
+    /* dismissed */
   }
 }
 
@@ -80,10 +96,15 @@ async function onCopy() {
   busy.value = true
   try {
     const abs = await resolveAbsUrl()
-    await navigator.clipboard.writeText(abs)
-    ElMessage.success('播放链接已复制')
+    try {
+      await copyText(abs)
+      ElMessage.success('播放链接已复制')
+    } catch {
+      ElMessage.warning('当前环境无法自动复制，请手动选择下方链接')
+      await showUrlFallback(abs)
+    }
   } catch (e: unknown) {
-    ElMessage.error(getErrorMessage(e, '复制播放链接失败'))
+    ElMessage.error(getErrorMessage(e, '获取播放链接失败'))
   } finally {
     busy.value = false
   }
