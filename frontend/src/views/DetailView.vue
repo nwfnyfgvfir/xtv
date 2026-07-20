@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import VideoPlayer from '@/components/VideoPlayer.vue'
 import CoverPlaceholder from '@/components/CoverPlaceholder.vue'
+import ExternalPlayersBar from '@/components/ExternalPlayersBar.vue'
 import {
   favoriteMedia,
   getMedia,
@@ -232,6 +233,12 @@ watch(() => props.id, load)
             <span>{{ item.favorited ? '已收藏' : '收藏' }}</span>
           </button>
         </div>
+        <ExternalPlayersBar
+          :media-id="item.id"
+          :name="item.filename || item.number || item.title || 'video'"
+          :play="play"
+          @play-resolved="play = $event"
+        />
         <div class="scrape-row">
           <el-input
             v-model="scrapeNumber"
