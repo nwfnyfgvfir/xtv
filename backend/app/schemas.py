@@ -128,10 +128,19 @@ class PaginatedActors(BaseModel):
     page_size: int
 
 
+class SubtitleTrack(BaseModel):
+    name: str
+    url: str
+    type: Literal["srt", "vtt", "ass"]
+    filename: str
+    default: bool = False
+
+
 class PlayInfo(BaseModel):
     play_url: str
     kind: Literal["local", "direct", "alist"]
     headers: dict[str, str] | None = None
+    subtitles: list[SubtitleTrack] = []
 
 
 class ProgressIn(BaseModel):

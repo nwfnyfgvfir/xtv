@@ -14,11 +14,23 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.deps import require_auth
 from app.models import MediaItem, PlaybackProgress
-from app.schemas import PlayInfo, ProgressIn, ProgressOut
+from app.schemas import PlayInfo, ProgressIn, ProgressOut, SubtitleTrack
 from app.services.alist import AlistClient, AlistError
 from app.services.scanner import resolve_library_path
+from app.services.subtitles import build_subtitle_tracks, mime_for_subtitle, resolve_sidecar_file
 
 router = APIRouter()
+
+
+def _local_subtitles(item: MediaItem) -> list[SubtitleTrack]:
+    """Discover sidecar tracks when the media file is present; never fail play_info."""
+    try:
+        path = Path(item.path)
+        if not path.is_file():
+            return []
+        return [SubtitleTrack.model_validate(t) for t in build_subtitle_tracks(item.id, path)]
+    except Exception:  # noqa: BLE001
+        return []
 
 
 def _ensure_path_in_library(item: MediaItem, db: Session) -> Path:
@@ -57,7 +69,11 @@ async def play_info(
 
     is_strm = (item.filename or "").lower().endswith(".strm") or bool(item.strm_target)
     if not is_strm and item.source_type == "local":
-        return PlayInfo(play_url=f"/api/stream/{item.id}", kind="local")
+        return PlayInfo(
+            play_url=f"/api/stream/{item.id}",
+            kind="local",
+            subtitles=_local_subtitles(item),
+        )
 
     target = (item.strm_target or "").strip()
     if not target and is_strm:
@@ -68,16 +84,20 @@ async def play_info(
     if not target:
         # fallback to local stream if file is a real video
         if not is_strm:
-            return PlayInfo(play_url=f"/api/stream/{item.id}", kind="local")
+            return PlayInfo(
+                play_url=f"/api/stream/{item.id}",
+                kind="local",
+                subtitles=_local_subtitles(item),
+            )
         raise HTTPException(404, "empty strm target")
 
     if target.lower().startswith("http://") or target.lower().startswith("https://"):
-        return PlayInfo(play_url=target, kind="direct")
+        return PlayInfo(play_url=target, kind="direct", subtitles=[])
 
     try:
         client = AlistClient()
         raw = await client.raw_url(target)
-        return PlayInfo(play_url=raw, kind="alist")
+        return PlayInfo(play_url=raw, kind="alist", subtitles=[])
     except AlistError as exc:
         raise HTTPException(502, f"Alist resolve failed: {exc}") from exc
 
@@ -127,6 +147,33 @@ async def stream_media(media_id: int, request: Request, db: Session = Depends(ge
         "Content-Length": str(length),
     }
     return StreamingResponse(iterfile(), status_code=206, media_type=content_type, headers=headers)
+
+
+@router.get("/stream/{media_id}/subtitle")
+async def stream_subtitle(
+    media_id: int,
+    file: str = Query(..., min_length=1, max_length=512),
+    db: Session = Depends(get_db),
+):
+    """Serve a same-directory sidecar subtitle (no auth — Artplayer fetches without JWT)."""
+    item = db.get(MediaItem, media_id)
+    if not item:
+        raise HTTPException(404, "media not found")
+    if (item.filename or "").lower().endswith(".strm"):
+        raise HTTPException(400, "subtitles not available for strm")
+
+    media_path = _ensure_path_in_library(item, db)
+    try:
+        sub_path = resolve_sidecar_file(media_path, file)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    return FileResponse(
+        sub_path,
+        media_type=mime_for_subtitle(sub_path),
+        filename=sub_path.name,
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
 
 
 @router.get("/media/{media_id}/progress", response_model=ProgressOut)

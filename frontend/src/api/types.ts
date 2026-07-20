@@ -82,10 +82,19 @@ export interface PaginatedActors {
   page_size: number
 }
 
+export interface SubtitleTrack {
+  name: string
+  url: string
+  type: 'srt' | 'vtt' | 'ass'
+  filename: string
+  default?: boolean
+}
+
 export interface PlayInfo {
   play_url: string
   kind: 'local' | 'direct' | 'alist'
   headers?: Record<string, string> | null
+  subtitles?: SubtitleTrack[]
 }
 
 export interface Progress {

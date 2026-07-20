@@ -303,7 +303,12 @@ watch(() => props.id, load)
     </div>
 
     <div v-if="playing && play" ref="playerWrap" class="player-wrap">
-      <VideoPlayer :media-id="Number(id)" :src="play.play_url" :autoplay="true" />
+      <VideoPlayer
+        :media-id="Number(id)"
+        :src="play.play_url"
+        :subtitles="play.subtitles || []"
+        :autoplay="true"
+      />
       <p class="muted">播放类型: {{ play.kind }}</p>
     </div>
   </div>

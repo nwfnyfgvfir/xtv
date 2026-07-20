@@ -2,8 +2,17 @@
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Artplayer from 'artplayer'
 import { getProgress, putProgress } from '@/api/media'
+import type { SubtitleTrack } from '@/api/types'
 
-const props = defineProps<{ mediaId: number; src: string; autoplay?: boolean }>()
+const props = withDefaults(
+  defineProps<{
+    mediaId: number
+    src: string
+    autoplay?: boolean
+    subtitles?: SubtitleTrack[]
+  }>(),
+  { subtitles: () => [] },
+)
 const containerRef = ref<HTMLDivElement | null>(null)
 let player: Artplayer | null = null
 let timer: number | undefined
@@ -368,6 +377,53 @@ function create() {
   Artplayer.DBCLICK_FULLSCREEN = false
   Artplayer.CONTROL_HIDE_TIME = CONTROL_HIDE_MS
 
+  const tracks = (props.subtitles || []).filter((t) => t?.url)
+  const defaultTrack = tracks.find((t) => t.default) || tracks[0]
+  const subtitleSettings =
+    tracks.length > 0
+      ? [
+          {
+            html: '字幕',
+            width: 220,
+            tooltip: defaultTrack?.name || '字幕',
+            selector: [
+              {
+                html: '关闭',
+                url: '',
+                default: false,
+              },
+              ...tracks.map((t) => ({
+                html: t.name || t.filename || '字幕',
+                url: t.url,
+                type: t.type,
+                default: t === defaultTrack,
+              })),
+            ],
+            onSelect(item: { html: string; url?: string; type?: string }) {
+              if (!player) return item.html
+              if (!item.url) {
+                try {
+                  player.subtitle.show = false
+                } catch {
+                  /* ignore */
+                }
+                return item.html
+              }
+              void player.subtitle.switch(item.url, {
+                type: (item.type as 'srt' | 'vtt' | 'ass' | undefined) || undefined,
+                name: item.html,
+              })
+              try {
+                player.subtitle.show = true
+              } catch {
+                /* ignore */
+              }
+              return item.html
+            },
+          },
+        ]
+      : []
+
   player = new Artplayer({
     container: containerRef.value,
     url: props.src,
@@ -391,6 +447,23 @@ function create() {
     // covers its side button. Unified custom lock works on phone + desktop.
     lock: false,
     lang: 'zh-cn',
+    subtitleOffset: tracks.length > 0,
+    ...(defaultTrack
+      ? {
+          subtitle: {
+            url: defaultTrack.url,
+            type: defaultTrack.type,
+            name: defaultTrack.name,
+            encoding: 'utf-8',
+            escape: true,
+            style: {
+              color: '#fff',
+              fontSize: '18px',
+            },
+          },
+        }
+      : {}),
+    ...(subtitleSettings.length ? { settings: subtitleSettings } : {}),
     controls: [
       {
         name: 'screen-lock',
@@ -541,7 +614,11 @@ onMounted(create)
 onBeforeUnmount(destroy)
 
 watch(
-  () => props.src,
+  () =>
+    [
+      props.src,
+      (props.subtitles || []).map((t) => `${t.url}|${t.type}|${t.default ? 1 : 0}`).join(';'),
+    ] as const,
   () => create(),
 )
 </script>
