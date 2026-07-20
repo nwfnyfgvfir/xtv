@@ -48,6 +48,24 @@ def test_discover_and_default_c(tmp_path: Path) -> None:
     assert defaults == ["FOO-001-C.srt"]
     assert is_chinese_subtitle_name("FOO-001-C.srt")
     assert subtitle_display_name("FOO-001", Path("FOO-001-C.srt")) == "中文"
+    assert subtitle_display_name("FOO-001", Path("FOO-001.srt")) == "默认"
+
+
+def test_both_default_and_c_switchable(tmp_path: Path) -> None:
+    """FOO-001.srt + FOO-001-C.srt both listed; user can pick either (C is default)."""
+    media = tmp_path / "FOO-001.mp4"
+    media.write_bytes(b"x")
+    (tmp_path / "FOO-001.srt").write_text("base", encoding="utf-8")
+    (tmp_path / "FOO-001-C.srt").write_text("cn", encoding="utf-8")
+
+    tracks = build_subtitle_tracks(7, media)
+    assert len(tracks) == 2
+    by_file = {t["filename"]: t for t in tracks}
+    assert by_file["FOO-001-C.srt"]["default"] is True
+    assert by_file["FOO-001-C.srt"]["name"] == "中文"
+    assert by_file["FOO-001.srt"]["default"] is False
+    assert by_file["FOO-001.srt"]["name"] == "默认"
+    assert all(t["url"].startswith("/api/stream/7/subtitle?file=") for t in tracks)
 
 
 def test_resolve_safe(tmp_path: Path) -> None:

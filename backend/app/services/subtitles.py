@@ -94,7 +94,7 @@ def is_chinese_subtitle_name(filename: str) -> bool:
 
 
 def subtitle_display_name(media_stem: str, path: Path) -> str:
-    """Human label for UI: 中文 / 字幕 / raw middle token."""
+    """Human label for UI: 中文 / 默认 / raw middle token (distinct for multi-track switch)."""
     t = path.stem
     s = media_stem
     middle = ""
@@ -109,8 +109,9 @@ def subtitle_display_name(media_stem: str, path: Path) -> str:
     else:
         middle = t
 
+    # Same basename as video: FOO-001.srt → 默认 (vs FOO-001-C.srt → 中文)
     if not middle:
-        return "字幕"
+        return "默认"
     if is_chinese_subtitle_name(path.name) or is_chinese_subtitle_name(f"x-{middle}.srt"):
         # Single C marker
         if re.fullmatch(r"(?i)C", middle) or re.fullmatch(r"(?i)C(?:[.\-_].*)?", middle):

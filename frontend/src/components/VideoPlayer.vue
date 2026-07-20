@@ -385,7 +385,7 @@ function create() {
           {
             html: '字幕',
             width: 220,
-            tooltip: defaultTrack?.name || '字幕',
+            tooltip: defaultTrack?.filename || defaultTrack?.name || '字幕',
             selector: [
               {
                 html: '关闭',
@@ -393,10 +393,11 @@ function create() {
                 default: false,
               },
               ...tracks.map((t) => ({
-                html: t.name || t.filename || '字幕',
+                // Show real sidecar filename so user can pick FOO-001-C.srt vs FOO-001.srt
+                html: t.filename || t.name || '字幕',
                 url: t.url,
                 type: t.type,
-                default: t === defaultTrack,
+                default: Boolean(t.default) || t === defaultTrack,
               })),
             ],
             onSelect(item: { html: string; url?: string; type?: string }) {
@@ -453,7 +454,7 @@ function create() {
           subtitle: {
             url: defaultTrack.url,
             type: defaultTrack.type,
-            name: defaultTrack.name,
+            name: defaultTrack.filename || defaultTrack.name,
             encoding: 'utf-8',
             escape: true,
             style: {
