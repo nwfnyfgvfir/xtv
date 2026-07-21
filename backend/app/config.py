@@ -23,8 +23,6 @@ class Settings(BaseSettings):
     metatube_provider: str = ""  # empty = auto
     metatube_provider_priority: str = ""  # JSON array string e.g. '["JavBus","FANZA"]'
     metatube_fallback: bool = True
-    alist_base_url: str = "http://127.0.0.1:5244"
-    alist_token: str = ""
     cors_origins: str = "http://127.0.0.1:5173,http://localhost:5173"
     host: str = "0.0.0.0"
     port: int = 8000

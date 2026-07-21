@@ -92,7 +92,7 @@ export interface SubtitleTrack {
 
 export interface PlayInfo {
   play_url: string
-  kind: 'local' | 'direct' | 'alist'
+  kind: 'local' | 'direct'
   headers?: Record<string, string> | null
   subtitles?: SubtitleTrack[]
 }
@@ -124,8 +124,6 @@ export interface Settings {
   metatube_provider?: string
   metatube_provider_priority?: string[]
   metatube_fallback?: boolean
-  alist_base_url: string
-  alist_token_set: boolean
   media_root: string
   auto_scrape: boolean
   auto_translate?: boolean

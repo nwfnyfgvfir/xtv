@@ -14,7 +14,7 @@ from app.services.jobs import ScanJob, job_store
 from app.services.library_revision import bump_revision
 from app.services.naming import extract_number
 from app.services.scrape import scrape_media_item
-from app.services.strm import classify_strm_target, read_strm_target
+from app.services.strm import read_strm_target
 
 logger = logging.getLogger(__name__)
 
@@ -364,7 +364,7 @@ def _ingest_file(db: Session, lib: Library, path: Path, job: ScanJob, auto_scrap
     strm_target = None
     if path.suffix.lower() == ".strm":
         strm_target = read_strm_target(path)
-        source_type = classify_strm_target(strm_target) if strm_target else "strm"
+        source_type = "strm"
 
     if existing is None:
         item = MediaItem(

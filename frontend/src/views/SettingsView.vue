@@ -13,8 +13,6 @@ const form = ref({
   metatube_provider: '',
   metatube_provider_priority: [] as string[],
   metatube_fallback: true,
-  alist_base_url: '',
-  alist_token: '',
   auto_scrape: true,
   auto_translate: true,
   translate_provider: 'google' as TranslateProvider,
@@ -52,7 +50,6 @@ function normalizeProvider(mode: string | undefined): TranslateProvider {
 
 function applySettingsToForm(s: Settings) {
   form.value.metatube_base_url = s.metatube_base_url
-  form.value.alist_base_url = s.alist_base_url
   form.value.auto_scrape = s.auto_scrape
   form.value.auto_translate = s.auto_translate !== false
   form.value.translate_provider = normalizeProvider(s.translate_provider)
@@ -64,7 +61,6 @@ function applySettingsToForm(s: Settings) {
   form.value.metatube_provider_priority = [...(s.metatube_provider_priority || [])]
   form.value.metatube_fallback = s.metatube_fallback !== false
   form.value.metatube_token = ''
-  form.value.alist_token = ''
   priorityPick.value = [...form.value.metatube_provider_priority]
 }
 
@@ -132,7 +128,6 @@ async function save() {
   try {
     const body: Record<string, unknown> = {
       metatube_base_url: form.value.metatube_base_url,
-      alist_base_url: form.value.alist_base_url,
       auto_scrape: form.value.auto_scrape,
       auto_translate: form.value.auto_translate,
       translate_provider: form.value.translate_provider,
@@ -145,7 +140,6 @@ async function save() {
       metatube_fallback: form.value.metatube_fallback,
     }
     if (form.value.metatube_token) body.metatube_token = form.value.metatube_token
-    if (form.value.alist_token) body.alist_token = form.value.alist_token
     settings.value = await updateSettings(body)
     applySettingsToForm(settings.value)
     health.value = await getHealth()
@@ -177,8 +171,7 @@ onMounted(() => {
       <p v-else class="err">未连接：{{ health?.metatube?.error || '未知' }}</p>
       <p class="muted line">MEDIA_ROOT: {{ settings?.media_root }}</p>
       <p class="muted line">
-        Token：MetaTube {{ settings?.metatube_token_set ? '已配置' : '未配置' }} · Alist
-        {{ settings?.alist_token_set ? '已配置' : '未配置' }}
+        Token：MetaTube {{ settings?.metatube_token_set ? '已配置' : '未配置' }}
       </p>
       <p class="muted line">
         鉴权：{{ settings?.auth_enabled ? '已启用 (ADMIN_PASSWORD)' : '关闭（开发模式）' }}
@@ -296,17 +289,6 @@ onMounted(() => {
         <el-form-item label="失败时 fallback">
           <el-switch v-model="form.metatube_fallback" />
           <span class="field-hint muted">优先级全部未命中后是否再搜索其余源</span>
-        </el-form-item>
-        <el-form-item label="Alist URL">
-          <el-input v-model="form.alist_base_url" />
-        </el-form-item>
-        <el-form-item label="Alist Token">
-          <el-input
-            v-model="form.alist_token"
-            type="password"
-            show-password
-            placeholder="留空则不修改"
-          />
         </el-form-item>
         <el-form-item label="自动刮削">
           <el-switch v-model="form.auto_scrape" />

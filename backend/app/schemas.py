@@ -138,7 +138,7 @@ class SubtitleTrack(BaseModel):
 
 class PlayInfo(BaseModel):
     play_url: str
-    kind: Literal["local", "direct", "alist"]
+    kind: Literal["local", "direct"]
     headers: dict[str, str] | None = None
     subtitles: list[SubtitleTrack] = []
 
@@ -163,8 +163,6 @@ class SettingsOut(BaseModel):
     metatube_provider: str = ""
     metatube_provider_priority: list[str] = []
     metatube_fallback: bool = True
-    alist_base_url: str
-    alist_token_set: bool
     media_root: str
     auto_scrape: bool
     auto_translate: bool = True
@@ -187,8 +185,6 @@ class SettingsUpdate(BaseModel):
     metatube_provider: str | None = None
     metatube_provider_priority: list[str] | None = None
     metatube_fallback: bool | None = None
-    alist_base_url: str | None = None
-    alist_token: str | None = None
     auto_scrape: bool | None = None
     auto_translate: bool | None = None
     translate_provider: Literal["google", "bing"] | None = None

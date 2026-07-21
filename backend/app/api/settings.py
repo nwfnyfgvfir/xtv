@@ -27,8 +27,6 @@ OVERRIDE_KEYS = {
     "metatube_provider",
     "metatube_provider_priority",
     "metatube_fallback",
-    "alist_base_url",
-    "alist_token",
     "auto_scrape",
     "auto_translate",
     "translate_provider",
@@ -95,10 +93,6 @@ def _apply_overrides_to_runtime(db_map: dict[str, str]) -> None:
         s.metatube_provider_priority = db_map["metatube_provider_priority"] or ""
     if "metatube_fallback" in db_map:
         s.metatube_fallback = db_map["metatube_fallback"].lower() in _BOOL_TRUE
-    if "alist_base_url" in db_map and db_map["alist_base_url"]:
-        s.alist_base_url = db_map["alist_base_url"]
-    if "alist_token" in db_map:
-        s.alist_token = db_map["alist_token"]
     if "auto_scrape" in db_map:
         s.auto_scrape = db_map["auto_scrape"].lower() in _BOOL_TRUE
     if "auto_translate" in db_map:
@@ -173,7 +167,6 @@ async def get_app_settings(
     _apply_overrides_to_runtime(db_map)
     s = get_settings()
     token = db_map.get("metatube_token", s.metatube_token)
-    alist_token = db_map.get("alist_token", s.alist_token)
     extra = {
         k: v
         for k, v in db_map.items()
@@ -212,8 +205,6 @@ async def get_app_settings(
         metatube_provider=provider or "",
         metatube_provider_priority=priority,
         metatube_fallback=fallback,
-        alist_base_url=db_map.get("alist_base_url") or s.alist_base_url,
-        alist_token_set=bool(alist_token),
         media_root=str(s.media_root_path),
         auto_scrape=s.auto_scrape,
         auto_translate=auto_translate,

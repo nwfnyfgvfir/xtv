@@ -15,7 +15,6 @@ from app.db import get_db
 from app.deps import require_auth
 from app.models import MediaItem, PlaybackProgress
 from app.schemas import PlayInfo, ProgressIn, ProgressOut, SubtitleTrack
-from app.services.alist import AlistClient, AlistError
 from app.services.scanner import resolve_library_path
 from app.services.subtitles import build_subtitle_tracks, mime_for_subtitle, resolve_sidecar_file
 
@@ -94,12 +93,7 @@ async def play_info(
     if target.lower().startswith("http://") or target.lower().startswith("https://"):
         return PlayInfo(play_url=target, kind="direct", subtitles=[])
 
-    try:
-        client = AlistClient()
-        raw = await client.raw_url(target)
-        return PlayInfo(play_url=raw, kind="alist", subtitles=[])
-    except AlistError as exc:
-        raise HTTPException(502, f"Alist resolve failed: {exc}") from exc
+    raise HTTPException(400, "不支持的 .strm 目标（仅支持 http/https 直链）")
 
 
 @router.get("/stream/{media_id}")

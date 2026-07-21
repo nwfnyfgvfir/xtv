@@ -1,9 +1,6 @@
 .env
 .venv/
 venv/
-# AutoFilm secrets (keep example only)
-config/autofilm/config.yaml
-!config/autofilm/config.example.yaml
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -12,7 +9,6 @@ __pycache__/
 .ruff_cache/
 data/
 !data/.gitkeep
-!data/autofilm-logs/.gitkeep
 media/
 !media/local/.gitkeep
 !media/strm/.gitkeep

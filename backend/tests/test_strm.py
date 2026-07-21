@@ -8,8 +8,9 @@ def test_classify_http():
     assert classify_strm_target("http://x/y") == "strm"
 
 
-def test_classify_path():
-    assert classify_strm_target("/cloud/jav/SSIS-001/SSIS-001.mp4") == "alist"
+def test_classify_path_is_strm():
+    """Path-like targets are labeled strm; play rejects non-HTTP at runtime."""
+    assert classify_strm_target("/cloud/jav/SSIS-001/SSIS-001.mp4") == "strm"
 
 
 def test_read_strm(tmp_path: Path):

@@ -18,9 +18,6 @@ def read_strm_target(path: Path) -> str | None:
 
 
 def classify_strm_target(target: str) -> str:
-    """Return source_type: 'strm' for http(s), 'alist' for path-like."""
-    t = target.strip()
-    lower = t.lower()
-    if lower.startswith("http://") or lower.startswith("https://"):
-        return "strm"
-    return "alist"
+    """Return source_type for a .strm target. Always 'strm' (HTTP or path)."""
+    _ = target  # target content only matters at play time
+    return "strm"

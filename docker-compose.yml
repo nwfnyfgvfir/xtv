@@ -1,13 +1,7 @@
 # Production: pull prebuilt image from GHCR (no local build).
-# Alist is on another VPS — not deployed here.
 #
 #   cp .env.example .env
 #   docker compose pull && docker compose up -d
-#
-# Optional AutoFilm (remote Alist → .strm under ./media):
-#   cp config/autofilm/config.example.yaml config/autofilm/config.yaml
-#   # fill alist base_url / token / source_dir — image only reads config.yaml
-#   docker compose --profile autofilm up -d --force-recreate autofilm
 
 services:
   tv:
@@ -37,16 +31,3 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
-
-  # Optional: scan remote Alist and write .strm into shared /media
-  # Image: https://hub.docker.com/r/akimio/autofilm
-  # Requires config/autofilm/config.yaml (see config.example.yaml)
-  autofilm:
-    image: ${AUTOFILM_IMAGE:-akimio/autofilm:latest}
-    container_name: tv-autofilm
-    profiles: ["autofilm"]
-    volumes:
-      - ./config/autofilm:/config:ro
-      - ${MEDIA_DIR:-./media}:/media
-      - ${AUTOFILM_LOG_DIR:-./data/autofilm-logs}:/logs
-    restart: unless-stopped
