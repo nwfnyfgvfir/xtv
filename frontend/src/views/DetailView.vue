@@ -1,16 +1,18 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import VideoPlayer from '@/components/VideoPlayer.vue'
 import CoverPlaceholder from '@/components/CoverPlaceholder.vue'
 import ExternalPlayersBar from '@/components/ExternalPlayersBar.vue'
 import {
+  deleteMedia,
   favoriteMedia,
   getMedia,
   getSettings,
   playMedia,
   rescrapeMedia,
+  translateMedia,
   unfavoriteMedia,
 } from '@/api/media'
 import type { MediaDetail, PlayInfo } from '@/api/types'
@@ -27,6 +29,8 @@ const imgFailed = ref(false)
 const favLoading = ref(false)
 const playLoading = ref(false)
 const scrapeLoading = ref(false)
+const translateLoading = ref(false)
+const deleteLoading = ref(false)
 const providers = ref<string[]>([])
 const scrapeProvider = ref('')
 const scrapeFallback = ref(true)
@@ -51,6 +55,12 @@ const isChineseSub = computed(
 const canRescrape = computed(() =>
   Boolean((scrapeNumber.value || item.value?.number || '').trim()),
 )
+const isLocal = computed(() => item.value?.source_type === 'local')
+const canTranslate = computed(() => {
+  if (!item.value) return false
+  if ((item.value.title || '').trim() || (item.value.plot || '').trim()) return true
+  return tags.value.length > 0
+})
 
 function syncScrapeNumber() {
   scrapeNumber.value = item.value?.number || ''
@@ -139,6 +149,48 @@ async function onToggleFav() {
     ElMessage.error(getErrorMessage(e, '收藏操作失败'))
   } finally {
     favLoading.value = false
+  }
+}
+
+async function onTranslate() {
+  if (!item.value) return
+  translateLoading.value = true
+  try {
+    item.value = await translateMedia(item.value.id)
+    ElMessage.success('翻译完成')
+  } catch (e: unknown) {
+    ElMessage.error(getErrorMessage(e, '翻译失败'))
+  } finally {
+    translateLoading.value = false
+  }
+}
+
+async function onDelete() {
+  if (!item.value || !isLocal.value) return
+  const label = item.value.number || item.value.filename || String(item.value.id)
+  try {
+    await ElMessageBox.confirm(
+      `确定删除「${label}」？将删除磁盘上的视频文件及库中索引，此操作不可恢复。`,
+      '删除影片',
+      {
+        type: 'warning',
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        confirmButtonClass: 'el-button--danger',
+      },
+    )
+  } catch {
+    return
+  }
+  deleteLoading.value = true
+  try {
+    await deleteMedia(item.value.id)
+    ElMessage.success('已删除')
+    goBack()
+  } catch (e: unknown) {
+    ElMessage.error(getErrorMessage(e, '删除失败'))
+  } finally {
+    deleteLoading.value = false
   }
 }
 
@@ -232,6 +284,17 @@ watch(() => props.id, load)
             </svg>
             <span>{{ item.favorited ? '已收藏' : '收藏' }}</span>
           </button>
+          <el-button
+            v-if="isLocal"
+            type="danger"
+            plain
+            class="btn-delete"
+            :loading="deleteLoading"
+            :disabled="deleteLoading"
+            @click="onDelete"
+          >
+            删除
+          </el-button>
         </div>
         <ExternalPlayersBar
           :media-id="item.id"
@@ -264,10 +327,18 @@ watch(() => props.id, load)
           <el-button
             class="scrape-btn"
             :loading="scrapeLoading"
-            :disabled="!canRescrape"
+            :disabled="!canRescrape || translateLoading"
             @click="onRescrape"
           >
             重新刮削
+          </el-button>
+          <el-button
+            class="scrape-btn translate-btn"
+            :loading="translateLoading"
+            :disabled="!canTranslate || scrapeLoading"
+            @click="onTranslate"
+          >
+            翻译
           </el-button>
         </div>
         <div v-if="tags.length" class="tags" role="list" aria-label="标签">

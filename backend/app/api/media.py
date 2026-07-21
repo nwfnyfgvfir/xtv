@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -11,8 +12,9 @@ from app.deps import require_auth
 from app.models import Favorite, MediaItem
 from app.schemas import MediaDetail, MediaListItem, PaginatedMedia, RescrapeIn
 from app.services.images import rewrite_image_url
+from app.services.media_delete import delete_local_media
 from app.services.naming import normalize_number
-from app.services.scrape import scrape_media_item
+from app.services.scrape import apply_translations, scrape_media_item
 from app.services.sorting import media_order_by
 
 router = APIRouter()
@@ -157,6 +159,78 @@ async def rescrape_media(
         .one()
     )
     return _with_proxied_images(item, detail=True)  # type: ignore[return-value]
+
+
+@router.post("/{media_id}/translate", response_model=MediaDetail)
+async def translate_media(
+    media_id: int,
+    _: Annotated[dict, Depends(require_auth)],
+    db: Session = Depends(get_db),
+) -> MediaDetail:
+    """Translate existing title/plot/tags without re-scraping MetaTube.
+
+    Always runs (ignores ``auto_translate``). Source text prefers
+    ``title_original`` / ``plot_original``, then current display fields.
+    """
+    item = (
+        db.query(MediaItem)
+        .options(joinedload(MediaItem.actors), joinedload(MediaItem.favorite))
+        .filter(MediaItem.id == media_id)
+        .one_or_none()
+    )
+    if not item:
+        raise HTTPException(404, "media not found")
+
+    src_title = (item.title_original or item.title or "").strip() or None
+    src_plot = (item.plot_original or item.plot or "").strip() or None
+    tags: list[str] = []
+    if item.tags_json:
+        try:
+            raw = json.loads(item.tags_json)
+            if isinstance(raw, list):
+                tags = [str(t) for t in raw if str(t).strip()]
+        except (json.JSONDecodeError, TypeError):
+            tags = []
+
+    if not src_title and not src_plot and not tags:
+        raise HTTPException(400, "nothing to translate")
+
+    # Reset display fields to source language so re-translate uses originals.
+    if src_title:
+        item.title = src_title
+    if src_plot:
+        item.plot = src_plot
+
+    await apply_translations(
+        db,
+        item,
+        src_title=src_title,
+        src_plot=src_plot,
+        tags=tags,
+    )
+    db.add(item)
+    db.commit()
+
+    item = (
+        db.query(MediaItem)
+        .options(joinedload(MediaItem.actors), joinedload(MediaItem.favorite))
+        .filter(MediaItem.id == media_id)
+        .one()
+    )
+    return _with_proxied_images(item, detail=True)  # type: ignore[return-value]
+
+
+@router.delete("/{media_id}", status_code=204)
+def delete_media(
+    media_id: int,
+    _: Annotated[dict, Depends(require_auth)],
+    db: Session = Depends(get_db),
+) -> None:
+    """Delete a local media file from disk and remove its library index row."""
+    item = db.get(MediaItem, media_id)
+    if not item:
+        raise HTTPException(404, "media not found")
+    delete_local_media(db, item)
 
 
 @router.post("/{media_id}/favorite", response_model=MediaDetail)

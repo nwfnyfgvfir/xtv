@@ -248,7 +248,7 @@ async def scrape_media_item(
                 item.actors.append(actor)
 
         if settings.auto_translate:
-            await _apply_translations(db, item, src_title=src_title, src_plot=src_plot, tags=tags)
+            await apply_translations(db, item, src_title=src_title, src_plot=src_plot, tags=tags)
 
         item.scraped_at = datetime.now(timezone.utc)
         db.add(item)
@@ -273,7 +273,7 @@ async def scrape_media_item(
         return False
 
 
-async def _apply_translations(
+async def apply_translations(
     db: Session,
     item: MediaItem,
     *,
@@ -281,7 +281,12 @@ async def _apply_translations(
     src_plot: str | None,
     tags: list[str],
 ) -> None:
-    """Translate title/plot/tags in-place. Actor names are identity — not translated."""
+    """Translate title/plot/tags in-place. Actor names are identity — not translated.
+
+    Callers should set ``item.title`` / ``item.plot`` to the source language text
+    before calling (``src_*`` is stored as ``*_original`` and used as the
+    translation source of truth for originals).
+    """
     from app.services.translate import translate_tags, translate_text
 
     # Always refresh originals from pre-translate MetaTube strings
@@ -298,6 +303,10 @@ async def _apply_translations(
     if tags:
         translated_tags = await translate_tags(tags)
         item.tags_json = json.dumps(translated_tags, ensure_ascii=False)
+
+
+# Backward-compatible alias for tests / older imports
+_apply_translations = apply_translations
 
 
 def _set_actor_provider_safe(

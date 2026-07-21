@@ -79,6 +79,11 @@ export const rescrapeMedia = (
   body?: { provider?: string; fallback?: boolean; number?: string },
 ) => client.post<MediaDetail>(`/media/${id}/rescrape`, body || {}).then((r) => r.data)
 
+export const translateMedia = (id: number) =>
+  client.post<MediaDetail>(`/media/${id}/translate`).then((r) => r.data)
+
+export const deleteMedia = (id: number) => client.delete(`/media/${id}`)
+
 export const favoriteMedia = (id: number) =>
   client.post<MediaDetail>(`/media/${id}/favorite`).then((r) => r.data)
 
