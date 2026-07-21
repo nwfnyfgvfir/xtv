@@ -15,7 +15,6 @@ import {
   rescrapePendingLibrary,
   scanLibrary,
   deleteLibrary,
-  updateLibrary,
 } from '@/api/media'
 import type { Library, MediaListItem, MediaSort, ScanJob } from '@/api/types'
 import { usePagedRoute } from '@/composables/usePagedRoute'
@@ -49,9 +48,6 @@ const form = ref({
   name: '番号',
   path: 'local',
   type: 'mixed',
-  auto_scan_enabled: false,
-  interval_value: 24,
-  interval_unit: 'hours' as 'seconds' | 'minutes' | 'hours',
 })
 
 function onPathPicked(path: string) {
@@ -61,37 +57,6 @@ function onPathPicked(path: string) {
 function parseFilter(raw: string): MediaFilter {
   if (raw === 'unscraped' || raw === 'chinese' || raw === 'favorited') return raw
   return ''
-}
-
-function toSeconds(value: number, unit: 'seconds' | 'minutes' | 'hours') {
-  if (unit === 'seconds') return Math.max(30, value)
-  if (unit === 'minutes') return Math.max(30, value * 60)
-  return Math.max(30, value * 3600)
-}
-
-function formatInterval(lib: Library) {
-  const s = lib.scan_interval_seconds || (lib.scan_interval_hours ? lib.scan_interval_hours * 3600 : 0)
-  if (!s) return ''
-  if (s % 3600 === 0) return `${s / 3600}h`
-  if (s % 60 === 0) return `${s / 60}m`
-  return `${s}s`
-}
-
-function syncIntervalForm(lib: Library | null) {
-  if (!lib) return
-  const s =
-    lib.scan_interval_seconds ||
-    (lib.scan_interval_hours ? lib.scan_interval_hours * 3600 : 86400)
-  if (s % 3600 === 0) {
-    form.value.interval_value = s / 3600
-    form.value.interval_unit = 'hours'
-  } else if (s % 60 === 0) {
-    form.value.interval_value = s / 60
-    form.value.interval_unit = 'minutes'
-  } else {
-    form.value.interval_value = s
-    form.value.interval_unit = 'seconds'
-  }
 }
 
 const currentLibrary = computed(() =>
@@ -131,8 +96,6 @@ async function loadLibraries() {
   ) {
     currentLibraryId.value = libraries.value[0]?.id ?? null
   }
-  const cur = libraries.value.find((l) => l.id === currentLibraryId.value) || null
-  syncIntervalForm(cur)
 }
 
 async function loadMedia(opts?: { quiet?: boolean }) {
@@ -232,8 +195,6 @@ async function load() {
 
 function selectLibrary(id: number) {
   currentLibraryId.value = id
-  const lib = libraries.value.find((l) => l.id === id) || null
-  syncIntervalForm(lib)
   replaceQuery(
     {
       library: String(id),
@@ -276,16 +237,10 @@ function onItemRefreshed(updated: MediaListItem) {
 
 async function onCreate() {
   try {
-    const secs = form.value.auto_scan_enabled
-      ? toSeconds(form.value.interval_value, form.value.interval_unit)
-      : null
     const lib = await createLibrary({
       name: form.value.name,
       path: form.value.path,
       type: form.value.type,
-      auto_scan_enabled: form.value.auto_scan_enabled,
-      scan_interval_seconds: secs,
-      scan_interval_hours: secs ? Math.max(1, Math.round(secs / 3600)) : null,
     })
     showCreate.value = false
     ElMessage.success('媒体库已创建')
@@ -380,47 +335,10 @@ async function onDelete(lib: Library) {
   }
 }
 
-async function toggleAutoScan(lib: Library) {
-  try {
-    const secs =
-      lib.scan_interval_seconds ||
-      (lib.scan_interval_hours ? lib.scan_interval_hours * 3600 : 86400)
-    await updateLibrary(lib.id, {
-      auto_scan_enabled: !lib.auto_scan_enabled,
-      scan_interval_seconds: secs,
-      scan_interval_hours: Math.max(1, Math.round(secs / 3600)),
-    })
-    await loadLibraries()
-    ElMessage.success(
-      !lib.auto_scan_enabled
-        ? '已开启定时全量扫描（目录实时监听始终开启）'
-        : '已关闭定时全量扫描（目录实时监听仍开启）',
-    )
-  } catch (e: unknown) {
-    ElMessage.error(getErrorMessage(e, '更新失败'))
-  }
-}
-
-async function saveInterval(lib: Library) {
-  const secs = toSeconds(form.value.interval_value, form.value.interval_unit)
-  try {
-    await updateLibrary(lib.id, {
-      scan_interval_seconds: secs,
-      scan_interval_hours: Math.max(1, Math.round(secs / 3600)),
-      auto_scan_enabled: true,
-    })
-    await loadLibraries()
-    ElMessage.success(`定时间隔已设为 ${secs}s`)
-  } catch (e: unknown) {
-    ElMessage.error(getErrorMessage(e, '更新间隔失败'))
-  }
-}
-
 function onMoreCommand(cmd: string) {
   const lib = currentLibrary.value
   if (!lib) return
-  if (cmd === 'toggle-auto') void toggleAutoScan(lib)
-  else if (cmd === 'delete') void onDelete(lib)
+  if (cmd === 'delete') void onDelete(lib)
 }
 
 watch(
@@ -496,10 +414,7 @@ onBeforeUnmount(stopSoftRefresh)
       <div class="meta muted">
         <span>{{ currentLibrary.path }}</span>
         <span>· {{ currentLibrary.type }}</span>
-        <span v-if="currentLibrary.auto_scan_enabled">
-          · 定时全量每 {{ formatInterval(currentLibrary) || '24h' }}
-        </span>
-        <span v-else>· 实时监听中</span>
+        <span>· 实时监听中</span>
       </div>
       <div class="actions">
         <el-select
@@ -535,34 +450,13 @@ onBeforeUnmount(stopSoftRefresh)
           刮削未刮削
         </el-button>
         <div class="actions-more desktop-more">
-          <div v-if="currentLibrary.auto_scan_enabled" class="interval-inline">
-            <el-input-number
-              v-model="form.interval_value"
-              size="small"
-              :min="1"
-              :max="999999"
-              controls-position="right"
-            />
-            <el-select v-model="form.interval_unit" size="small" class="unit-select">
-              <el-option label="秒" value="seconds" />
-              <el-option label="分" value="minutes" />
-              <el-option label="时" value="hours" />
-            </el-select>
-            <el-button size="small" plain @click="saveInterval(currentLibrary)">应用间隔</el-button>
-          </div>
-          <el-button size="small" @click="toggleAutoScan(currentLibrary)">
-            {{ currentLibrary.auto_scan_enabled ? '关闭定时' : '开启定时' }}
-          </el-button>
           <el-button size="small" type="danger" plain @click="onDelete(currentLibrary)">删除</el-button>
         </div>
         <el-dropdown class="mobile-more" trigger="click" @command="onMoreCommand">
           <el-button size="small">更多</el-button>
           <template #dropdown>
             <el-dropdown-menu>
-              <el-dropdown-item command="toggle-auto">
-                {{ currentLibrary.auto_scan_enabled ? '关闭定时' : '开启定时' }}
-              </el-dropdown-item>
-              <el-dropdown-item command="delete" divided>
+              <el-dropdown-item command="delete">
                 <span class="danger-text">删除媒体库</span>
               </el-dropdown-item>
             </el-dropdown-menu>
@@ -634,22 +528,7 @@ onBeforeUnmount(stopSoftRefresh)
             <el-option label="strm" value="strm" />
           </el-select>
         </el-form-item>
-        <el-form-item label="定时扫描">
-          <el-switch v-model="form.auto_scan_enabled" />
-        </el-form-item>
-        <el-form-item label="扫描间隔">
-          <div class="interval-row">
-            <el-input-number v-model="form.interval_value" :min="1" :max="999999" />
-            <el-select v-model="form.interval_unit" style="width: 110px">
-              <el-option label="秒" value="seconds" />
-              <el-option label="分" value="minutes" />
-              <el-option label="时" value="hours" />
-            </el-select>
-          </div>
-          <div class="muted tip">
-            最小 30 秒。目录实时监听始终开启；定时扫描为周期全量校验/清理。
-          </div>
-        </el-form-item>
+        <p class="muted tip create-tip">创建后目录实时监听自动开启；需要全量校验时点工具栏「扫描」。</p>
       </el-form>
       <template #footer>
         <el-button @click="showCreate = false">取消</el-button>
@@ -750,15 +629,6 @@ onBeforeUnmount(stopSoftRefresh)
 .sort-select {
   width: 168px;
 }
-.unit-select {
-  width: 78px;
-}
-.interval-inline {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-  flex-wrap: wrap;
-}
 .filter-chips {
   display: flex;
   flex-wrap: wrap;
@@ -832,12 +702,6 @@ onBeforeUnmount(stopSoftRefresh)
 code {
   color: var(--accent);
 }
-.interval-row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  width: 100%;
-}
 .path-row {
   display: flex;
   gap: 8px;
@@ -851,6 +715,16 @@ code {
 .tip {
   margin-top: 6px;
   font-size: 12px;
+}
+.create-tip {
+  margin: 0 0 4px 0;
+  padding-left: 100px;
+  font-size: 12px;
+}
+@media (max-width: 520px) {
+  .create-tip {
+    padding-left: 0;
+  }
 }
 @media (max-width: 860px) {
   .lib-toolbar {

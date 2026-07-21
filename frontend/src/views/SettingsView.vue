@@ -192,9 +192,9 @@ onMounted(() => {
         鉴权：{{ settings?.auth_enabled ? '已启用 (ADMIN_PASSWORD)' : '关闭（开发模式）' }}
       </p>
       <p class="muted line">
-        调度器：{{ health?.scheduler?.running ? '运行中' : '未运行' }}
-        <span v-if="health?.scheduler?.jobs?.length">
-          · jobs {{ health.scheduler.jobs.length }}
+        目录监听：{{ health?.watcher?.running ? '运行中' : '未运行' }}
+        <span v-if="health?.watcher?.watched_library_ids?.length">
+          · 监视库 {{ health.watcher.watched_library_ids.length }}
         </span>
       </p>
     </el-card>
@@ -352,7 +352,7 @@ onMounted(() => {
         </el-form-item>
       </el-form>
       <p class="muted tip">
-        定时扫描请在媒体库页对单个库开启「定时扫描」。登录密码通过环境变量
+        目录变更由实时监听增量刷新；需要全量校验时请在媒体库页点「扫描」。登录密码通过环境变量
         <code>ADMIN_PASSWORD</code> 配置。调试日志用 <code>LOG_LEVEL</code> /
         <code>DEBUG</code>（环境变量，不在此页）。
       </p>

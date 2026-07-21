@@ -34,9 +34,7 @@ export const createLibrary = (body: {
   name: string
   path: string
   type?: string
-  auto_scan_enabled?: boolean
-  scan_interval_hours?: number | null
-  scan_interval_seconds?: number | null
+  enabled?: boolean
 }) => client.post<Library>('/libraries', body).then((r) => r.data)
 
 export const updateLibrary = (
@@ -46,9 +44,6 @@ export const updateLibrary = (
     path: string
     type: string
     enabled: boolean
-    auto_scan_enabled: boolean
-    scan_interval_hours: number | null
-    scan_interval_seconds: number | null
   }>,
 ) => client.patch<Library>(`/libraries/${id}`, body).then((r) => r.data)
 

@@ -13,7 +13,6 @@ from app.api import api_router
 from app.config import get_settings
 from app.db import init_db
 from app.logging_setup import configure_logging
-from app.services.scheduler import shutdown_scheduler, start_scheduler
 from app.services.watcher import start_watcher, stop_watcher
 
 configure_logging()
@@ -39,10 +38,6 @@ async def lifespan(_app: FastAPI):
     if not settings.auth_enabled:
         logger.warning("ADMIN_PASSWORD empty — API auth is DISABLED (dev mode)")
     try:
-        start_scheduler()
-    except Exception:  # noqa: BLE001
-        logger.exception("Failed to start scheduler")
-    try:
         start_watcher()
     except Exception:  # noqa: BLE001
         logger.exception("Failed to start filesystem watcher")
@@ -51,10 +46,6 @@ async def lifespan(_app: FastAPI):
         stop_watcher()
     except Exception:  # noqa: BLE001
         logger.exception("Failed to stop filesystem watcher")
-    try:
-        shutdown_scheduler()
-    except Exception:  # noqa: BLE001
-        logger.exception("Failed to stop scheduler")
 
 
 app = FastAPI(title="TV", version="0.2.0", lifespan=lifespan)

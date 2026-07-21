@@ -5,7 +5,6 @@ from fastapi import APIRouter
 from app.config import get_settings
 from app.schemas import HealthOut
 from app.services.metatube import MetaTubeClient, MetaTubeError
-from app.services.scheduler import scheduler_status
 from app.services.watcher import watcher_status
 
 router = APIRouter()
@@ -22,14 +21,14 @@ async def health() -> HealthOut:
         metatube = {"ok": False, "error": str(exc)}
     except Exception as exc:  # noqa: BLE001
         metatube = {"ok": False, "error": str(exc)}
-    sched = scheduler_status()
+    watcher: dict | None = None
     try:
-        sched = {**sched, "watcher": watcher_status()}
+        watcher = watcher_status()
     except Exception:  # noqa: BLE001
-        pass
+        watcher = {"running": False}
     return HealthOut(
         status="ok",
         metatube=metatube,
         auth_enabled=settings.auth_enabled,
-        scheduler=sched,
+        watcher=watcher,
     )

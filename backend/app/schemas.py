@@ -11,9 +11,6 @@ class LibraryCreate(BaseModel):
     path: str = Field(min_length=1, max_length=1024)
     type: Literal["local", "strm", "mixed"] = "mixed"
     enabled: bool = True
-    auto_scan_enabled: bool = False
-    scan_interval_hours: int | None = Field(default=None, ge=1, le=24 * 30)
-    scan_interval_seconds: int | None = Field(default=None, ge=30, le=30 * 24 * 3600)
 
 
 class LibraryUpdate(BaseModel):
@@ -21,9 +18,6 @@ class LibraryUpdate(BaseModel):
     path: str | None = None
     type: Literal["local", "strm", "mixed"] | None = None
     enabled: bool | None = None
-    auto_scan_enabled: bool | None = None
-    scan_interval_hours: int | None = Field(default=None, ge=1, le=24 * 30)
-    scan_interval_seconds: int | None = Field(default=None, ge=30, le=30 * 24 * 3600)
 
 
 class LibraryOut(BaseModel):
@@ -34,9 +28,6 @@ class LibraryOut(BaseModel):
     path: str
     type: str
     enabled: bool
-    auto_scan_enabled: bool = False
-    scan_interval_hours: int | None = None
-    scan_interval_seconds: int | None = None
     media_count: int = 0
     # In-process LibraryChanged generation (bumped on ingest/remove/scrape).
     content_revision: int = 0
@@ -244,7 +235,7 @@ class HealthOut(BaseModel):
     status: str
     metatube: dict[str, Any] | None = None
     auth_enabled: bool = False
-    scheduler: dict[str, Any] | None = None
+    watcher: dict[str, Any] | None = None
 
 
 class LoginIn(BaseModel):

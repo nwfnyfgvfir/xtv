@@ -204,7 +204,7 @@ def stop_watcher() -> None:
 
 
 def reload_watches() -> None:
-    """Re-sync observers with all enabled libraries (realtime independent of auto_scan)."""
+    """Re-sync observers with all enabled libraries."""
     global _observer
     with _lock:
         if _observer is None:
@@ -226,7 +226,6 @@ def reload_watches() -> None:
 
         db = SessionLocal()
         try:
-            # Jellyfin-style: realtime monitor is independent of scheduled full scan.
             libs = db.query(Library).filter(Library.enabled.is_(True)).all()
             for lib in libs:
                 root = resolve_library_path(lib)

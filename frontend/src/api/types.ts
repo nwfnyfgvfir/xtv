@@ -4,9 +4,6 @@ export interface Library {
   path: string
   type: string
   enabled: boolean
-  auto_scan_enabled?: boolean
-  scan_interval_hours?: number | null
-  scan_interval_seconds?: number | null
   media_count?: number
   /** Bumped when library media is added/removed/scraped (LibraryChanged-style). */
   content_revision?: number
@@ -180,7 +177,11 @@ export interface Health {
   status: string
   metatube?: { ok?: boolean; data?: unknown; error?: string } | null
   auth_enabled?: boolean
-  scheduler?: { running?: boolean; jobs?: { id: string; next_run_time?: string | null }[] } | null
+  watcher?: {
+    running?: boolean
+    watched_library_ids?: number[]
+    pending_scans?: number[]
+  } | null
 }
 
 export interface AuthStatus {

@@ -42,7 +42,7 @@ def configure_logging(settings: Settings | None = None) -> None:
 
     # Keep third-party noise down unless we are debugging
     noisy_level = logging.DEBUG if level <= logging.DEBUG else logging.WARNING
-    for name in ("httpx", "httpcore", "watchdog", "apscheduler", "urllib3"):
+    for name in ("httpx", "httpcore", "watchdog", "urllib3"):
         logging.getLogger(name).setLevel(noisy_level)
 
     # uvicorn access log is independent of root level; mute when not debugging

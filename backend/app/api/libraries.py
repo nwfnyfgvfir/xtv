@@ -15,7 +15,7 @@ from app.services.fs_browse import BrowseError, list_subdirectories
 from app.services.jobs import job_store
 from app.services.library_revision import get_revision
 from app.services.scanner import run_rescrape_pending_job, run_scan_job
-from app.services.scheduler import reload_library_jobs
+from app.services.watcher import reload_watches
 
 router = APIRouter()
 
@@ -60,22 +60,16 @@ def create_library(
     _: Annotated[dict, Depends(require_auth)],
     db: Session = Depends(get_db),
 ) -> LibraryOut:
-    secs = body.scan_interval_seconds
-    if secs is None and body.scan_interval_hours:
-        secs = body.scan_interval_hours * 3600
     lib = Library(
         name=body.name,
         path=body.path,
         type=body.type,
         enabled=body.enabled,
-        auto_scan_enabled=body.auto_scan_enabled,
-        scan_interval_hours=body.scan_interval_hours,
-        scan_interval_seconds=secs,
     )
     db.add(lib)
     db.commit()
     db.refresh(lib)
-    reload_library_jobs()
+    reload_watches()
     return _library_out(db, lib)
 
 
@@ -90,14 +84,12 @@ def update_library(
     if not lib:
         raise HTTPException(404, "library not found")
     data = body.model_dump(exclude_unset=True)
-    if "scan_interval_seconds" not in data and data.get("scan_interval_hours"):
-        data["scan_interval_seconds"] = int(data["scan_interval_hours"]) * 3600
     for k, v in data.items():
         setattr(lib, k, v)
     db.add(lib)
     db.commit()
     db.refresh(lib)
-    reload_library_jobs()
+    reload_watches()
     return _library_out(db, lib)
 
 
@@ -114,7 +106,7 @@ def delete_library(
     db.flush()
     delete_orphan_actors(db)
     db.commit()
-    reload_library_jobs()
+    reload_watches()
 
 
 @router.post("/{library_id}/scan", response_model=ScanJobOut)

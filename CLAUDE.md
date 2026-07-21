@@ -89,7 +89,7 @@ Container paths (compose injects): `MEDIA_ROOT=/media`, `DATABASE_URL=sqlite:///
 
 | Path | Role |
 |------|------|
-| `backend/app/main.py` | FastAPI app, lifespan (DB init, scheduler, fs watcher), CORS, SPA fallback |
+| `backend/app/main.py` | FastAPI app, lifespan (DB init, fs watcher), CORS, SPA fallback |
 | `backend/app/api/` | Route modules mounted under `/api` |
 | `backend/app/services/` | Scan, scrape, MetaTube client, naming, translate, actors merge, jobs, watcher, images |
 | `backend/app/models.py` | SQLAlchemy models |
@@ -103,7 +103,7 @@ Container paths (compose injects): `MEDIA_ROOT=/media`, `DATABASE_URL=sqlite:///
 
 ### Domain model (SQLite)
 
-- **Library** — named folder under `MEDIA_ROOT` (e.g. `local`, `strm`); optional auto-scan interval + fs watcher.
+- **Library** — named folder under `MEDIA_ROOT` (e.g. `local`, `strm`); filesystem watcher for realtime refresh + manual full scan.
 - **MediaItem** — one file; unique `(library_id, path)`; `source_type` local/strm; scrape fields (number, title, plot, cover…); `strm_target` for `.strm` content.
 - **Actor** ↔ **MediaItem** via `media_actors`; actors keyed by `(provider, provider_id)` with merge logic in `services/actors.py`.
 - **PlaybackProgress** — per-media position.
@@ -124,12 +124,12 @@ Container paths (compose injects): `MEDIA_ROOT=/media`, `DATABASE_URL=sqlite:///
 6. **Settings**: env defaults + `app_settings` table; UI can update MetaTube/image proxy/translate without restart for many keys.
    - Translate: `google` (free gtx) | `bing` (free Edge).
    - Image proxy modes: `site` (`/api/images/proxy`) | `metatube` | `external` (template with `{url}`); optional disk cache under data when `IMAGE_LOCAL_CACHE`.
-7. **Background**: APScheduler for library auto-scan; watchdog for filesystem changes when enabled on a library.
+7. **Background**: watchdog filesystem watcher on enabled libraries (realtime ingest/remove); manual full scan via API/UI.
 
 ### Frontend flow
 
 - Vue Router SPA; Pinia present; Element Plus UI.
-- Routes: `/`, `/search`, `/media/:id`, `/actors`, `/actors/:id`, `/favorites`, `/settings`, `/login`.
+- Routes: `/`, `/search`, `/media/:id`, `/actors`, `/actors/:id`, `/favorites`, `/settings`, `/duplicates`, `/login`.
 - `useAuth` stores JWT in `localStorage` (`tv-token`) + Axios interceptor.
 - Lists/detail call `/api/media*`, `/api/actors*`, `/api/favorites*`; play uses `VideoPlayer` with URL from `/api/media/{id}/play`.
 - Vite dev proxies `/api` → `127.0.0.1:8000`. Production: FastAPI serves `app/static` + SPA fallback.
