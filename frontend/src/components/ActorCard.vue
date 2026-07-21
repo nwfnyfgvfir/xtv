@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { favoriteActor, unfavoriteActor } from '@/api/media'
 import { getErrorMessage } from '@/utils/errors'
+import { rememberListAnchor } from '@/utils/listScrollAnchor'
 import { monogramChar, monogramStyle } from '@/utils/monogram'
 
 const props = defineProps<{ actor: Actor }>()
@@ -28,6 +29,7 @@ watch(
 )
 
 function open() {
+  rememberListAnchor('actor', props.actor.id)
   router.push(`/actors/${props.actor.id}`)
 }
 
@@ -53,7 +55,14 @@ async function toggleFav(e: Event) {
 </script>
 
 <template>
-  <article class="actor-card" role="button" tabindex="0" @click="open" @keyup.enter="open">
+  <article
+    class="actor-card"
+    :data-actor-id="actor.id"
+    role="button"
+    tabindex="0"
+    @click="open"
+    @keyup.enter="open"
+  >
     <div class="portrait">
       <img
         v-if="actor.image_url && !imgFailed"

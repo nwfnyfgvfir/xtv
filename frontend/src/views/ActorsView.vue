@@ -1,7 +1,7 @@
 <script setup lang="ts">
 defineOptions({ name: 'ActorsView' })
 
-import { onMounted, ref, watch } from 'vue'
+import { onActivated, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import AppPagination from '@/components/AppPagination.vue'
 import ActorCard from '@/components/ActorCard.vue'
@@ -11,6 +11,7 @@ import type { Actor, ActorSort } from '@/api/types'
 import { usePagedRoute } from '@/composables/usePagedRoute'
 import { ACTOR_SORT_OPTIONS, loadActorSort, saveActorSort } from '@/utils/actorSort'
 import { getErrorMessage } from '@/utils/errors'
+import { restoreListAnchor } from '@/utils/listScrollAnchor'
 import { DEFAULT_PAGE_SIZE, queryString } from '@/utils/pageQuery'
 
 const { route, page, replaceQuery, goPage, syncPageFromRoute } = usePagedRoute()
@@ -80,6 +81,18 @@ onMounted(() => {
   q.value = queryString(route.query, 'q')
   void load()
 })
+
+onActivated(() => {
+  restoreListAnchor('actor')
+})
+
+watch(
+  items,
+  () => {
+    restoreListAnchor('actor')
+  },
+  { flush: 'post' },
+)
 </script>
 
 <template>

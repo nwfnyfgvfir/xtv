@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import type { MediaListItem } from '@/api/types'
+import { onActivated, onMounted, watch } from 'vue'
+import { restoreListAnchor } from '@/utils/listScrollAnchor'
 import MediaCard from './MediaCard.vue'
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     items: MediaListItem[]
     emptyTitle?: string
@@ -19,6 +21,18 @@ const emit = defineEmits<{ refreshed: [MediaListItem] }>()
 function onRefreshed(item: MediaListItem) {
   emit('refreshed', item)
 }
+
+function tryRestore() {
+  restoreListAnchor('media')
+}
+
+onMounted(tryRestore)
+onActivated(tryRestore)
+watch(
+  () => props.items,
+  () => tryRestore(),
+  { flush: 'post' },
+)
 </script>
 
 <template>

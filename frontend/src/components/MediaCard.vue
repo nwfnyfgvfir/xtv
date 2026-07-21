@@ -6,6 +6,7 @@ import { ElMessage } from 'element-plus'
 import CoverPlaceholder from './CoverPlaceholder.vue'
 import { favoriteMedia, unfavoriteMedia } from '@/api/media'
 import { getErrorMessage } from '@/utils/errors'
+import { rememberListAnchor } from '@/utils/listScrollAnchor'
 
 const props = defineProps<{ item: MediaListItem }>()
 const emit = defineEmits<{ refreshed: [MediaListItem] }>()
@@ -31,6 +32,7 @@ watch(cover, () => {
 })
 
 function open() {
+  rememberListAnchor('media', props.item.id)
   router.push(`/media/${props.item.id}`)
 }
 
@@ -56,7 +58,14 @@ async function toggleFav(e: Event) {
 </script>
 
 <template>
-  <article class="card" @click="open" role="button" tabindex="0" @keyup.enter="open">
+  <article
+    class="card"
+    :data-media-id="item.id"
+    role="button"
+    tabindex="0"
+    @click="open"
+    @keyup.enter="open"
+  >
     <div class="poster">
       <img
         v-if="showImage"

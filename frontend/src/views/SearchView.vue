@@ -1,7 +1,7 @@
 <script setup lang="ts">
 defineOptions({ name: 'SearchView' })
 
-import { onMounted, ref, watch } from 'vue'
+import { onActivated, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import AppPagination from '@/components/AppPagination.vue'
 import ActorCard from '@/components/ActorCard.vue'
@@ -11,6 +11,7 @@ import { listActors, listLibraries, listMedia } from '@/api/media'
 import type { Actor, Library, MediaListItem, MediaSort } from '@/api/types'
 import { usePagedRoute } from '@/composables/usePagedRoute'
 import { getErrorMessage } from '@/utils/errors'
+import { restoreListAnchor } from '@/utils/listScrollAnchor'
 import { loadMediaSort, MEDIA_SORT_OPTIONS, saveMediaSort } from '@/utils/mediaSort'
 import { DEFAULT_PAGE_SIZE, queryString } from '@/utils/pageQuery'
 
@@ -151,6 +152,18 @@ onMounted(async () => {
     void runSearch()
   }
 })
+
+onActivated(() => {
+  restoreListAnchor('actor')
+})
+
+watch(
+  actorItems,
+  () => {
+    restoreListAnchor('actor')
+  },
+  { flush: 'post' },
+)
 </script>
 
 <template>

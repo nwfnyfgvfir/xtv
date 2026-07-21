@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { ensureAuthReady, useAuth } from '@/composables/useAuth'
+import { hasPendingListAnchor } from '@/utils/listScrollAnchor'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -52,6 +53,10 @@ const router = createRouter({
     },
   ],
   scrollBehavior(to, from, saved) {
+    // Leaving detail → list: let listScrollAnchor own scroll (id-based).
+    const returningFromDetail =
+      from.name === 'detail' || from.name === 'actor-detail'
+    if (returningFromDetail && hasPendingListAnchor()) return false
     if (saved) return saved
     if (to.hash) return { el: to.hash }
     if (to.path !== from.path) return { top: 0 }
