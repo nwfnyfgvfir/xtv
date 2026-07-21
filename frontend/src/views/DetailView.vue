@@ -17,6 +17,7 @@ import {
 } from '@/api/media'
 import type { MediaDetail, PlayInfo } from '@/api/types'
 import { getErrorMessage } from '@/utils/errors'
+import { formatFileSize } from '@/utils/format'
 import { monogramChar, monogramStyle } from '@/utils/monogram'
 
 const props = defineProps<{ id: string }>()
@@ -56,6 +57,7 @@ const canRescrape = computed(() =>
   Boolean((scrapeNumber.value || item.value?.number || '').trim()),
 )
 const isLocal = computed(() => item.value?.source_type === 'local')
+const fileSizeLabel = computed(() => formatFileSize(item.value?.file_size))
 const canTranslate = computed(() => {
   if (!item.value) return false
   if ((item.value.title || '').trim() || (item.value.plot || '').trim()) return true
@@ -243,6 +245,8 @@ watch(() => props.id, load)
           <span v-if="item.provider">{{ item.provider }}</span>
           <span v-if="item.release_date"> · {{ item.release_date }}</span>
           <span v-if="item.studio"> · {{ item.studio }}</span>
+          <span v-if="item.runtime"> · {{ item.runtime }} 分钟</span>
+          <span v-if="isLocal && fileSizeLabel"> · {{ fileSizeLabel }}</span>
           <span> · {{ item.source_type }}</span>
         </p>
         <div class="btns">
