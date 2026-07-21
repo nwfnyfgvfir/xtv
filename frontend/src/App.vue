@@ -13,7 +13,7 @@ const navigating = ref(false)
 const KEEP_ALIVE_NAMES = ['LibraryView', 'SearchView', 'ActorsView', 'FavoritesView']
 
 const active = computed(() => {
-  if (route.path.startsWith('/settings')) return 'settings'
+  if (route.path.startsWith('/settings') || route.path.startsWith('/duplicates')) return 'settings'
   if (route.path.startsWith('/search')) return 'search'
   if (route.path.startsWith('/actors')) return 'actors'
   if (route.path.startsWith('/favorites')) return 'favorites'

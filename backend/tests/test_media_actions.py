@@ -159,7 +159,8 @@ def test_delete_local_media_missing_file_still_drops_db(tmp_path: Path, monkeypa
         get_settings.cache_clear()
 
 
-def test_delete_non_local_refused(tmp_path: Path, monkeypatch) -> None:
+def test_delete_local_media_refuses_non_local(tmp_path: Path, monkeypatch) -> None:
+    """delete_local_media still refuses strm; use delete_media_item for index-only."""
     init_db()
     media_root = tmp_path / "media"
     lib_dir = media_root / "strm"

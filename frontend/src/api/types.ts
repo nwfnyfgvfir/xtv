@@ -75,6 +75,30 @@ export interface PaginatedMedia {
   page_size: number
 }
 
+export interface DuplicateMediaItem extends MediaListItem {
+  path: string
+  file_size?: number | null
+  library_name: string
+}
+
+export interface DuplicateGroup {
+  number: string
+  count: number
+  items: DuplicateMediaItem[]
+}
+
+export interface PaginatedDuplicateGroups {
+  items: DuplicateGroup[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface BatchDeleteResult {
+  deleted: number[]
+  failed: { id: number; error: string }[]
+}
+
 export interface PaginatedActors {
   items: Actor[]
   total: number

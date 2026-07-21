@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getHealth, getMovieProviders, getSettings, updateSettings } from '@/api/media'
 import type { Health, ImageProxyMode, Settings, TranslateProvider } from '@/api/types'
 import { getErrorMessage } from '@/utils/errors'
+
+const router = useRouter()
 
 const settings = ref<Settings | null>(null)
 const health = ref<Health | null>(null)
@@ -160,6 +163,18 @@ onMounted(() => {
   <div class="page">
     <h1 class="page-title">设置</h1>
     <p class="muted intro">MetaTube 刮削源、图片代理、翻译与系统状态</p>
+
+    <el-card class="card" shadow="never">
+      <template #header>
+        <span class="card-title">库维护</span>
+      </template>
+      <p class="muted line">
+        按番号查找跨库 / 同库重复项，并有选择地删除副本（本地删文件；strm 仅删索引）。
+      </p>
+      <el-button type="primary" plain @click="router.push({ name: 'duplicates' })">
+        重复影片
+      </el-button>
+    </el-card>
 
     <el-card class="card" shadow="never">
       <template #header>

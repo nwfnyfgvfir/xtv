@@ -121,6 +121,39 @@ class PaginatedMedia(BaseModel):
     page_size: int
 
 
+class DuplicateMediaItem(MediaListItem):
+    path: str
+    file_size: int | None = None
+    library_name: str = ""
+
+
+class DuplicateGroup(BaseModel):
+    number: str
+    count: int
+    items: list[DuplicateMediaItem]
+
+
+class PaginatedDuplicateGroups(BaseModel):
+    items: list[DuplicateGroup]
+    total: int
+    page: int
+    page_size: int
+
+
+class BatchDeleteIn(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=100)
+
+
+class BatchDeleteFailure(BaseModel):
+    id: int
+    error: str
+
+
+class BatchDeleteResult(BaseModel):
+    deleted: list[int]
+    failed: list[BatchDeleteFailure]
+
+
 class PaginatedActors(BaseModel):
     items: list[ActorListItem]
     total: int

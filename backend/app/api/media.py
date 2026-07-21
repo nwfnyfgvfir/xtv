@@ -10,9 +10,19 @@ from sqlalchemy.orm import Session, joinedload
 from app.db import get_db
 from app.deps import require_auth
 from app.models import Favorite, MediaItem
-from app.schemas import MediaDetail, MediaListItem, PaginatedMedia, RescrapeIn
+from app.schemas import (
+    BatchDeleteFailure,
+    BatchDeleteIn,
+    BatchDeleteResult,
+    MediaDetail,
+    MediaListItem,
+    PaginatedDuplicateGroups,
+    PaginatedMedia,
+    RescrapeIn,
+)
+from app.services.duplicates import list_duplicate_groups
 from app.services.images import rewrite_image_url
-from app.services.media_delete import delete_local_media
+from app.services.media_delete import delete_media_item
 from app.services.naming import normalize_number
 from app.services.scrape import apply_translations, scrape_media_item
 from app.services.sorting import media_order_by
@@ -45,6 +55,51 @@ def _with_proxied_images(
         favorited = item.favorite is not None
     data.favorited = bool(favorited)
     return data
+
+
+@router.get("/duplicates", response_model=PaginatedDuplicateGroups)
+def list_duplicates(
+    _: Annotated[dict, Depends(require_auth)],
+    q: str | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=50),
+    db: Session = Depends(get_db),
+) -> PaginatedDuplicateGroups:
+    """List groups of media that share the same 番号 (case-insensitive)."""
+    return list_duplicate_groups(db, page=page, page_size=page_size, q=q)
+
+
+@router.post("/batch-delete", response_model=BatchDeleteResult)
+def batch_delete_media(
+    body: BatchDeleteIn,
+    _: Annotated[dict, Depends(require_auth)],
+    db: Session = Depends(get_db),
+) -> BatchDeleteResult:
+    """Delete selected media; local removes files, non-local drops index only."""
+    deleted: list[int] = []
+    failed: list[BatchDeleteFailure] = []
+    # Dedupe while preserving order
+    seen: set[int] = set()
+    ids: list[int] = []
+    for mid in body.ids:
+        if mid not in seen:
+            seen.add(mid)
+            ids.append(mid)
+
+    for media_id in ids:
+        item = db.get(MediaItem, media_id)
+        if not item:
+            failed.append(BatchDeleteFailure(id=media_id, error="media not found"))
+            continue
+        try:
+            delete_media_item(db, item)
+            deleted.append(media_id)
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+            failed.append(BatchDeleteFailure(id=media_id, error=detail))
+        except Exception as exc:  # noqa: BLE001 — partial success for batch
+            failed.append(BatchDeleteFailure(id=media_id, error=str(exc)))
+    return BatchDeleteResult(deleted=deleted, failed=failed)
 
 
 @router.get("", response_model=PaginatedMedia)
@@ -226,11 +281,11 @@ def delete_media(
     _: Annotated[dict, Depends(require_auth)],
     db: Session = Depends(get_db),
 ) -> None:
-    """Delete a local media file from disk and remove its library index row."""
+    """Delete local media file + index, or index-only for non-local (e.g. strm)."""
     item = db.get(MediaItem, media_id)
     if not item:
         raise HTTPException(404, "media not found")
-    delete_local_media(db, item)
+    delete_media_item(db, item)
 
 
 @router.post("/{media_id}/favorite", response_model=MediaDetail)

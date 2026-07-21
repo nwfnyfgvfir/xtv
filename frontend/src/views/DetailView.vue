@@ -57,6 +57,8 @@ const canRescrape = computed(() =>
   Boolean((scrapeNumber.value || item.value?.number || '').trim()),
 )
 const isLocal = computed(() => item.value?.source_type === 'local')
+const canDelete = computed(() => Boolean(item.value))
+const deleteButtonLabel = computed(() => (isLocal.value ? '删除' : '删除索引'))
 const fileSizeLabel = computed(() => formatFileSize(item.value?.file_size))
 const canTranslate = computed(() => {
   if (!item.value) return false
@@ -168,26 +170,25 @@ async function onTranslate() {
 }
 
 async function onDelete() {
-  if (!item.value || !isLocal.value) return
+  if (!item.value) return
   const label = item.value.number || item.value.filename || String(item.value.id)
+  const msg = isLocal.value
+    ? `确定删除「${label}」？将删除磁盘上的视频文件及库中索引，此操作不可恢复。`
+    : `确定删除「${label}」的库索引？不会删除磁盘上的 .strm 文件；下次扫描可能重新入库。`
   try {
-    await ElMessageBox.confirm(
-      `确定删除「${label}」？将删除磁盘上的视频文件及库中索引，此操作不可恢复。`,
-      '删除影片',
-      {
-        type: 'warning',
-        confirmButtonText: '删除',
-        cancelButtonText: '取消',
-        confirmButtonClass: 'el-button--danger',
-      },
-    )
+    await ElMessageBox.confirm(msg, isLocal.value ? '删除影片' : '删除索引', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      confirmButtonClass: 'el-button--danger',
+    })
   } catch {
     return
   }
   deleteLoading.value = true
   try {
     await deleteMedia(item.value.id)
-    ElMessage.success('已删除')
+    ElMessage.success(isLocal.value ? '已删除' : '已删除索引')
     goBack()
   } catch (e: unknown) {
     ElMessage.error(getErrorMessage(e, '删除失败'))
@@ -289,7 +290,7 @@ watch(() => props.id, load)
             <span>{{ item.favorited ? '已收藏' : '收藏' }}</span>
           </button>
           <el-button
-            v-if="isLocal"
+            v-if="canDelete"
             type="danger"
             plain
             class="btn-delete"
@@ -297,7 +298,7 @@ watch(() => props.id, load)
             :disabled="deleteLoading"
             @click="onDelete"
           >
-            删除
+            {{ deleteButtonLabel }}
           </el-button>
         </div>
         <ExternalPlayersBar

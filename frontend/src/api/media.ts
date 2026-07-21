@@ -2,12 +2,14 @@ import client from './client'
 import type {
   Actor,
   AuthStatus,
+  BatchDeleteResult,
   BrowseDirsOut,
   Health,
   Library,
   LoginResult,
   MediaDetail,
   PaginatedActors,
+  PaginatedDuplicateGroups,
   PaginatedMedia,
   PlayInfo,
   Progress,
@@ -83,6 +85,12 @@ export const translateMedia = (id: number) =>
   client.post<MediaDetail>(`/media/${id}/translate`).then((r) => r.data)
 
 export const deleteMedia = (id: number) => client.delete(`/media/${id}`)
+
+export const listDuplicates = (params?: { q?: string; page?: number; page_size?: number }) =>
+  client.get<PaginatedDuplicateGroups>('/media/duplicates', { params }).then((r) => r.data)
+
+export const batchDeleteMedia = (ids: number[]) =>
+  client.post<BatchDeleteResult>('/media/batch-delete', { ids }).then((r) => r.data)
 
 export const favoriteMedia = (id: number) =>
   client.post<MediaDetail>(`/media/${id}/favorite`).then((r) => r.data)

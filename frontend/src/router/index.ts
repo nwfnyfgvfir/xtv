@@ -47,6 +47,11 @@ const router = createRouter({
       component: () => import('@/views/SettingsView.vue'),
     },
     {
+      path: '/duplicates',
+      name: 'duplicates',
+      component: () => import('@/views/DuplicatesView.vue'),
+    },
+    {
       path: '/login',
       name: 'login',
       component: () => import('@/views/LoginView.vue'),

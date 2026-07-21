@@ -82,3 +82,25 @@ def delete_local_media(db: Session, item: MediaItem) -> None:
     delete_orphan_actors(db)
     db.commit()
     bump_revision(library_id)
+
+
+def delete_media_index(db: Session, item: MediaItem) -> None:
+    """Remove the library index row only (no disk unlink).
+
+    Suitable for ``strm`` and other non-local entries. A later scan may re-ingest
+    the file if it still exists under the library path.
+    """
+    library_id = item.library_id
+    db.delete(item)
+    db.flush()
+    delete_orphan_actors(db)
+    db.commit()
+    bump_revision(library_id)
+
+
+def delete_media_item(db: Session, item: MediaItem) -> None:
+    """Unified delete: local files + index; non-local index only."""
+    if (item.source_type or "").lower() == "local":
+        delete_local_media(db, item)
+    else:
+        delete_media_index(db, item)
