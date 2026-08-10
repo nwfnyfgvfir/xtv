@@ -18,12 +18,14 @@ from app.schemas import (
     MediaListItem,
     PaginatedDuplicateGroups,
     PaginatedMedia,
+    RenameIn,
     RescrapeIn,
 )
 from app.services.duplicates import list_duplicate_groups
 from app.services.images import rewrite_image_url
 from app.services.media_delete import delete_media_item
 from app.services.naming import normalize_number
+from app.services.scanner import rename_media_item
 from app.services.scrape import apply_translations, scrape_media_item
 from app.services.sorting import media_order_by
 
@@ -339,3 +341,34 @@ def unfavorite_media(
             .one()
         )
     return _with_proxied_images(item, detail=True, favorited=False)  # type: ignore[return-value]
+
+
+@router.put("/{media_id}/rename", response_model=MediaDetail)
+def rename_media(
+    media_id: int,
+    body: RenameIn,
+    _: Annotated[dict, Depends(require_auth)],
+    db: Session = Depends(get_db),
+) -> MediaDetail:
+    """Rename a media file on disk and update DB path/filename."""
+    item = (
+        db.query(MediaItem)
+        .options(joinedload(MediaItem.actors), joinedload(MediaItem.favorite))
+        .filter(MediaItem.id == media_id)
+        .one_or_none()
+    )
+    if not item:
+        raise HTTPException(404, "media not found")
+
+    result = rename_media_item(db, item.library_id, media_id, body.new_filename)
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("message", "rename failed"))
+
+    # Refresh and return
+    item = (
+        db.query(MediaItem)
+        .options(joinedload(MediaItem.actors), joinedload(MediaItem.favorite))
+        .filter(MediaItem.id == media_id)
+        .one()
+    )
+    return _with_proxied_images(item, detail=True)  # type: ignore[return-value]

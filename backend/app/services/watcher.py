@@ -37,6 +37,12 @@ _watched_ids: set[int] = set()
 
 def _is_media_path(path: str) -> bool:
     settings = get_settings()
+
+    # Always skip common download temporary files
+    temp_exts = {"ts", "tmp", "part", "crdownload", "ytdlp", "partial"}
+    if Path(path).suffix.lower().lstrip(".") in temp_exts:
+        return False
+
     ext = Path(path).suffix.lower().lstrip(".")
     return bool(ext) and ext in settings.extension_set
 

@@ -30,6 +30,12 @@ def resolve_library_path(lib: Library) -> Path:
 def _is_media_file(path: Path, exts: set[str]) -> bool:
     if not path.is_file():
         return False
+
+    # Always skip common download temporary files (e.g. yt-dlp output)
+    temp_exts = {"ts", "tmp", "part", "crdownload", "ytdlp", "partial"}
+    if path.suffix.lower().lstrip(".") in temp_exts:
+        return False
+
     ext = path.suffix.lower().lstrip(".")
     return bool(ext) and ext in exts
 
@@ -483,3 +489,81 @@ def run_rescrape_pending_job(job_id: str, library_id: int) -> None:
         job.errors.append(str(exc))
     finally:
         db.close()
+
+
+def rename_media_item(db: Session, library_id: int, media_id: int, new_filename: str) -> dict:
+    """Rename a media file on disk and update DB path/filename.
+
+    ``new_filename`` may be a bare stem or a full name with extension.
+    Extension is preserved from the original file when omitted; path
+    traversal / separators are rejected.
+    """
+    lib = db.get(Library, library_id)
+    if not lib:
+        return {"ok": False, "message": "library not found"}
+    item = db.get(MediaItem, media_id)
+    if not item:
+        return {"ok": False, "message": "media not found"}
+    if item.library_id != library_id:
+        return {"ok": False, "message": "media not in library"}
+
+    old_path = Path(item.path)
+    if not old_path.exists() or not old_path.is_file():
+        return {"ok": False, "message": "file not found on disk"}
+
+    raw = (new_filename or "").strip()
+    if not raw:
+        return {"ok": False, "message": "empty filename"}
+    # Reject path separators / traversal — rename stays in the same directory.
+    if any(sep in raw for sep in ("/", "\\")) or raw in (".", "..") or ".." in raw:
+        return {"ok": False, "message": "invalid filename"}
+
+    old_ext = old_path.suffix  # includes leading dot, e.g. ".mp4"
+    # If user supplied an extension matching the original (case-insensitive), keep it;
+    # otherwise force original extension so media type is not silently changed.
+    candidate = Path(raw).name
+    if candidate.lower().endswith(old_ext.lower()) and old_ext:
+        new_name = candidate[: -len(old_ext)] + old_ext
+    elif old_ext:
+        # Strip any accidental extension the user typed, then re-attach original.
+        stem = Path(candidate).stem or candidate
+        new_name = f"{stem}{old_ext}"
+    else:
+        new_name = candidate
+
+    if not new_name or new_name in (".", ".."):
+        return {"ok": False, "message": "invalid filename"}
+
+    new_path = old_path.with_name(new_name)
+    if new_path.resolve() == old_path.resolve():
+        return {"ok": False, "message": "same filename"}
+    if new_path.exists():
+        return {"ok": False, "message": "target already exists"}
+
+    # Stay inside the library root.
+    try:
+        root = resolve_library_path(lib)
+        new_path.resolve().relative_to(root)
+    except ValueError:
+        return {"ok": False, "message": "target outside library"}
+
+    try:
+        old_path.rename(new_path)
+        item.filename = new_path.name
+        item.path = str(new_path.resolve())
+        # Re-extract number/disc/subtitle flags from the new name when possible.
+        parsed = extract_number(new_path.name)
+        if parsed.number:
+            item.number = parsed.number
+        if parsed.disc:
+            item.disc = parsed.disc
+        if parsed.subtitle_flag:
+            item.subtitle_flag = parsed.subtitle_flag
+        db.add(item)
+        db.commit()
+        bump_revision(library_id)
+        return {"ok": True, "new_path": str(new_path.resolve()), "new_filename": new_path.name}
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("rename_media_item failed")
+        db.rollback()
+        return {"ok": False, "message": str(exc)}

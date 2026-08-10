@@ -144,3 +144,6 @@ export const getMovieProviders = () =>
       from_cache?: boolean
     }>('/settings/providers')
     .then((r) => r.data)
+
+export const renameMedia = (id: number, body: { new_filename: string }) =>
+  client.put<MediaDetail>(`/media/${id}/rename`, body).then((r) => r.data)

@@ -219,6 +219,10 @@ class SettingsUpdate(BaseModel):
     extra: dict[str, str] | None = None
 
 
+class RenameIn(BaseModel):
+    new_filename: str = Field(min_length=1, max_length=512)
+
+
 class ScanJobOut(BaseModel):
     job_id: str
     status: str

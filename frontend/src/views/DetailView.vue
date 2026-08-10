@@ -11,6 +11,7 @@ import {
   getMedia,
   getSettings,
   playMedia,
+  renameMedia,
   rescrapeMedia,
   translateMedia,
   unfavoriteMedia,
@@ -37,6 +38,10 @@ const scrapeProvider = ref('')
 const scrapeFallback = ref(true)
 const scrapeNumber = ref('')
 const playerWrap = ref<HTMLElement | null>(null)
+const renameVisible = ref(false)
+const renameInput = ref('')
+const renameLoading = ref(false)
+const renameExt = ref('')
 
 const tags = computed(() => {
   if (!item.value?.tags_json) return [] as string[]
@@ -197,6 +202,40 @@ async function onDelete() {
   }
 }
 
+function openRename() {
+  if (!item.value) return
+  const name = item.value.filename || ''
+  const dot = name.lastIndexOf('.')
+  if (dot > 0) {
+    renameInput.value = name.slice(0, dot)
+    renameExt.value = name.slice(dot)
+  } else {
+    renameInput.value = name || item.value.title || ''
+    renameExt.value = ''
+  }
+  renameVisible.value = true
+}
+
+async function doRename() {
+  if (!item.value) return
+  const stem = renameInput.value.trim()
+  if (!stem) {
+    ElMessage.warning('请输入新文件名')
+    return
+  }
+  const newFilename = renameExt.value ? `${stem}${renameExt.value}` : stem
+  renameLoading.value = true
+  try {
+    item.value = await renameMedia(item.value.id, { new_filename: newFilename })
+    ElMessage.success('重命名成功')
+    renameVisible.value = false
+  } catch (e: unknown) {
+    ElMessage.error(getErrorMessage(e, '重命名失败'))
+  } finally {
+    renameLoading.value = false
+  }
+}
+
 /** Prefer history back so list ?page= is preserved; fallback to library home. */
 function goBack() {
   if (typeof window !== 'undefined' && window.history.length > 1) {
@@ -290,6 +329,14 @@ watch(() => props.id, load)
             <span>{{ item.favorited ? '已收藏' : '收藏' }}</span>
           </button>
           <el-button
+            plain
+            class="btn-rename"
+            :disabled="renameLoading"
+            @click="openRename"
+          >
+            重命名
+          </el-button>
+          <el-button
             v-if="canDelete"
             type="danger"
             plain
@@ -346,6 +393,21 @@ watch(() => props.id, load)
             翻译
           </el-button>
         </div>
+
+        <el-dialog v-model="renameVisible" title="重命名" :width="420" center>
+          <el-input
+            v-model="renameInput"
+            placeholder="新文件名（保留原扩展名）"
+            clearable
+          />
+          <template #footer>
+            <el-button @click="renameVisible = false">取消</el-button>
+            <el-button type="primary" :loading="renameLoading" @click="doRename">
+              确认重命名
+            </el-button>
+          </template>
+        </el-dialog>
+
         <div v-if="tags.length" class="tags" role="list" aria-label="标签">
           <span
             v-for="t in tags"
@@ -522,6 +584,26 @@ h1 {
 .btn-play:disabled {
   opacity: 0.75;
   cursor: wait;
+}
+
+.btn-rename {
+  background: var(--panel);
+  border-color: var(--border);
+  color: var(--text);
+  font-size: 14px;
+  padding: 8px 20px;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.btn-rename:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.btn-rename:active:not(:disabled) {
+  transform: scale(0.98);
 }
 .btn-fav {
   background: var(--panel);
