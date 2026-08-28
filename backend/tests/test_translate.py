@@ -4,7 +4,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.services.translate import (
     _map_target_for_bing,
+    _map_target_for_deepl,
     _parse_bing,
+    _parse_deepl,
     _parse_gtx,
     looks_chinese,
     translate_text,
@@ -41,6 +43,20 @@ def test_map_target_for_bing():
     assert _map_target_for_bing("en") == "en"
 
 
+def test_map_target_for_deepl():
+    assert _map_target_for_deepl("zh-CN") == "ZH"
+    assert _map_target_for_deepl("zh") == "ZH"
+    assert _map_target_for_deepl("zh-TW") == "ZH-HANT"
+    assert _map_target_for_deepl("zh-Hant") == "ZH-HANT"
+
+
+def test_parse_deepl():
+    data = {"translations": [{"detected_source_language": "JA", "text": "你好"}]}
+    assert _parse_deepl(data) == "你好"
+    assert _parse_deepl({}) is None
+    assert _parse_deepl({"translations": []}) is None
+
+
 def test_translate_skip_chinese():
     async def run():
         return await translate_text("已经是中文")
@@ -70,6 +86,7 @@ def test_translate_gtx_mock():
         with (
             patch("app.services.translate.get_settings", return_value=settings),
             patch("httpx.AsyncClient", return_value=mock_client) as client_ctor,
+            patch("app.services.translate._google_throttle", new_callable=AsyncMock),
         ):
             out = await translate_text("原タイトルです")
             client_ctor.assert_called()
@@ -102,6 +119,7 @@ def test_translate_gtx_uses_proxy_when_enabled():
         with (
             patch("app.services.translate.get_settings", return_value=settings),
             patch("httpx.AsyncClient", return_value=mock_client) as client_ctor,
+            patch("app.services.translate._google_throttle", new_callable=AsyncMock),
         ):
             out = await translate_text("これは日本語")
             kwargs = client_ctor.call_args.kwargs or {}
@@ -121,6 +139,160 @@ def test_translate_gtx_proxy_off_ignores_url():
     )
     with patch("app.services.translate.get_settings", return_value=settings):
         assert _google_proxy_url() is None
+
+
+def test_translate_google_falls_back_to_bing():
+    from app.services.translate import _CACHE, _CACHE_LOCK
+
+    with _CACHE_LOCK:
+        _CACHE.clear()
+
+    rate_limited = MagicMock()
+    rate_limited.status_code = 429
+    rate_limited.is_success = False
+    rate_limited.headers = {}
+
+    bing_ok = MagicMock()
+    bing_ok.status_code = 200
+    bing_ok.is_success = True
+    bing_ok.json.return_value = [{"translations": [{"text": "必应译", "to": "zh-Hans"}]}]
+
+    auth_resp = MagicMock()
+    auth_resp.status_code = 200
+    auth_resp.is_success = True
+    auth_resp.text = "aaa.bbb.ccc"
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__.return_value = mock_client
+    mock_client.__aexit__.return_value = None
+    mock_client.get = AsyncMock(
+        side_effect=lambda *args, **kwargs: (
+            auth_resp if "edge.microsoft.com" in args[0] else rate_limited
+        )
+    )
+    mock_client.post = AsyncMock(return_value=bing_ok)
+
+    settings = SimpleNamespace(
+        translate_provider="google",
+        translate_google_proxy=False,
+        translate_google_proxy_url="",
+    )
+
+    async def run():
+        with (
+            patch("app.services.translate.get_settings", return_value=settings),
+            patch("httpx.AsyncClient", return_value=mock_client),
+            patch("app.services.translate._edge_token", None),
+            patch("app.services.translate._edge_token_exp", 0.0),
+            patch("app.services.translate.asyncio.sleep", new_callable=AsyncMock),
+            patch("app.services.translate._google_throttle", new_callable=AsyncMock),
+        ):
+            return await translate_text("fallback-only-phrase")
+
+    out = asyncio.run(run())
+    assert out == "必应译"
+    mock_client.post.assert_awaited()
+
+
+def test_normalize_deepl_api_url():
+    from app.services.translate import _normalize_deepl_api_url
+
+    assert _normalize_deepl_api_url("") == ""
+    assert (
+        _normalize_deepl_api_url("https://api-free.deepl.com/v2/translate")
+        == "https://api-free.deepl.com/v2/translate"
+    )
+    assert (
+        _normalize_deepl_api_url("https://proxy.example.com/deepl")
+        == "https://proxy.example.com/deepl/v2/translate"
+    )
+
+
+def test_deepl_custom_api_url():
+    from app.services.translate import _deepl_translate_url
+
+    settings = SimpleNamespace(
+        translate_deepl_api_url="https://proxy.example.com/deepl/",
+        translate_deepl_free=True,
+        translate_deepl_api_key="key:fx",
+    )
+    with patch("app.services.translate.get_settings", return_value=settings):
+        assert _deepl_translate_url() == "https://proxy.example.com/deepl/v2/translate"
+
+
+def test_translate_deepl_mock():
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.is_success = True
+    mock_resp.json.return_value = {
+        "translations": [{"detected_source_language": "JA", "text": "DeepL译"}]
+    }
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__.return_value = mock_client
+    mock_client.__aexit__.return_value = None
+    mock_client.post = AsyncMock(return_value=mock_resp)
+
+    settings = SimpleNamespace(
+        translate_provider="deepl",
+        translate_deepl_api_key="test-key:fx",
+        translate_deepl_api_url="https://custom.example.com/v2/translate",
+        translate_deepl_free=True,
+        translate_deepl_proxy=False,
+        translate_deepl_proxy_url="",
+    )
+
+    async def run():
+        with (
+            patch("app.services.translate.get_settings", return_value=settings),
+            patch("httpx.AsyncClient", return_value=mock_client) as client_ctor,
+        ):
+            out = await translate_text("これは日本語")
+            kwargs = client_ctor.call_args.kwargs or {}
+            assert "proxy" not in kwargs
+            return out
+
+    out = asyncio.run(run())
+    assert out == "DeepL译"
+    assert mock_client.post.await_args.args[0] == "https://custom.example.com/v2/translate"
+    call_kwargs = mock_client.post.await_args.kwargs
+    assert call_kwargs["json"]["target_lang"] == "ZH"
+    assert call_kwargs["headers"]["Authorization"] == "DeepL-Auth-Key test-key:fx"
+
+
+def test_translate_deepl_uses_proxy():
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.is_success = True
+    mock_resp.json.return_value = {
+        "translations": [{"detected_source_language": "JA", "text": "代理译"}]
+    }
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__.return_value = mock_client
+    mock_client.__aexit__.return_value = None
+    mock_client.post = AsyncMock(return_value=mock_resp)
+
+    settings = SimpleNamespace(
+        translate_provider="deepl",
+        translate_deepl_api_key="pro-key",
+        translate_deepl_free=False,
+        translate_deepl_proxy=True,
+        translate_deepl_proxy_url="socks5h://127.0.0.1:1080",
+    )
+
+    async def run():
+        with (
+            patch("app.services.translate.get_settings", return_value=settings),
+            patch("httpx.AsyncClient", return_value=mock_client) as client_ctor,
+        ):
+            out = await translate_text("proxy phrase")
+            kwargs = client_ctor.call_args.kwargs or {}
+            assert kwargs.get("proxy") == "socks5h://127.0.0.1:1080"
+            return out
+
+    out = asyncio.run(run())
+    assert out == "代理译"
 
 
 def test_translate_bing_mock():

@@ -21,6 +21,11 @@ const form = ref({
   translate_provider: 'google' as TranslateProvider,
   translate_google_proxy: false,
   translate_google_proxy_url: '',
+  translate_deepl_api_key: '',
+  translate_deepl_api_url: '',
+  translate_deepl_free: true,
+  translate_deepl_proxy: false,
+  translate_deepl_proxy_url: '',
   image_proxy_mode: 'site' as ImageProxyMode,
   image_external_proxy_url: '',
   image_local_cache: false,
@@ -34,6 +39,10 @@ const showExternalTpl = computed(() => form.value.image_proxy_mode === 'external
 const showGoogleProxy = computed(() => form.value.translate_provider === 'google')
 const showGoogleProxyUrl = computed(
   () => showGoogleProxy.value && form.value.translate_google_proxy,
+)
+const showDeepL = computed(() => form.value.translate_provider === 'deepl')
+const showDeepLProxyUrl = computed(
+  () => showDeepL.value && form.value.translate_deepl_proxy,
 )
 const movieProviders = computed(() => settings.value?.movie_providers || [])
 const providerCount = computed(() => movieProviders.value.length)
@@ -54,7 +63,9 @@ function normalizeMode(mode: string | undefined): ImageProxyMode {
 }
 
 function normalizeProvider(mode: string | undefined): TranslateProvider {
-  return mode === 'bing' ? 'bing' : 'google'
+  if (mode === 'bing') return 'bing'
+  if (mode === 'deepl') return 'deepl'
+  return 'google'
 }
 
 function applySettingsToForm(s: Settings) {
@@ -64,6 +75,10 @@ function applySettingsToForm(s: Settings) {
   form.value.translate_provider = normalizeProvider(s.translate_provider)
   form.value.translate_google_proxy = Boolean(s.translate_google_proxy)
   form.value.translate_google_proxy_url = s.translate_google_proxy_url || ''
+  form.value.translate_deepl_free = s.translate_deepl_free !== false
+  form.value.translate_deepl_api_url = s.translate_deepl_api_url || ''
+  form.value.translate_deepl_proxy = Boolean(s.translate_deepl_proxy)
+  form.value.translate_deepl_proxy_url = s.translate_deepl_proxy_url || ''
   form.value.image_proxy_mode = normalizeMode(s.image_proxy_mode)
   form.value.image_external_proxy_url = s.image_external_proxy_url || ''
   form.value.image_local_cache = Boolean(s.image_local_cache)
@@ -72,6 +87,7 @@ function applySettingsToForm(s: Settings) {
   form.value.metatube_provider_priority = [...(s.metatube_provider_priority || [])]
   form.value.metatube_fallback = s.metatube_fallback !== false
   form.value.metatube_token = ''
+  form.value.translate_deepl_api_key = ''
   priorityPick.value = [...form.value.metatube_provider_priority]
 }
 
@@ -144,6 +160,10 @@ async function save() {
       translate_provider: form.value.translate_provider,
       translate_google_proxy: form.value.translate_google_proxy,
       translate_google_proxy_url: form.value.translate_google_proxy_url,
+      translate_deepl_free: form.value.translate_deepl_free,
+      translate_deepl_api_url: form.value.translate_deepl_api_url,
+      translate_deepl_proxy: form.value.translate_deepl_proxy,
+      translate_deepl_proxy_url: form.value.translate_deepl_proxy_url,
       image_proxy_mode: form.value.image_proxy_mode,
       image_external_proxy_url: form.value.image_external_proxy_url,
       image_local_cache: form.value.image_local_cache,
@@ -153,6 +173,9 @@ async function save() {
       metatube_fallback: form.value.metatube_fallback,
     }
     if (form.value.metatube_token) body.metatube_token = form.value.metatube_token
+    if (form.value.translate_deepl_api_key) {
+      body.translate_deepl_api_key = form.value.translate_deepl_api_key
+    }
     settings.value = await updateSettings(body)
     applySettingsToForm(settings.value)
     health.value = await getHealth()
@@ -330,6 +353,7 @@ onMounted(() => {
           >
             <el-option label="免费 Google（gtx）" value="google" />
             <el-option label="免费必应（Edge）" value="bing" />
+            <el-option label="DeepL（需 API Key）" value="deepl" />
           </el-select>
         </el-form-item>
         <el-form-item v-if="showGoogleProxy" label="Google 走代理">
@@ -346,6 +370,48 @@ onMounted(() => {
             <code>socks5://</code> / <code>socks5h://</code>
           </span>
         </el-form-item>
+        <template v-if="showDeepL">
+          <el-form-item label="DeepL API Key">
+            <el-input
+              v-model="form.translate_deepl_api_key"
+              type="password"
+              show-password
+              placeholder="留空则不修改"
+            />
+            <span class="field-hint muted block">
+              {{ settings?.translate_deepl_api_key_set ? '已配置' : '未配置' }} ·
+              免费 Key 以 <code>:fx</code> 结尾，自动走 api-free 端点
+            </span>
+          </el-form-item>
+          <el-form-item label="DeepL API 地址">
+            <el-input
+              v-model="form.translate_deepl_api_url"
+              placeholder="留空自动：api-free.deepl.com 或 api.deepl.com"
+            />
+            <span class="field-hint muted block">
+              可填完整地址或域名根路径（自动补 <code>/v2/translate</code>）；
+              填写后优先于下方「免费端点」开关
+            </span>
+          </el-form-item>
+          <el-form-item label="DeepL 免费端点">
+            <el-switch v-model="form.translate_deepl_free" :disabled="!!form.translate_deepl_api_url.trim()" />
+            <span class="field-hint muted">Pro Key 请关闭；自定义地址时忽略</span>
+          </el-form-item>
+          <el-form-item label="DeepL 走代理">
+            <el-switch v-model="form.translate_deepl_proxy" />
+            <span class="field-hint muted">关闭则直连 DeepL API</span>
+          </el-form-item>
+          <el-form-item v-if="showDeepLProxyUrl" label="DeepL 代理地址">
+            <el-input
+              v-model="form.translate_deepl_proxy_url"
+              placeholder="http://127.0.0.1:7890"
+            />
+            <span class="field-hint muted block">
+              支持 <code>http://</code> / <code>https://</code> /
+              <code>socks5://</code> / <code>socks5h://</code>
+            </span>
+          </el-form-item>
+        </template>
         <el-form-item label="图片代理">
           <el-select v-model="form.image_proxy_mode" style="width: 100%">
             <el-option label="本站代理（/api/images/proxy）" value="site" />

@@ -190,9 +190,14 @@ class SettingsOut(BaseModel):
     media_root: str
     auto_scrape: bool
     auto_translate: bool = True
-    translate_provider: Literal["google", "bing"] = "google"
+    translate_provider: Literal["google", "bing", "deepl"] = "google"
     translate_google_proxy: bool = False
     translate_google_proxy_url: str = ""
+    translate_deepl_api_key_set: bool = False
+    translate_deepl_api_url: str = ""
+    translate_deepl_free: bool = True
+    translate_deepl_proxy: bool = False
+    translate_deepl_proxy_url: str = ""
     image_proxy_mode: Literal["site", "metatube", "external"] = "site"
     image_external_proxy_url: str = ""
     image_local_cache: bool = False
@@ -213,9 +218,14 @@ class SettingsUpdate(BaseModel):
     metatube_fallback: bool | None = None
     auto_scrape: bool | None = None
     auto_translate: bool | None = None
-    translate_provider: Literal["google", "bing"] | None = None
+    translate_provider: Literal["google", "bing", "deepl"] | None = None
     translate_google_proxy: bool | None = None
     translate_google_proxy_url: str | None = None
+    translate_deepl_api_key: str | None = None
+    translate_deepl_api_url: str | None = None
+    translate_deepl_free: bool | None = None
+    translate_deepl_proxy: bool | None = None
+    translate_deepl_proxy_url: str | None = None
     image_proxy_mode: Literal["site", "metatube", "external"] | None = None
     image_external_proxy_url: str | None = None
     image_local_cache: bool | None = None

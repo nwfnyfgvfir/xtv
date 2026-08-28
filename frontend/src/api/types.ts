@@ -127,7 +127,7 @@ export interface Progress {
 
 export type ImageProxyMode = 'site' | 'metatube' | 'external'
 
-export type TranslateProvider = 'google' | 'bing'
+export type TranslateProvider = 'google' | 'bing' | 'deepl'
 
 export type MediaSort =
   | 'number_asc'
@@ -151,6 +151,11 @@ export interface Settings {
   translate_provider?: TranslateProvider
   translate_google_proxy?: boolean
   translate_google_proxy_url?: string
+  translate_deepl_api_key_set?: boolean
+  translate_deepl_api_url?: string
+  translate_deepl_free?: boolean
+  translate_deepl_proxy?: boolean
+  translate_deepl_proxy_url?: string
   image_proxy_mode?: ImageProxyMode
   image_external_proxy_url?: string
   image_local_cache?: boolean

@@ -35,12 +35,36 @@ _EDGE_UA = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/172.16.1.5 Safari/537.36 Edg/172.16.1.5"
 )
+_GOOGLE_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/131.0.0.0 Safari/537.36"
+)
+_GOOGLE_BASE_URLS = (
+    "https://translate.googleapis.com/translate_a/single",
+    "https://translate.google.com/translate_a/single",
+)
+_GOOGLE_HEADERS = {
+    "User-Agent": _GOOGLE_UA,
+    "Accept": "*/*",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "Referer": "https://translate.google.com/",
+}
+_GOOGLE_MIN_INTERVAL = 0.45  # seconds between gtx calls (title/plot/tags burst)
+_GOOGLE_MAX_ATTEMPTS = 5
+_DEEPL_FREE_URL = "https://api-free.deepl.com/v2/translate"
+_DEEPL_PRO_URL = "https://api.deepl.com/v2/translate"
+_VALID_PROVIDERS = frozenset({"google", "bing", "deepl"})
+_RETRYABLE_STATUS = frozenset({429, 502, 503, 504})
 _TOKEN_SKEW = 60.0
 _TOKEN_FALLBACK_TTL = 540.0  # ~9 min if JWT exp cannot be parsed
 
 _token_lock = Lock()
 _edge_token: str | None = None
 _edge_token_exp: float = 0.0
+
+_google_lock = asyncio.Lock()
+_google_last_at: float = 0.0
 
 _HTTP_TIMEOUT = httpx.Timeout(12.0, connect=8.0)
 
@@ -110,6 +134,22 @@ def _parse_bing(data: Any) -> str | None:
     return out or None
 
 
+def _parse_deepl(data: Any) -> str | None:
+    # {"translations":[{"detected_source_language":"JA","text":"..."}]}
+    if not isinstance(data, dict):
+        return None
+    translations = data.get("translations")
+    if not isinstance(translations, list) or not translations:
+        return None
+    first = translations[0]
+    if not isinstance(first, dict):
+        return None
+    text = first.get("text")
+    if isinstance(text, str) and text.strip():
+        return text.strip()
+    return None
+
+
 def _map_target_for_bing(target: str) -> str:
     t = (target or "").strip()
     if t in ("zh-CN", "zh", "zh-Hans"):
@@ -117,6 +157,13 @@ def _map_target_for_bing(target: str) -> str:
     if t in ("zh-TW", "zh-Hant"):
         return "zh-Hant"
     return t or "zh-Hans"
+
+
+def _map_target_for_deepl(target: str) -> str:
+    t = (target or "").strip()
+    if t in ("zh-TW", "zh-Hant"):
+        return "ZH-HANT"
+    return "ZH"
 
 
 def _parse_jwt_exp(token: str) -> float | None:
@@ -140,7 +187,7 @@ def _resolved_provider() -> str:
         raw = (get_settings().translate_provider or "google").strip().lower()
     except Exception:  # noqa: BLE001
         return "google"
-    return raw if raw in ("google", "bing") else "google"
+    return raw if raw in _VALID_PROVIDERS else "google"
 
 
 def _google_proxy_url() -> str | None:
@@ -153,6 +200,95 @@ def _google_proxy_url() -> str | None:
         return None
     url = (getattr(s, "translate_google_proxy_url", None) or "").strip()
     return url or None
+
+
+def _deepl_api_key() -> str | None:
+    try:
+        s = get_settings()
+        key = (getattr(s, "translate_deepl_api_key", None) or "").strip()
+    except Exception:  # noqa: BLE001
+        return None
+    return key or None
+
+
+def _deepl_proxy_url() -> str | None:
+    try:
+        s = get_settings()
+    except Exception:  # noqa: BLE001
+        return None
+    if not bool(getattr(s, "translate_deepl_proxy", False)):
+        return None
+    url = (getattr(s, "translate_deepl_proxy_url", None) or "").strip()
+    return url or None
+
+
+def _normalize_deepl_api_url(raw: str) -> str:
+    """Normalize custom DeepL endpoint; accepts base host or full /v2/translate URL."""
+    url = (raw or "").strip().rstrip("/")
+    if not url:
+        return ""
+    if url.endswith("/v2/translate"):
+        return url
+    return f"{url}/v2/translate"
+
+
+def _deepl_translate_url() -> str:
+    try:
+        s = get_settings()
+        custom = _normalize_deepl_api_url(getattr(s, "translate_deepl_api_url", "") or "")
+        if custom:
+            return custom
+    except Exception:  # noqa: BLE001
+        pass
+    key = _deepl_api_key() or ""
+    if key.endswith(":fx"):
+        return _DEEPL_FREE_URL
+    try:
+        s = get_settings()
+        use_free = bool(getattr(s, "translate_deepl_free", True))
+    except Exception:  # noqa: BLE001
+        use_free = True
+    return _DEEPL_FREE_URL if use_free else _DEEPL_PRO_URL
+
+
+def _deepl_client_kwargs() -> dict[str, Any]:
+    client_kwargs: dict[str, Any] = {"timeout": _HTTP_TIMEOUT}
+    proxy = _deepl_proxy_url()
+    if proxy:
+        client_kwargs["proxy"] = proxy
+    return client_kwargs
+
+
+def _retry_delay_seconds(attempt: int, status_code: int, resp: httpx.Response | None) -> float:
+    """Backoff for retryable HTTP statuses; 429 uses longer waits."""
+    if resp is not None:
+        retry_after = resp.headers.get("Retry-After")
+        if retry_after:
+            try:
+                return max(float(retry_after), 1.0)
+            except ValueError:
+                pass
+    if status_code == 429:
+        return min(2.0 * (2 ** (attempt - 1)), 30.0)
+    return 0.6 * attempt
+
+
+async def _google_throttle() -> None:
+    global _google_last_at
+    async with _google_lock:
+        now = time.monotonic()
+        wait = _GOOGLE_MIN_INTERVAL - (now - _google_last_at)
+        if wait > 0:
+            await asyncio.sleep(wait)
+        _google_last_at = time.monotonic()
+
+
+def _google_client_kwargs() -> dict[str, Any]:
+    client_kwargs: dict[str, Any] = {"timeout": _HTTP_TIMEOUT}
+    proxy = _google_proxy_url()
+    if proxy:
+        client_kwargs["proxy"] = proxy
+    return client_kwargs
 
 
 async def _fetch_edge_token(client: httpx.AsyncClient) -> str:
@@ -188,43 +324,54 @@ async def _get_edge_token(client: httpx.AsyncClient, *, force: bool = False) -> 
 
 
 async def _translate_google_gtx(text: str, target: str) -> str | None:
-    url = (
-        "https://translate.googleapis.com/translate_a/single"
-        f"?client=gtx&sl=auto&tl={quote(target)}&dt=t&q={quote(text)}"
-    )
-    proxy = _google_proxy_url()
-    client_kwargs: dict[str, Any] = {"timeout": _HTTP_TIMEOUT}
-    if proxy:
-        client_kwargs["proxy"] = proxy
+    query = f"client=gtx&sl=auto&tl={quote(target)}&dt=t&q={quote(text)}"
+    client_kwargs = _google_client_kwargs()
     last_err: Exception | None = None
-    for attempt in range(1, 4):
-        try:
-            async with httpx.AsyncClient(**client_kwargs) as client:
-                resp = await client.get(
-                    url,
-                    headers={"User-Agent": "TV-App/0.2", "Accept": "application/json"},
-                )
-            if resp.status_code in {429, 502, 503, 504} and attempt < 3:
-                await asyncio.sleep(0.6 * attempt)
-                continue
+
+    for base_url in _GOOGLE_BASE_URLS:
+        url = f"{base_url}?{query}"
+        for attempt in range(1, _GOOGLE_MAX_ATTEMPTS + 1):
+            await _google_throttle()
+            resp: httpx.Response | None = None
+            try:
+                async with httpx.AsyncClient(**client_kwargs) as client:
+                    resp = await client.get(url, headers=_GOOGLE_HEADERS)
+            except httpx.HTTPError as exc:
+                last_err = exc
+                if attempt < _GOOGLE_MAX_ATTEMPTS:
+                    await asyncio.sleep(_retry_delay_seconds(attempt, 0, resp))
+                    continue
+                break
+
+            if resp.status_code in _RETRYABLE_STATUS:
+                last_err = RuntimeError(f"HTTP {resp.status_code}")
+                if attempt < _GOOGLE_MAX_ATTEMPTS:
+                    delay = _retry_delay_seconds(attempt, resp.status_code, resp)
+                    logger.info(
+                        "google translate retry %s/%s: HTTP %s (wait %.1fs)",
+                        attempt,
+                        _GOOGLE_MAX_ATTEMPTS,
+                        resp.status_code,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                break
+
             if not resp.is_success:
                 last_err = RuntimeError(f"HTTP {resp.status_code}")
                 break
+
             try:
                 body = resp.json()
             except Exception as exc:  # noqa: BLE001
                 last_err = exc
                 break
+
             translated = _parse_gtx(body)
             if translated:
                 return translated
             last_err = RuntimeError("empty gtx parse")
-            break
-        except httpx.HTTPError as exc:
-            last_err = exc
-            if attempt < 3:
-                await asyncio.sleep(0.6 * attempt)
-                continue
             break
 
     logger.warning("google translate failed: %s", last_err)
@@ -265,8 +412,9 @@ async def _translate_bing(text: str, target: str) -> str | None:
                 force_token = True
                 await asyncio.sleep(0.3)
                 continue
-            if resp.status_code in {429, 502, 503, 504} and attempt < 3:
-                await asyncio.sleep(0.6 * attempt)
+            if resp.status_code in _RETRYABLE_STATUS and attempt < 3:
+                delay = _retry_delay_seconds(attempt, resp.status_code, resp)
+                await asyncio.sleep(delay)
                 continue
             if not resp.is_success:
                 last_err = RuntimeError(f"HTTP {resp.status_code}")
@@ -292,6 +440,55 @@ async def _translate_bing(text: str, target: str) -> str | None:
     return None
 
 
+async def _translate_deepl(text: str, target: str) -> str | None:
+    api_key = _deepl_api_key()
+    if not api_key:
+        logger.warning("deepl translate skipped: API key not configured")
+        return None
+
+    url = _deepl_translate_url()
+    target_lang = _map_target_for_deepl(target)
+    client_kwargs = _deepl_client_kwargs()
+    headers = {
+        "Authorization": f"DeepL-Auth-Key {api_key}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    body = {"text": [text], "target_lang": target_lang}
+    last_err: Exception | None = None
+
+    for attempt in range(1, 4):
+        try:
+            async with httpx.AsyncClient(**client_kwargs) as client:
+                resp = await client.post(url, headers=headers, json=body)
+            if resp.status_code in _RETRYABLE_STATUS and attempt < 3:
+                delay = _retry_delay_seconds(attempt, resp.status_code, resp)
+                await asyncio.sleep(delay)
+                continue
+            if not resp.is_success:
+                last_err = RuntimeError(f"HTTP {resp.status_code}")
+                break
+            try:
+                data = resp.json()
+            except Exception as exc:  # noqa: BLE001
+                last_err = exc
+                break
+            translated = _parse_deepl(data)
+            if translated:
+                return translated
+            last_err = RuntimeError("empty deepl parse")
+            break
+        except httpx.HTTPError as exc:
+            last_err = exc
+            if attempt < 3:
+                await asyncio.sleep(_retry_delay_seconds(attempt, 0, None))
+                continue
+            break
+
+    logger.warning("deepl translate failed: %s", last_err)
+    return None
+
+
 async def translate_text(text: str | None, *, target: str = "zh-CN") -> str | None:
     """Translate text via configured free provider. Fail-open returns original."""
     if text is None:
@@ -311,8 +508,13 @@ async def translate_text(text: str | None, *, target: str = "zh-CN") -> str | No
 
     if provider == "bing":
         translated = await _translate_bing(s, target)
+    elif provider == "deepl":
+        translated = await _translate_deepl(s, target)
     else:
         translated = await _translate_google_gtx(s, target)
+        if not translated:
+            logger.info("google translate unavailable, trying bing fallback")
+            translated = await _translate_bing(s, target)
 
     if translated:
         _cache_set(cache_key, translated)

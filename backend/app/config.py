@@ -29,10 +29,16 @@ class Settings(BaseSettings):
     scan_extensions: str = "mp4,mkv,avi,wmv,m2ts,ts,mov,strm"
     auto_scrape: bool = True
     auto_translate: bool = True
-    translate_provider: str = "google"  # google | bing
+    translate_provider: str = "google"  # google | bing | deepl
     # Google gtx only: optional HTTP(S)/SOCKS proxy; toggle off → direct
     translate_google_proxy: bool = False
     translate_google_proxy_url: str = ""  # e.g. http://127.0.0.1:7890
+    # DeepL API (requires key from deepl.com/pro-api)
+    translate_deepl_api_key: str = ""
+    translate_deepl_api_url: str = ""  # empty = auto (free/pro by key)
+    translate_deepl_free: bool = True  # api-free.deepl.com vs api.deepl.com
+    translate_deepl_proxy: bool = False
+    translate_deepl_proxy_url: str = ""
     image_proxy_mode: str = "site"  # site | metatube | external
     image_external_proxy_url: str = ""  # template with {url}
     image_local_cache: bool = False
