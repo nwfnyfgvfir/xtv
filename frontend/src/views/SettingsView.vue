@@ -390,7 +390,7 @@ onMounted(() => {
             />
             <span class="field-hint muted block">
               可填完整地址或域名根路径（自动补 <code>/v2/translate</code>）；
-              填写后优先于下方「免费端点」开关
+              已含 <code>/translate</code> 的 DeepLX 地址会原样使用
             </span>
           </el-form-item>
           <el-form-item label="DeepL 免费端点">

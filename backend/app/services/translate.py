@@ -150,6 +150,19 @@ def _parse_deepl(data: Any) -> str | None:
     return None
 
 
+def _parse_deeplx(data: Any) -> str | None:
+    # DeepLX native: {"code":200,"data":"..."}
+    if not isinstance(data, dict):
+        return None
+    code = data.get("code")
+    if code not in (200, "200"):
+        return None
+    text = data.get("data")
+    if isinstance(text, str) and text.strip():
+        return text.strip()
+    return None
+
+
 def _map_target_for_bing(target: str) -> str:
     t = (target or "").strip()
     if t in ("zh-CN", "zh", "zh-Hans"):
@@ -223,13 +236,24 @@ def _deepl_proxy_url() -> str | None:
 
 
 def _normalize_deepl_api_url(raw: str) -> str:
-    """Normalize custom DeepL endpoint; accepts base host or full /v2/translate URL."""
+    """Normalize custom DeepL endpoint URL; do not mutate paths ending in /translate."""
     url = (raw or "").strip().rstrip("/")
     if not url:
         return ""
-    if url.endswith("/v2/translate"):
+    lower = url.lower()
+    if lower.endswith("/v2/translate") or lower.endswith("/translate"):
         return url
     return f"{url}/v2/translate"
+
+
+def _deepl_api_mode(url: str) -> str:
+    """Detect official DeepL vs DeepLX native API from endpoint URL."""
+    lower = (url or "").lower()
+    if lower.endswith("/v2/translate") or "deepl.com" in lower:
+        return "official"
+    if "deeplx" in lower or lower.endswith("/translate"):
+        return "deeplx"
+    return "official"
 
 
 def _deepl_translate_url() -> str:
@@ -441,20 +465,28 @@ async def _translate_bing(text: str, target: str) -> str | None:
 
 
 async def _translate_deepl(text: str, target: str) -> str | None:
+    url = _deepl_translate_url()
+    mode = _deepl_api_mode(url)
     api_key = _deepl_api_key()
-    if not api_key:
+    if mode == "official" and not api_key:
         logger.warning("deepl translate skipped: API key not configured")
         return None
+    if mode == "deeplx" and not url:
+        logger.warning("deepl translate skipped: DeepLX API URL not configured")
+        return None
 
-    url = _deepl_translate_url()
     target_lang = _map_target_for_deepl(target)
     client_kwargs = _deepl_client_kwargs()
-    headers = {
-        "Authorization": f"DeepL-Auth-Key {api_key}",
+    headers: dict[str, str] = {
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
-    body = {"text": [text], "target_lang": target_lang}
+    if mode == "official":
+        headers["Authorization"] = f"DeepL-Auth-Key {api_key}"
+        body: dict[str, Any] = {"text": [text], "target_lang": target_lang}
+    else:
+        body = {"text": text, "target_lang": target_lang}
+
     last_err: Exception | None = None
 
     for attempt in range(1, 4):
@@ -473,10 +505,13 @@ async def _translate_deepl(text: str, target: str) -> str | None:
             except Exception as exc:  # noqa: BLE001
                 last_err = exc
                 break
-            translated = _parse_deepl(data)
+            translated = _parse_deeplx(data) if mode == "deeplx" else _parse_deepl(data)
             if translated:
                 return translated
-            last_err = RuntimeError("empty deepl parse")
+            if isinstance(data, dict) and data.get("message"):
+                last_err = RuntimeError(str(data.get("message")))
+            else:
+                last_err = RuntimeError("empty deepl parse")
             break
         except httpx.HTTPError as exc:
             last_err = exc

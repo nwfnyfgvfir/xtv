@@ -57,6 +57,14 @@ def test_parse_deepl():
     assert _parse_deepl({"translations": []}) is None
 
 
+def test_parse_deeplx():
+    from app.services.translate import _parse_deeplx
+
+    data = {"code": 200, "data": "你好", "target_lang": "ZH"}
+    assert _parse_deeplx(data) == "你好"
+    assert _parse_deeplx({"code": 400, "message": "bad"}) is None
+
+
 def test_translate_skip_chinese():
     async def run():
         return await translate_text("已经是中文")
@@ -206,6 +214,20 @@ def test_normalize_deepl_api_url():
         _normalize_deepl_api_url("https://proxy.example.com/deepl")
         == "https://proxy.example.com/deepl/v2/translate"
     )
+    assert (
+        _normalize_deepl_api_url(
+            "https://api.deeplx.org/token123/translate"
+        )
+        == "https://api.deeplx.org/token123/translate"
+    )
+
+
+def test_deepl_api_mode():
+    from app.services.translate import _deepl_api_mode
+
+    assert _deepl_api_mode("https://api-free.deepl.com/v2/translate") == "official"
+    assert _deepl_api_mode("https://api.deeplx.org/abc/translate") == "deeplx"
+    assert _deepl_api_mode("https://api.deeplx.org/translate") == "deeplx"
 
 
 def test_deepl_custom_api_url():
@@ -218,6 +240,49 @@ def test_deepl_custom_api_url():
     )
     with patch("app.services.translate.get_settings", return_value=settings):
         assert _deepl_translate_url() == "https://proxy.example.com/deepl/v2/translate"
+
+
+def test_translate_deeplx_mock():
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.is_success = True
+    mock_resp.json.return_value = {
+        "code": 200,
+        "data": "DeepLX译",
+        "target_lang": "ZH",
+    }
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__.return_value = mock_client
+    mock_client.__aexit__.return_value = None
+    mock_client.post = AsyncMock(return_value=mock_resp)
+
+    settings = SimpleNamespace(
+        translate_provider="deepl",
+        translate_deepl_api_key="token123",
+        translate_deepl_api_url="https://api.deeplx.org/token123/translate",
+        translate_deepl_free=True,
+        translate_deepl_proxy=False,
+        translate_deepl_proxy_url="",
+    )
+
+    async def run():
+        with (
+            patch("app.services.translate.get_settings", return_value=settings),
+            patch("httpx.AsyncClient", return_value=mock_client),
+        ):
+            return await translate_text("これは日本語 deeplx")
+
+    out = asyncio.run(run())
+    assert out == "DeepLX译"
+    call_kwargs = mock_client.post.await_args.kwargs
+    assert call_kwargs["json"]["text"] == "これは日本語 deeplx"
+    assert call_kwargs["json"]["target_lang"] == "ZH"
+    assert "Authorization" not in (call_kwargs.get("headers") or {})
+    assert (
+        mock_client.post.await_args.args[0]
+        == "https://api.deeplx.org/token123/translate"
+    )
 
 
 def test_translate_deepl_mock():
