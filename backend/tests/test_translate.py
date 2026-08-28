@@ -165,19 +165,10 @@ def test_translate_google_falls_back_to_bing():
     bing_ok.is_success = True
     bing_ok.json.return_value = [{"translations": [{"text": "必应译", "to": "zh-Hans"}]}]
 
-    auth_resp = MagicMock()
-    auth_resp.status_code = 200
-    auth_resp.is_success = True
-    auth_resp.text = "aaa.bbb.ccc"
-
     mock_client = AsyncMock()
     mock_client.__aenter__.return_value = mock_client
     mock_client.__aexit__.return_value = None
-    mock_client.get = AsyncMock(
-        side_effect=lambda *args, **kwargs: (
-            auth_resp if "edge.microsoft.com" in args[0] else rate_limited
-        )
-    )
+    mock_client.get = AsyncMock(return_value=rate_limited)
     mock_client.post = AsyncMock(return_value=bing_ok)
 
     settings = SimpleNamespace(
@@ -190,10 +181,9 @@ def test_translate_google_falls_back_to_bing():
         with (
             patch("app.services.translate.get_settings", return_value=settings),
             patch("httpx.AsyncClient", return_value=mock_client),
-            patch("app.services.translate._edge_token", None),
-            patch("app.services.translate._edge_token_exp", 0.0),
             patch("app.services.translate.asyncio.sleep", new_callable=AsyncMock),
             patch("app.services.translate._google_throttle", new_callable=AsyncMock),
+            patch("app.services.translate._bing_throttle", new_callable=AsyncMock),
         ):
             return await translate_text("fallback-only-phrase")
 
@@ -408,12 +398,6 @@ def test_translate_deeplx_retries_429():
 
 
 def test_translate_bing_mock():
-    auth_resp = MagicMock()
-    auth_resp.status_code = 200
-    auth_resp.is_success = True
-    # dummy three-segment token (exp parse may fail → fallback TTL ok)
-    auth_resp.text = "aaa.bbb.ccc"
-
     translate_resp = MagicMock()
     translate_resp.status_code = 200
     translate_resp.is_success = True
@@ -424,7 +408,6 @@ def test_translate_bing_mock():
     mock_client = AsyncMock()
     mock_client.__aenter__.return_value = mock_client
     mock_client.__aexit__.return_value = None
-    mock_client.get = AsyncMock(return_value=auth_resp)
     mock_client.post = AsyncMock(return_value=translate_resp)
 
     settings = SimpleNamespace(translate_provider="bing")
@@ -432,33 +415,32 @@ def test_translate_bing_mock():
     async def run():
         with (
             patch("app.services.translate.get_settings", return_value=settings),
-            patch("app.services.translate._edge_token", None),
-            patch("app.services.translate._edge_token_exp", 0.0),
             patch("httpx.AsyncClient", return_value=mock_client),
+            patch("app.services.translate._bing_throttle", new_callable=AsyncMock),
         ):
             return await translate_text("原タイトルです")
 
     out = asyncio.run(run())
     assert out == "译后标题"
-    mock_client.get.assert_awaited()
     mock_client.post.assert_awaited()
     call_kwargs = mock_client.post.await_args
-    assert "api-version=3.0" in call_kwargs.args[0]
+    assert "translatetext" in call_kwargs.args[0]
     assert "to=zh-Hans" in call_kwargs.args[0]
+    assert call_kwargs.kwargs.get("json") == ["原タイトルです"]
     headers = call_kwargs.kwargs.get("headers") or {}
-    assert headers.get("Authorization") == "Bearer aaa.bbb.ccc"
-    assert call_kwargs.kwargs.get("json") == [{"Text": "原タイトルです"}]
+    assert "Authorization" not in headers
 
 
-def test_translate_bing_401_refreshes_token():
-    auth_resp = MagicMock()
-    auth_resp.status_code = 200
-    auth_resp.is_success = True
-    auth_resp.text = "tok.a.b"
+def test_translate_bing_retries_429():
+    from app.services.translate import _CACHE, _CACHE_LOCK
 
-    unauthorized = MagicMock()
-    unauthorized.status_code = 401
-    unauthorized.is_success = False
+    with _CACHE_LOCK:
+        _CACHE.clear()
+
+    rate_limited = MagicMock()
+    rate_limited.status_code = 429
+    rate_limited.is_success = False
+    rate_limited.headers = {}
 
     ok_resp = MagicMock()
     ok_resp.status_code = 200
@@ -468,22 +450,19 @@ def test_translate_bing_401_refreshes_token():
     mock_client = AsyncMock()
     mock_client.__aenter__.return_value = mock_client
     mock_client.__aexit__.return_value = None
-    mock_client.get = AsyncMock(return_value=auth_resp)
-    mock_client.post = AsyncMock(side_effect=[unauthorized, ok_resp])
+    mock_client.post = AsyncMock(side_effect=[rate_limited, ok_resp])
 
     settings = SimpleNamespace(translate_provider="bing")
 
     async def run():
         with (
             patch("app.services.translate.get_settings", return_value=settings),
-            patch("app.services.translate._edge_token", None),
-            patch("app.services.translate._edge_token_exp", 0.0),
             patch("httpx.AsyncClient", return_value=mock_client),
+            patch("app.services.translate._bing_throttle", new_callable=AsyncMock),
             patch("app.services.translate.asyncio.sleep", new_callable=AsyncMock),
         ):
-            return await translate_text("hello world title")
+            return await translate_text("hello world title bing429")
 
     out = asyncio.run(run())
     assert out == "成功"
-    assert mock_client.get.await_count >= 2
     assert mock_client.post.await_count == 2

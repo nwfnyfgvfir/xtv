@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
-import json
 import logging
 import re
 import time
@@ -28,12 +26,11 @@ _KANA_RE = re.compile(r"[぀-ヿ]")
 _CJK_RE = re.compile(r"[一-鿿]")
 _LATIN_RE = re.compile(r"[A-Za-z]")
 
-_EDGE_AUTH_URL = "https://edge.microsoft.com/translate/auth"
-_EDGE_TRANSLATE_URL = "https://api-edge.cognitive.microsofttranslator.com/translate"
+_EDGE_TRANSLATE_TEXT_URL = "https://edge.microsoft.com/translate/translatetext"
 _EDGE_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/172.16.1.5 Safari/537.36 Edg/172.16.1.5"
+    "Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0"
 )
 _GOOGLE_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -54,22 +51,21 @@ _GOOGLE_MIN_INTERVAL = 0.45  # seconds between gtx calls (title/plot/tags burst)
 _GOOGLE_MAX_ATTEMPTS = 5
 _DEEPL_MIN_INTERVAL = 0.8  # DeepLX public pool is stricter on burst
 _DEEPL_MAX_ATTEMPTS = 5
+_BING_MIN_INTERVAL = 0.45
+_BING_MAX_ATTEMPTS = 5
 _DEEPL_FREE_URL = "https://api-free.deepl.com/v2/translate"
 _DEEPL_PRO_URL = "https://api.deepl.com/v2/translate"
 _VALID_PROVIDERS = frozenset({"google", "bing", "deepl"})
 _RETRYABLE_STATUS = frozenset({429, 502, 503, 504})
-_TOKEN_SKEW = 60.0
-_TOKEN_FALLBACK_TTL = 540.0  # ~9 min if JWT exp cannot be parsed
-
-_token_lock = Lock()
-_edge_token: str | None = None
-_edge_token_exp: float = 0.0
 
 _google_lock = asyncio.Lock()
 _google_last_at: float = 0.0
 
 _deepl_lock = asyncio.Lock()
 _deepl_last_at: float = 0.0
+
+_bing_lock = asyncio.Lock()
+_bing_last_at: float = 0.0
 
 _HTTP_TIMEOUT = httpx.Timeout(12.0, connect=8.0)
 
@@ -182,22 +178,6 @@ def _map_target_for_deepl(target: str) -> str:
     if t in ("zh-TW", "zh-Hant"):
         return "ZH-HANT"
     return "ZH"
-
-
-def _parse_jwt_exp(token: str) -> float | None:
-    try:
-        parts = token.split(".")
-        if len(parts) < 2:
-            return None
-        payload_b64 = parts[1]
-        pad = "=" * (-len(payload_b64) % 4)
-        payload = json.loads(base64.urlsafe_b64decode(payload_b64 + pad))
-        exp = payload.get("exp")
-        if isinstance(exp, (int, float)):
-            return float(exp)
-    except Exception:  # noqa: BLE001
-        return None
-    return None
 
 
 def _resolved_provider() -> str:
@@ -322,44 +302,22 @@ async def _deepl_throttle() -> None:
         _deepl_last_at = time.monotonic()
 
 
+async def _bing_throttle() -> None:
+    global _bing_last_at
+    async with _bing_lock:
+        now = time.monotonic()
+        wait = _BING_MIN_INTERVAL - (now - _bing_last_at)
+        if wait > 0:
+            await asyncio.sleep(wait)
+        _bing_last_at = time.monotonic()
+
+
 def _google_client_kwargs() -> dict[str, Any]:
     client_kwargs: dict[str, Any] = {"timeout": _HTTP_TIMEOUT}
     proxy = _google_proxy_url()
     if proxy:
         client_kwargs["proxy"] = proxy
     return client_kwargs
-
-
-async def _fetch_edge_token(client: httpx.AsyncClient) -> str:
-    resp = await client.get(
-        _EDGE_AUTH_URL,
-        headers={"User-Agent": _EDGE_UA, "Accept": "*/*"},
-    )
-    if not resp.is_success:
-        raise RuntimeError(f"edge auth HTTP {resp.status_code}")
-    token = (resp.text or "").strip()
-    if not token or token.count(".") < 2:
-        raise RuntimeError("edge auth empty/invalid token")
-    return token
-
-
-async def _get_edge_token(client: httpx.AsyncClient, *, force: bool = False) -> str:
-    global _edge_token, _edge_token_exp
-    now = time.time()
-    with _token_lock:
-        if (
-            not force
-            and _edge_token
-            and now < (_edge_token_exp - _TOKEN_SKEW)
-        ):
-            return _edge_token
-
-    token = await _fetch_edge_token(client)
-    exp = _parse_jwt_exp(token) or (time.time() + _TOKEN_FALLBACK_TTL)
-    with _token_lock:
-        _edge_token = token
-        _edge_token_exp = exp
-        return _edge_token
 
 
 async def _translate_google_gtx(text: str, target: str) -> str | None:
@@ -418,62 +376,60 @@ async def _translate_google_gtx(text: str, target: str) -> str | None:
 
 
 async def _translate_bing(text: str, target: str) -> str | None:
+    """Free Edge translate via translatetext (no auth token; auth endpoint retired)."""
     to_lang = _map_target_for_bing(target)
-    url = f"{_EDGE_TRANSLATE_URL}?api-version=3.0&to={quote(to_lang)}"
-    body = [{"Text": text}]
+    url = f"{_EDGE_TRANSLATE_TEXT_URL}?isEnterpriseClient=false&to={quote(to_lang)}"
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": _EDGE_UA,
+    }
+    body = [text]
     last_err: Exception | None = None
-    force_token = False
 
-    for attempt in range(1, 4):
+    for attempt in range(1, _BING_MAX_ATTEMPTS + 1):
+        await _bing_throttle()
+        resp: httpx.Response | None = None
         try:
             async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
-                try:
-                    token = await _get_edge_token(client, force=force_token)
-                except Exception as exc:  # noqa: BLE001
-                    last_err = exc
-                    if attempt < 3:
-                        await asyncio.sleep(0.6 * attempt)
-                        force_token = True
-                        continue
-                    break
-                force_token = False
-                resp = await client.post(
-                    url,
-                    headers={
-                        "Authorization": f"Bearer {token}",
-                        "Content-Type": "application/json",
-                        "User-Agent": _EDGE_UA,
-                        "Accept": "application/json",
-                    },
-                    json=body,
-                )
-            if resp.status_code == 401 and attempt < 3:
-                force_token = True
-                await asyncio.sleep(0.3)
-                continue
-            if resp.status_code in _RETRYABLE_STATUS and attempt < 3:
-                delay = _retry_delay_seconds(attempt, resp.status_code, resp)
-                await asyncio.sleep(delay)
-                continue
-            if not resp.is_success:
-                last_err = RuntimeError(f"HTTP {resp.status_code}")
-                break
-            try:
-                data = resp.json()
-            except Exception as exc:  # noqa: BLE001
-                last_err = exc
-                break
-            translated = _parse_bing(data)
-            if translated:
-                return translated
-            last_err = RuntimeError("empty bing parse")
-            break
+                resp = await client.post(url, headers=headers, json=body)
         except httpx.HTTPError as exc:
             last_err = exc
-            if attempt < 3:
-                await asyncio.sleep(0.6 * attempt)
+            if attempt < _BING_MAX_ATTEMPTS:
+                await asyncio.sleep(_retry_delay_seconds(attempt, 0, resp))
                 continue
             break
+
+        if resp.status_code in _RETRYABLE_STATUS:
+            last_err = RuntimeError(f"HTTP {resp.status_code}")
+            if attempt < _BING_MAX_ATTEMPTS:
+                delay = _retry_delay_seconds(attempt, resp.status_code, resp)
+                logger.info(
+                    "bing translate retry %s/%s: HTTP %s (wait %.1fs)",
+                    attempt,
+                    _BING_MAX_ATTEMPTS,
+                    resp.status_code,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+                continue
+            break
+
+        if not resp.is_success:
+            last_err = RuntimeError(f"HTTP {resp.status_code}")
+            break
+
+        try:
+            data = resp.json()
+        except Exception as exc:  # noqa: BLE001
+            last_err = exc
+            break
+
+        translated = _parse_bing(data)
+        if translated:
+            return translated
+        last_err = RuntimeError("empty bing parse")
+        break
 
     logger.warning("bing translate failed: %s", last_err)
     return None
