@@ -270,6 +270,7 @@ def test_translate_deeplx_mock():
         with (
             patch("app.services.translate.get_settings", return_value=settings),
             patch("httpx.AsyncClient", return_value=mock_client),
+            patch("app.services.translate._deepl_throttle", new_callable=AsyncMock),
         ):
             return await translate_text("これは日本語 deeplx")
 
@@ -311,6 +312,7 @@ def test_translate_deepl_mock():
         with (
             patch("app.services.translate.get_settings", return_value=settings),
             patch("httpx.AsyncClient", return_value=mock_client) as client_ctor,
+            patch("app.services.translate._deepl_throttle", new_callable=AsyncMock),
         ):
             out = await translate_text("これは日本語")
             kwargs = client_ctor.call_args.kwargs or {}
@@ -350,6 +352,7 @@ def test_translate_deepl_uses_proxy():
         with (
             patch("app.services.translate.get_settings", return_value=settings),
             patch("httpx.AsyncClient", return_value=mock_client) as client_ctor,
+            patch("app.services.translate._deepl_throttle", new_callable=AsyncMock),
         ):
             out = await translate_text("proxy phrase")
             kwargs = client_ctor.call_args.kwargs or {}
@@ -358,6 +361,50 @@ def test_translate_deepl_uses_proxy():
 
     out = asyncio.run(run())
     assert out == "代理译"
+
+
+def test_translate_deeplx_retries_429():
+    from app.services.translate import _CACHE, _CACHE_LOCK
+
+    with _CACHE_LOCK:
+        _CACHE.clear()
+
+    rate_limited = MagicMock()
+    rate_limited.status_code = 429
+    rate_limited.is_success = False
+    rate_limited.headers = {}
+
+    ok_resp = MagicMock()
+    ok_resp.status_code = 200
+    ok_resp.is_success = True
+    ok_resp.json.return_value = {"code": 200, "data": "重试成功"}
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__.return_value = mock_client
+    mock_client.__aexit__.return_value = None
+    mock_client.post = AsyncMock(side_effect=[rate_limited, ok_resp])
+
+    settings = SimpleNamespace(
+        translate_provider="deepl",
+        translate_deepl_api_key="token123",
+        translate_deepl_api_url="https://api.deeplx.org/token123/translate",
+        translate_deepl_free=True,
+        translate_deepl_proxy=False,
+        translate_deepl_proxy_url="",
+    )
+
+    async def run():
+        with (
+            patch("app.services.translate.get_settings", return_value=settings),
+            patch("httpx.AsyncClient", return_value=mock_client),
+            patch("app.services.translate._deepl_throttle", new_callable=AsyncMock),
+            patch("app.services.translate.asyncio.sleep", new_callable=AsyncMock),
+        ):
+            return await translate_text("deeplx-429-retry")
+
+    out = asyncio.run(run())
+    assert out == "重试成功"
+    assert mock_client.post.await_count == 2
 
 
 def test_translate_bing_mock():

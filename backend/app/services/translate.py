@@ -52,6 +52,8 @@ _GOOGLE_HEADERS = {
 }
 _GOOGLE_MIN_INTERVAL = 0.45  # seconds between gtx calls (title/plot/tags burst)
 _GOOGLE_MAX_ATTEMPTS = 5
+_DEEPL_MIN_INTERVAL = 0.8  # DeepLX public pool is stricter on burst
+_DEEPL_MAX_ATTEMPTS = 5
 _DEEPL_FREE_URL = "https://api-free.deepl.com/v2/translate"
 _DEEPL_PRO_URL = "https://api.deepl.com/v2/translate"
 _VALID_PROVIDERS = frozenset({"google", "bing", "deepl"})
@@ -65,6 +67,9 @@ _edge_token_exp: float = 0.0
 
 _google_lock = asyncio.Lock()
 _google_last_at: float = 0.0
+
+_deepl_lock = asyncio.Lock()
+_deepl_last_at: float = 0.0
 
 _HTTP_TIMEOUT = httpx.Timeout(12.0, connect=8.0)
 
@@ -307,6 +312,16 @@ async def _google_throttle() -> None:
         _google_last_at = time.monotonic()
 
 
+async def _deepl_throttle() -> None:
+    global _deepl_last_at
+    async with _deepl_lock:
+        now = time.monotonic()
+        wait = _DEEPL_MIN_INTERVAL - (now - _deepl_last_at)
+        if wait > 0:
+            await asyncio.sleep(wait)
+        _deepl_last_at = time.monotonic()
+
+
 def _google_client_kwargs() -> dict[str, Any]:
     client_kwargs: dict[str, Any] = {"timeout": _HTTP_TIMEOUT}
     proxy = _google_proxy_url()
@@ -489,36 +504,66 @@ async def _translate_deepl(text: str, target: str) -> str | None:
 
     last_err: Exception | None = None
 
-    for attempt in range(1, 4):
+    for attempt in range(1, _DEEPL_MAX_ATTEMPTS + 1):
+        await _deepl_throttle()
+        resp: httpx.Response | None = None
         try:
             async with httpx.AsyncClient(**client_kwargs) as client:
                 resp = await client.post(url, headers=headers, json=body)
-            if resp.status_code in _RETRYABLE_STATUS and attempt < 3:
-                delay = _retry_delay_seconds(attempt, resp.status_code, resp)
-                await asyncio.sleep(delay)
-                continue
-            if not resp.is_success:
-                last_err = RuntimeError(f"HTTP {resp.status_code}")
-                break
-            try:
-                data = resp.json()
-            except Exception as exc:  # noqa: BLE001
-                last_err = exc
-                break
-            translated = _parse_deeplx(data) if mode == "deeplx" else _parse_deepl(data)
-            if translated:
-                return translated
-            if isinstance(data, dict) and data.get("message"):
-                last_err = RuntimeError(str(data.get("message")))
-            else:
-                last_err = RuntimeError("empty deepl parse")
-            break
         except httpx.HTTPError as exc:
             last_err = exc
-            if attempt < 3:
-                await asyncio.sleep(_retry_delay_seconds(attempt, 0, None))
+            if attempt < _DEEPL_MAX_ATTEMPTS:
+                await asyncio.sleep(_retry_delay_seconds(attempt, 0, resp))
                 continue
             break
+
+        if resp.status_code in _RETRYABLE_STATUS:
+            last_err = RuntimeError(f"HTTP {resp.status_code}")
+            if attempt < _DEEPL_MAX_ATTEMPTS:
+                delay = _retry_delay_seconds(attempt, resp.status_code, resp)
+                logger.info(
+                    "deepl translate retry %s/%s: HTTP %s (wait %.1fs)",
+                    attempt,
+                    _DEEPL_MAX_ATTEMPTS,
+                    resp.status_code,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+                continue
+            break
+
+        if not resp.is_success:
+            last_err = RuntimeError(f"HTTP {resp.status_code}")
+            break
+
+        try:
+            data = resp.json()
+        except Exception as exc:  # noqa: BLE001
+            last_err = exc
+            break
+
+        if mode == "deeplx" and isinstance(data, dict) and data.get("code") in (429, "429"):
+            last_err = RuntimeError("DeepLX rate limited (code 429)")
+            if attempt < _DEEPL_MAX_ATTEMPTS:
+                delay = _retry_delay_seconds(attempt, 429, resp)
+                logger.info(
+                    "deepl translate retry %s/%s: DeepLX 429 (wait %.1fs)",
+                    attempt,
+                    _DEEPL_MAX_ATTEMPTS,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+                continue
+            break
+
+        translated = _parse_deeplx(data) if mode == "deeplx" else _parse_deepl(data)
+        if translated:
+            return translated
+        if isinstance(data, dict) and data.get("message"):
+            last_err = RuntimeError(str(data.get("message")))
+        else:
+            last_err = RuntimeError("empty deepl parse")
+        break
 
     logger.warning("deepl translate failed: %s", last_err)
     return None
@@ -545,6 +590,9 @@ async def translate_text(text: str | None, *, target: str = "zh-CN") -> str | No
         translated = await _translate_bing(s, target)
     elif provider == "deepl":
         translated = await _translate_deepl(s, target)
+        if not translated:
+            logger.info("deepl translate unavailable, trying bing fallback")
+            translated = await _translate_bing(s, target)
     else:
         translated = await _translate_google_gtx(s, target)
         if not translated:
