@@ -143,6 +143,18 @@ def _resolved_provider() -> str:
     return raw if raw in ("google", "bing") else "google"
 
 
+def _google_proxy_url() -> str | None:
+    """Return proxy URL for Google gtx when enabled; otherwise None (direct)."""
+    try:
+        s = get_settings()
+    except Exception:  # noqa: BLE001
+        return None
+    if not bool(getattr(s, "translate_google_proxy", False)):
+        return None
+    url = (getattr(s, "translate_google_proxy_url", None) or "").strip()
+    return url or None
+
+
 async def _fetch_edge_token(client: httpx.AsyncClient) -> str:
     resp = await client.get(
         _EDGE_AUTH_URL,
@@ -180,10 +192,14 @@ async def _translate_google_gtx(text: str, target: str) -> str | None:
         "https://translate.googleapis.com/translate_a/single"
         f"?client=gtx&sl=auto&tl={quote(target)}&dt=t&q={quote(text)}"
     )
+    proxy = _google_proxy_url()
+    client_kwargs: dict[str, Any] = {"timeout": _HTTP_TIMEOUT}
+    if proxy:
+        client_kwargs["proxy"] = proxy
     last_err: Exception | None = None
     for attempt in range(1, 4):
         try:
-            async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            async with httpx.AsyncClient(**client_kwargs) as client:
                 resp = await client.get(
                     url,
                     headers={"User-Agent": "TV-App/0.2", "Accept": "application/json"},

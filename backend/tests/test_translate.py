@@ -60,18 +60,67 @@ def test_translate_gtx_mock():
     mock_client.__aexit__.return_value = None
     mock_client.get = AsyncMock(return_value=mock_resp)
 
-    settings = SimpleNamespace(translate_provider="google")
+    settings = SimpleNamespace(
+        translate_provider="google",
+        translate_google_proxy=False,
+        translate_google_proxy_url="",
+    )
 
     async def run():
         with (
             patch("app.services.translate.get_settings", return_value=settings),
-            patch("httpx.AsyncClient", return_value=mock_client),
+            patch("httpx.AsyncClient", return_value=mock_client) as client_ctor,
         ):
-            return await translate_text("原タイトルです")
+            out = await translate_text("原タイトルです")
+            client_ctor.assert_called()
+            assert "proxy" not in (client_ctor.call_args.kwargs or {})
+            return out
 
     out = asyncio.run(run())
     assert out == "译后标题"
     mock_client.get.assert_awaited()
+
+
+def test_translate_gtx_uses_proxy_when_enabled():
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.is_success = True
+    mock_resp.json.return_value = [[["译后", "原", None, None, 10]]]
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__.return_value = mock_client
+    mock_client.__aexit__.return_value = None
+    mock_client.get = AsyncMock(return_value=mock_resp)
+
+    settings = SimpleNamespace(
+        translate_provider="google",
+        translate_google_proxy=True,
+        translate_google_proxy_url="http://127.0.0.1:7890",
+    )
+
+    async def run():
+        with (
+            patch("app.services.translate.get_settings", return_value=settings),
+            patch("httpx.AsyncClient", return_value=mock_client) as client_ctor,
+        ):
+            out = await translate_text("これは日本語")
+            kwargs = client_ctor.call_args.kwargs or {}
+            assert kwargs.get("proxy") == "http://127.0.0.1:7890"
+            return out
+
+    out = asyncio.run(run())
+    assert out == "译后"
+
+
+def test_translate_gtx_proxy_off_ignores_url():
+    from app.services.translate import _google_proxy_url
+
+    settings = SimpleNamespace(
+        translate_google_proxy=False,
+        translate_google_proxy_url="http://127.0.0.1:7890",
+    )
+    with patch("app.services.translate.get_settings", return_value=settings):
+        assert _google_proxy_url() is None
 
 
 def test_translate_bing_mock():

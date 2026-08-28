@@ -19,6 +19,8 @@ const form = ref({
   auto_scrape: true,
   auto_translate: true,
   translate_provider: 'google' as TranslateProvider,
+  translate_google_proxy: false,
+  translate_google_proxy_url: '',
   image_proxy_mode: 'site' as ImageProxyMode,
   image_external_proxy_url: '',
   image_local_cache: false,
@@ -29,6 +31,10 @@ const providersRefreshing = ref(false)
 const priorityPick = ref<string[]>([])
 
 const showExternalTpl = computed(() => form.value.image_proxy_mode === 'external')
+const showGoogleProxy = computed(() => form.value.translate_provider === 'google')
+const showGoogleProxyUrl = computed(
+  () => showGoogleProxy.value && form.value.translate_google_proxy,
+)
 const movieProviders = computed(() => settings.value?.movie_providers || [])
 const providerCount = computed(() => movieProviders.value.length)
 const hasPriority = computed(() => form.value.metatube_provider_priority.length > 0)
@@ -56,6 +62,8 @@ function applySettingsToForm(s: Settings) {
   form.value.auto_scrape = s.auto_scrape
   form.value.auto_translate = s.auto_translate !== false
   form.value.translate_provider = normalizeProvider(s.translate_provider)
+  form.value.translate_google_proxy = Boolean(s.translate_google_proxy)
+  form.value.translate_google_proxy_url = s.translate_google_proxy_url || ''
   form.value.image_proxy_mode = normalizeMode(s.image_proxy_mode)
   form.value.image_external_proxy_url = s.image_external_proxy_url || ''
   form.value.image_local_cache = Boolean(s.image_local_cache)
@@ -134,6 +142,8 @@ async function save() {
       auto_scrape: form.value.auto_scrape,
       auto_translate: form.value.auto_translate,
       translate_provider: form.value.translate_provider,
+      translate_google_proxy: form.value.translate_google_proxy,
+      translate_google_proxy_url: form.value.translate_google_proxy_url,
       image_proxy_mode: form.value.image_proxy_mode,
       image_external_proxy_url: form.value.image_external_proxy_url,
       image_local_cache: form.value.image_local_cache,
@@ -321,6 +331,20 @@ onMounted(() => {
             <el-option label="免费 Google（gtx）" value="google" />
             <el-option label="免费必应（Edge）" value="bing" />
           </el-select>
+        </el-form-item>
+        <el-form-item v-if="showGoogleProxy" label="Google 走代理">
+          <el-switch v-model="form.translate_google_proxy" />
+          <span class="field-hint muted">仅 Google gtx；关闭则直连</span>
+        </el-form-item>
+        <el-form-item v-if="showGoogleProxyUrl" label="Google 代理地址">
+          <el-input
+            v-model="form.translate_google_proxy_url"
+            placeholder="http://127.0.0.1:7890"
+          />
+          <span class="field-hint muted block">
+            支持 <code>http://</code> / <code>https://</code> /
+            <code>socks5://</code> / <code>socks5h://</code>
+          </span>
         </el-form-item>
         <el-form-item label="图片代理">
           <el-select v-model="form.image_proxy_mode" style="width: 100%">

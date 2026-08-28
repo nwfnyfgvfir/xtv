@@ -191,6 +191,8 @@ class SettingsOut(BaseModel):
     auto_scrape: bool
     auto_translate: bool = True
     translate_provider: Literal["google", "bing"] = "google"
+    translate_google_proxy: bool = False
+    translate_google_proxy_url: str = ""
     image_proxy_mode: Literal["site", "metatube", "external"] = "site"
     image_external_proxy_url: str = ""
     image_local_cache: bool = False
@@ -212,6 +214,8 @@ class SettingsUpdate(BaseModel):
     auto_scrape: bool | None = None
     auto_translate: bool | None = None
     translate_provider: Literal["google", "bing"] | None = None
+    translate_google_proxy: bool | None = None
+    translate_google_proxy_url: str | None = None
     image_proxy_mode: Literal["site", "metatube", "external"] | None = None
     image_external_proxy_url: str | None = None
     image_local_cache: bool | None = None

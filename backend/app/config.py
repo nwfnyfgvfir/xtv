@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     auto_scrape: bool = True
     auto_translate: bool = True
     translate_provider: str = "google"  # google | bing
+    # Google gtx only: optional HTTP(S)/SOCKS proxy; toggle off → direct
+    translate_google_proxy: bool = False
+    translate_google_proxy_url: str = ""  # e.g. http://127.0.0.1:7890
     image_proxy_mode: str = "site"  # site | metatube | external
     image_external_proxy_url: str = ""  # template with {url}
     image_local_cache: bool = False

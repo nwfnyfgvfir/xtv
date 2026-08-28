@@ -30,6 +30,8 @@ OVERRIDE_KEYS = {
     "auto_scrape",
     "auto_translate",
     "translate_provider",
+    "translate_google_proxy",
+    "translate_google_proxy_url",
     "image_proxy_mode",
     "image_external_proxy_url",
     "image_local_cache",
@@ -101,6 +103,10 @@ def _apply_overrides_to_runtime(db_map: dict[str, str]) -> None:
         provider = (db_map["translate_provider"] or "").strip().lower()
         if provider in _TRANSLATE_PROVIDERS:
             s.translate_provider = provider
+    if "translate_google_proxy" in db_map:
+        s.translate_google_proxy = db_map["translate_google_proxy"].lower() in _BOOL_TRUE
+    if "translate_google_proxy_url" in db_map:
+        s.translate_google_proxy_url = db_map["translate_google_proxy_url"] or ""
     if "image_proxy_mode" in db_map:
         mode = (db_map["image_proxy_mode"] or "").strip().lower()
         if mode in _IMAGE_PROXY_MODES:
@@ -190,6 +196,15 @@ async def get_app_settings(
         db_map.get("translate_provider") or s.translate_provider or "google"
     ).strip().lower()
     translate_provider = provider_raw if provider_raw in _TRANSLATE_PROVIDERS else "google"
+    google_proxy_raw = db_map.get("translate_google_proxy")
+    translate_google_proxy = (
+        google_proxy_raw.lower() in _BOOL_TRUE
+        if google_proxy_raw is not None
+        else bool(s.translate_google_proxy)
+    )
+    translate_google_proxy_url = (
+        db_map.get("translate_google_proxy_url", s.translate_google_proxy_url) or ""
+    )
     mode_raw = (db_map.get("image_proxy_mode") or s.image_proxy_mode or "site").strip().lower()
     image_proxy_mode = mode_raw if mode_raw in _IMAGE_PROXY_MODES else "site"
     local_cache_raw = db_map.get("image_local_cache")
@@ -209,6 +224,8 @@ async def get_app_settings(
         auto_scrape=s.auto_scrape,
         auto_translate=auto_translate,
         translate_provider=translate_provider,  # type: ignore[arg-type]
+        translate_google_proxy=translate_google_proxy,
+        translate_google_proxy_url=translate_google_proxy_url,
         image_proxy_mode=image_proxy_mode,  # type: ignore[arg-type]
         image_external_proxy_url=db_map.get("image_external_proxy_url", s.image_external_proxy_url)
         or "",

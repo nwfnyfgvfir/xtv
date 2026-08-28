@@ -149,6 +149,8 @@ export interface Settings {
   auto_scrape: boolean
   auto_translate?: boolean
   translate_provider?: TranslateProvider
+  translate_google_proxy?: boolean
+  translate_google_proxy_url?: string
   image_proxy_mode?: ImageProxyMode
   image_external_proxy_url?: string
   image_local_cache?: boolean
