@@ -71,12 +71,17 @@ _NO_STORE_API_PREFIXES = (
 
 
 @app.middleware("http")
-async def add_no_store_headers(request, call_next):  # type: ignore[no-untyped-def]
+async def add_cache_headers(request, call_next):  # type: ignore[no-untyped-def]
     response = await call_next(request)
-    if request.url.path.startswith(_NO_STORE_API_PREFIXES):
+    path = request.url.path
+    accept = request.headers.get("accept", "")
+    is_spa_entry = request.method == "GET" and not path.startswith("/assets/") and "text/html" in accept
+    if path.startswith(_NO_STORE_API_PREFIXES) or is_spa_entry:
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
+    elif path.startswith("/assets/"):
+        response.headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")
     return response
 
 

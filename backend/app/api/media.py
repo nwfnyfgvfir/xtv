@@ -182,6 +182,34 @@ def list_media(
     )
 
 
+@router.get("/query/{cache_buster}", response_model=PaginatedMedia)
+def query_media_with_cache_buster(
+    cache_buster: str,
+    _: Annotated[dict, Depends(require_auth)],
+    q: str | None = None,
+    library_id: int | None = None,
+    scraped: bool | None = None,
+    favorited: bool | None = None,
+    subtitle_flag: str | None = Query(None, description="e.g. C for Chinese subtitle"),
+    sort: str | None = Query(None, description="number_asc|number_desc|created_asc|created_desc|release_asc|release_desc"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(40, ge=1, le=200),
+    db: Session = Depends(get_db),
+) -> PaginatedMedia:
+    _ = cache_buster
+    return _list_media_page(
+        db,
+        q=q,
+        library_id=library_id,
+        scraped=scraped,
+        favorited=favorited,
+        subtitle_flag=subtitle_flag,
+        sort=sort,
+        page=page,
+        page_size=page_size,
+    )
+
+
 @router.post("/query", response_model=PaginatedMedia)
 def query_media(
     body: MediaListQuery,

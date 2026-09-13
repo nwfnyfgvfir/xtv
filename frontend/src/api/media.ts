@@ -58,6 +58,8 @@ export const rescrapePendingLibrary = (id: number) =>
 export const getScanJob = (jobId: string) =>
   client.get<ScanJob>(`/scan/jobs/${jobId}`).then((r) => r.data)
 
+let mediaListRequestSeq = 0
+
 export const listMedia = (params: {
   q?: string
   library_id?: number
@@ -67,7 +69,10 @@ export const listMedia = (params: {
   sort?: string
   page?: number
   page_size?: number
-}) => client.post<PaginatedMedia>('/media/query', params).then((r) => r.data)
+}) =>
+  client
+    .get<PaginatedMedia>(`/media/query/${Date.now()}-${mediaListRequestSeq++}`, { params })
+    .then((r) => r.data)
 
 export const getMedia = (id: number) => client.get<MediaDetail>(`/media/${id}`).then((r) => r.data)
 

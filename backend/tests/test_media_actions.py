@@ -26,7 +26,7 @@ def _seed_lib(db, *, path: str = "local") -> Library:
     return lib
 
 
-def test_query_media_uses_body_filters_and_no_store_headers() -> None:
+def test_query_media_uses_path_cache_buster_filters_and_no_store_headers() -> None:
     from fastapi.testclient import TestClient
 
     from app.main import app
@@ -63,7 +63,10 @@ def test_query_media_uses_body_filters_and_no_store_headers() -> None:
         db.close()
 
     client = TestClient(app)
-    r = client.post("/api/media/query", json={"library_id": lib_b_id, "page": 1, "page_size": 10})
+    r = client.get(
+        "/api/media/query/cache-test",
+        params={"library_id": lib_b_id, "page": 1, "page_size": 10},
+    )
     assert r.status_code == 200, r.text
     assert r.headers["cache-control"].startswith("no-store")
     data = r.json()
