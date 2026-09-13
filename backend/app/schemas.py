@@ -99,6 +99,17 @@ class MediaDetail(MediaListItem):
     actors: list[ActorOut] = []
 
 
+class MediaListQuery(BaseModel):
+    q: str | None = None
+    library_id: int | None = None
+    scraped: bool | None = None
+    favorited: bool | None = None
+    subtitle_flag: str | None = None
+    sort: str | None = None
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=40, ge=1, le=200)
+
+
 class RescrapeIn(BaseModel):
     provider: str | None = None
     fallback: bool | None = None

@@ -16,6 +16,7 @@ from app.schemas import (
     BatchDeleteResult,
     MediaDetail,
     MediaListItem,
+    MediaListQuery,
     PaginatedDuplicateGroups,
     PaginatedMedia,
     RenameIn,
@@ -104,18 +105,17 @@ def batch_delete_media(
     return BatchDeleteResult(deleted=deleted, failed=failed)
 
 
-@router.get("", response_model=PaginatedMedia)
-def list_media(
-    _: Annotated[dict, Depends(require_auth)],
+def _list_media_page(
+    db: Session,
+    *,
     q: str | None = None,
     library_id: int | None = None,
     scraped: bool | None = None,
     favorited: bool | None = None,
-    subtitle_flag: str | None = Query(None, description="e.g. C for Chinese subtitle"),
-    sort: str | None = Query(None, description="number_asc|number_desc|created_asc|created_desc|release_asc|release_desc"),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(40, ge=1, le=200),
-    db: Session = Depends(get_db),
+    subtitle_flag: str | None = None,
+    sort: str | None = None,
+    page: int = 1,
+    page_size: int = 40,
 ) -> PaginatedMedia:
     query = db.query(MediaItem)
     if library_id is not None:
@@ -153,6 +153,51 @@ def list_media(
         total=total,
         page=page,
         page_size=page_size,
+    )
+
+
+@router.get("", response_model=PaginatedMedia)
+def list_media(
+    _: Annotated[dict, Depends(require_auth)],
+    q: str | None = None,
+    library_id: int | None = None,
+    scraped: bool | None = None,
+    favorited: bool | None = None,
+    subtitle_flag: str | None = Query(None, description="e.g. C for Chinese subtitle"),
+    sort: str | None = Query(None, description="number_asc|number_desc|created_asc|created_desc|release_asc|release_desc"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(40, ge=1, le=200),
+    db: Session = Depends(get_db),
+) -> PaginatedMedia:
+    return _list_media_page(
+        db,
+        q=q,
+        library_id=library_id,
+        scraped=scraped,
+        favorited=favorited,
+        subtitle_flag=subtitle_flag,
+        sort=sort,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.post("/query", response_model=PaginatedMedia)
+def query_media(
+    body: MediaListQuery,
+    _: Annotated[dict, Depends(require_auth)],
+    db: Session = Depends(get_db),
+) -> PaginatedMedia:
+    return _list_media_page(
+        db,
+        q=body.q,
+        library_id=body.library_id,
+        scraped=body.scraped,
+        favorited=body.favorited,
+        subtitle_flag=body.subtitle_flag,
+        sort=body.sort,
+        page=body.page,
+        page_size=body.page_size,
     )
 
 

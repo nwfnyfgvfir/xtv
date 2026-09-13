@@ -98,7 +98,7 @@ async function loadLibraries() {
   }
 }
 
-async function loadMedia(opts?: { quiet?: boolean }) {
+async function loadMedia(opts?: { quiet?: boolean; force?: boolean }) {
   if (currentLibraryId.value == null) {
     items.value = []
     total.value = 0
@@ -116,7 +116,7 @@ async function loadMedia(opts?: { quiet?: boolean }) {
       nextIds.length !== prevIds.length ||
       nextIds.some((id, idx) => id !== prevIds[idx]) ||
       data.items.some((it, idx) => it.favorited !== items.value[idx]?.favorited)
-    if (changed || !quiet) {
+    if (changed || !quiet || opts?.force) {
       items.value = data.items
       total.value = data.total
     }
@@ -150,7 +150,7 @@ async function softRefreshTick() {
       prevSig !== nextSig ||
       !lastSoftFingerprint
     if (curChanged) {
-      await loadMedia({ quiet: true })
+      await loadMedia({ quiet: true, force: true })
     }
   } catch {
     /* ignore soft-refresh errors */
@@ -186,7 +186,7 @@ function stopSoftRefresh() {
 async function load() {
   try {
     await loadLibraries()
-    await loadMedia()
+    await loadMedia({ force: true })
     loadedOnce = true
   } catch (e: unknown) {
     ElMessage.error(getErrorMessage(e, '加载失败，请确认后端已启动并已登录'))
@@ -202,7 +202,7 @@ function selectLibrary(id: number) {
     },
     1,
   )
-  void loadMedia()
+  void loadMedia({ force: true })
 }
 
 function onSortChange(v: MediaSort) {
@@ -347,7 +347,7 @@ watch(
     const id = Number(v || 0) || null
     if (id && id !== currentLibraryId.value) {
       currentLibraryId.value = id
-      void loadMedia()
+      void loadMedia({ force: true })
     }
   },
 )

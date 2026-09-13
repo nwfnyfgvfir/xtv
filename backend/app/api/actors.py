@@ -63,7 +63,7 @@ def _actor_detail(db: Session, actor: Actor, favorited: bool | None = None) -> A
 def list_actors(
     _: Annotated[dict, Depends(require_auth)],
     q: str | None = None,
-    sort: str | None = Query(None),
+    sort: Annotated[str | None, Query()] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(48, ge=1, le=200),
     db: Session = Depends(get_db),

@@ -59,6 +59,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+_NO_STORE_API_PREFIXES = (
+    "/api/auth",
+    "/api/libraries",
+    "/api/media",
+    "/api/actors",
+    "/api/favorites",
+    "/api/settings",
+    "/api/scan",
+)
+
+
+@app.middleware("http")
+async def add_no_store_headers(request, call_next):  # type: ignore[no-untyped-def]
+    response = await call_next(request)
+    if request.url.path.startswith(_NO_STORE_API_PREFIXES):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
+
 app.include_router(api_router)
 
 static_dir = Path(__file__).resolve().parent / "static"

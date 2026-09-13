@@ -67,7 +67,7 @@ export const listMedia = (params: {
   sort?: string
   page?: number
   page_size?: number
-}) => client.get<PaginatedMedia>('/media', { params }).then((r) => r.data)
+}) => client.post<PaginatedMedia>('/media/query', params).then((r) => r.data)
 
 export const getMedia = (id: number) => client.get<MediaDetail>(`/media/${id}`).then((r) => r.data)
 

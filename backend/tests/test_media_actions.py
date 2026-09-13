@@ -26,6 +26,58 @@ def _seed_lib(db, *, path: str = "local") -> Library:
     return lib
 
 
+def test_query_media_uses_body_filters_and_no_store_headers() -> None:
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    init_db()
+    db = SessionLocal()
+    try:
+        _cleanup_libs(db)
+        lib_a = _seed_lib(db, path="query-a")
+        lib_b = Library(name="query-b", path="query-b", type="local", enabled=True, auto_scan_enabled=False)
+        db.add(lib_b)
+        db.flush()
+        db.add_all(
+            [
+                MediaItem(
+                    library_id=lib_a.id,
+                    path="/tmp/query-a/A-001.mp4",
+                    filename="A-001.mp4",
+                    number="A-001",
+                    source_type="local",
+                ),
+                MediaItem(
+                    library_id=lib_b.id,
+                    path="/tmp/query-b/B-001.mp4",
+                    filename="B-001.mp4",
+                    number="B-001",
+                    source_type="local",
+                ),
+            ]
+        )
+        lib_b_id = lib_b.id
+        db.commit()
+    finally:
+        db.close()
+
+    client = TestClient(app)
+    r = client.post("/api/media/query", json={"library_id": lib_b_id, "page": 1, "page_size": 10})
+    assert r.status_code == 200, r.text
+    assert r.headers["cache-control"].startswith("no-store")
+    data = r.json()
+    assert data["total"] == 1
+    assert [item["library_id"] for item in data["items"]] == [lib_b_id]
+    assert [item["number"] for item in data["items"]] == ["B-001"]
+
+    db = SessionLocal()
+    try:
+        _cleanup_libs(db)
+    finally:
+        db.close()
+
+
 def test_apply_translations_from_originals(monkeypatch) -> None:
     init_db()
     db = SessionLocal()
