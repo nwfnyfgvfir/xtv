@@ -5,8 +5,10 @@ import { ElMessage } from 'element-plus'
 import { getHealth, getMovieProviders, getSettings, updateSettings } from '@/api/media'
 import type { Health, ImageProxyMode, Settings, TranslateProvider } from '@/api/types'
 import { getErrorMessage } from '@/utils/errors'
+import { APP_VERSION } from '@/utils/version'
 
 const router = useRouter()
+const appVersion = APP_VERSION
 
 const settings = ref<Settings | null>(null)
 const health = ref<Health | null>(null)
@@ -47,6 +49,33 @@ const showDeepLProxyUrl = computed(
 const movieProviders = computed(() => settings.value?.movie_providers || [])
 const providerCount = computed(() => movieProviders.value.length)
 const hasPriority = computed(() => form.value.metatube_provider_priority.length > 0)
+
+/**
+ * MetaTube / Cloudflare can return a multi-KB blob as the error string — and it
+ * is not always valid JSON (the backend may pass a Python repr). Never dump it
+ * raw: try JSON, then a loose key match, then fall back to a clamped string.
+ */
+function shortenError(raw: string | null | undefined, fallback = '未知'): string {
+  if (!raw) return fallback
+  let text: unknown = raw
+  try {
+    const obj = JSON.parse(raw)
+    text = obj?.title || obj?.detail || obj?.error?.message || raw
+  } catch {
+    /* not valid JSON — try to pull a readable field out of the blob */
+    const m = raw.match(
+      /["'](?:title|detail|message)["']\s*:\s*["']([^"']{4,200})["']/,
+    )
+    if (m) text = m[1]
+  }
+  const s = String(text).replace(/\s+/g, ' ').trim()
+  return s.length > 180 ? `${s.slice(0, 177)}…` : s
+}
+
+const shortError = computed(() => shortenError(health.value?.metatube?.error))
+const shortProvidersError = computed(() =>
+  shortenError(settings.value?.movie_providers_error, ''),
+)
 
 const allProviderOptions = computed(() => {
   const set = new Set(movieProviders.value)
@@ -204,9 +233,7 @@ onMounted(() => {
       <p class="muted line">
         按番号查找跨库 / 同库重复项，并有选择地删除副本（本地删文件；strm 仅删索引）。
       </p>
-      <el-button type="primary" plain @click="router.push({ name: 'duplicates' })">
-        重复影片
-      </el-button>
+      <el-button @click="router.push({ name: 'duplicates' })">重复影片</el-button>
     </el-card>
 
     <el-card class="card" shadow="never">
@@ -216,7 +243,7 @@ onMounted(() => {
       <p v-if="health?.metatube?.ok" class="ok">
         MetaTube 已连接：{{ JSON.stringify(health.metatube.data) }}
       </p>
-      <p v-else class="err">未连接：{{ health?.metatube?.error || '未知' }}</p>
+      <p v-else class="err" :title="health?.metatube?.error || ''">未连接：{{ shortError }}</p>
       <p class="muted line">MEDIA_ROOT: {{ settings?.media_root }}</p>
       <p class="muted line">
         Token：MetaTube {{ settings?.metatube_token_set ? '已配置' : '未配置' }}
@@ -230,6 +257,7 @@ onMounted(() => {
           · 监视库 {{ health.watcher.watched_library_ids.length }}
         </span>
       </p>
+      <p class="muted line">版本：{{ appVersion }}</p>
     </el-card>
 
     <el-card class="card" shadow="never">
@@ -252,12 +280,16 @@ onMounted(() => {
         <el-form-item label="源列表">
           <div class="providers-meta">
             <span class="muted">共 {{ providerCount }} 个源</span>
-            <el-button size="small" :loading="providersRefreshing" @click="refreshProviders">
+            <el-button :loading="providersRefreshing" @click="refreshProviders">
               刷新源列表
             </el-button>
           </div>
-          <p v-if="settings?.movie_providers_error" class="warn-line">
-            实时拉取失败：{{ settings.movie_providers_error }}
+          <p
+            v-if="settings?.movie_providers_error"
+            class="warn-line"
+            :title="settings.movie_providers_error"
+          >
+            实时拉取失败：{{ shortProvidersError }}
             <span v-if="settings.movie_providers_from_cache">（已使用缓存列表）</span>
           </p>
         </el-form-item>
@@ -313,6 +345,7 @@ onMounted(() => {
         <el-form-item label="兼容单源">
           <el-select
             v-model="form.metatube_provider"
+            class="field-sm"
             clearable
             filterable
             allow-create
@@ -348,6 +381,7 @@ onMounted(() => {
         <el-form-item label="翻译服务">
           <el-select
             v-model="form.translate_provider"
+            class="field-sm"
             style="width: 100%"
             :disabled="!form.auto_translate"
           >
@@ -413,7 +447,7 @@ onMounted(() => {
           </el-form-item>
         </template>
         <el-form-item label="图片代理">
-          <el-select v-model="form.image_proxy_mode" style="width: 100%">
+          <el-select v-model="form.image_proxy_mode" class="field-sm" style="width: 100%">
             <el-option label="本站代理（/api/images/proxy）" value="site" />
             <el-option label="MetaTube 图片代理" value="metatube" />
             <el-option label="外部代理（模板 {url}）" value="external" />
@@ -435,7 +469,7 @@ onMounted(() => {
           </span>
         </el-form-item>
         <el-form-item label="扫描扩展名">
-          <el-input v-model="form.scan_extensions" />
+          <el-input v-model="form.scan_extensions" class="field-md" />
         </el-form-item>
         <el-form-item>
           <el-button type="primary" :loading="saving" @click="save">保存</el-button>
@@ -452,19 +486,21 @@ onMounted(() => {
 
 <style scoped>
 .intro {
-  margin: -4px 0 18px;
-  font-size: 13px;
+  margin: var(--space-2) 0 var(--space-6);
+  font-size: var(--text-sm);
 }
 .card {
   background: var(--panel);
   border: 1px solid var(--border);
-  margin-bottom: 16px;
-  max-width: 760px;
-  border-radius: 14px;
+  margin-bottom: var(--space-4);
+  /* Narrower than the reading column: settings fields should never be
+     full-bleed — a 568px-wide input for a short value reads as unfinished. */
+  max-width: 640px;
+  border-radius: var(--radius-lg);
 }
 .card-title {
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--tracking-wide);
 }
 .ok {
   color: var(--ok);
@@ -473,52 +509,56 @@ onMounted(() => {
   color: var(--danger);
 }
 .line {
-  margin: 6px 0;
-  font-size: 13px;
+  margin: var(--space-2) 0;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
 }
 .tip {
   margin: 0;
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
 }
 .field-hint {
-  margin-left: 10px;
-  font-size: 12px;
+  margin-left: var(--space-3);
+  font-size: var(--text-xs);
 }
 .field-hint.block {
   display: block;
-  margin: 6px 0 0;
+  margin: var(--space-2) 0 0;
   margin-left: 0;
 }
 .providers-meta {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-3);
 }
 .warn-line {
-  margin: 8px 0 0;
-  font-size: 12px;
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-xs);
   color: var(--danger);
-  line-height: 1.45;
+  line-height: var(--leading-snug);
 }
+/* Select, ordering list and hint read as one column — capping the whole block
+   keeps them aligned instead of stretching the select across the form. */
 .priority-block {
   width: 100%;
+  max-width: 320px;
 }
 .priority-list {
   list-style: none;
-  margin: 10px 0 0;
+  margin: var(--space-3) 0 0;
   padding: 0;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   overflow: hidden;
 }
 .priority-list li {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--border);
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
   background: var(--bg-elevated);
   color: var(--text);
 }
@@ -532,8 +572,9 @@ onMounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: var(--text-2xs);
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
   background: var(--accent-soft);
   color: var(--accent);
   flex-shrink: 0;
@@ -544,7 +585,7 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 500;
   color: var(--text);
 }
@@ -556,20 +597,17 @@ onMounted(() => {
 .pri-actions :deep(.el-button.is-text) {
   color: var(--muted) !important;
   min-width: 28px;
-  padding: 4px 6px;
+  padding: var(--space-1) 6px;
 }
 .pri-actions :deep(.el-button.is-text:not(.is-disabled):hover) {
   color: var(--accent) !important;
 }
 .pri-actions :deep(.el-button.is-text.is-disabled) {
-  color: var(--muted) !important;
+  color: var(--faint) !important;
   opacity: 0.4;
 }
 .pri-actions :deep(.el-button.is-text.el-button--danger) {
   color: var(--danger) !important;
-}
-code {
-  color: var(--accent);
 }
 @media (max-width: 640px) {
   :deep(.el-form-item) {
@@ -579,8 +617,8 @@ code {
   :deep(.el-form-item__label) {
     justify-content: flex-start;
     height: auto;
-    line-height: 1.4;
-    margin-bottom: 6px;
+    line-height: var(--leading-snug);
+    margin-bottom: var(--space-2);
   }
 }
 </style>

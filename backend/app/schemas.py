@@ -262,6 +262,7 @@ class ScanJobOut(BaseModel):
 
 class HealthOut(BaseModel):
     status: str
+    version: str = "dev"
     metatube: dict[str, Any] | None = None
     auth_enabled: bool = False
     watcher: dict[str, Any] | None = None

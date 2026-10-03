@@ -428,7 +428,8 @@ function create() {
   player = new Artplayer({
     container: containerRef.value,
     url: props.src,
-    theme: '#e8a838',
+    // Matches --gold-500 / --accent (oklch(79.5% 0.13 82)).
+    theme: '#e6b34f',
     autoplay: Boolean(props.autoplay),
     autoSize: false,
     autoMini: false,
@@ -529,8 +530,9 @@ function create() {
           minWidth: '48px',
           height: '48px',
           padding: '0 14px',
-          borderRadius: '999px',
-          background: 'rgba(0,0,0,.6)',
+          borderRadius: 'var(--radius-full)',
+          background: 'oklch(12% 0.01 75 / 0.72)',
+          border: '1px solid oklch(100% 0 0 / 0.18)',
           color: '#fff',
           fontSize: '14px',
           cursor: 'pointer',
@@ -640,14 +642,15 @@ watch(
 .player {
   width: 100%;
   height: min(70vh, 520px);
+  /* Pure black is deliberate here: it must match the video letterbox. */
   background: #000;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   overflow: hidden;
 }
 .hint {
-  margin: 8px 0 0;
-  font-size: 12px;
-  line-height: 1.45;
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-xs);
+  line-height: var(--leading-snug);
 }
 .muted {
   color: var(--muted);
@@ -656,10 +659,10 @@ watch(
   .player {
     height: 52vw;
     min-height: 200px;
-    border-radius: 8px;
+    border-radius: var(--radius-sm);
   }
   .hint {
-    font-size: 11px;
+    font-size: var(--text-2xs);
   }
   /* Slim Artplayer bar so 锁 + setting + fullscreen stay on-screen. */
   .player :deep(.art-video-player) {

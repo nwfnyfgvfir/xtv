@@ -67,6 +67,14 @@ npm run preview
 
 No frontend test or lint scripts in `package.json`. Optional typecheck: `npx vue-tsc --noEmit`.
 
+**App version in the UI** is injected at build time as `__APP_VERSION__` (`frontend/vite.config.ts`), resolved in this order: `APP_VERSION` env → `git describe --tags --always` → `"dev"`. It is surfaced via `frontend/src/utils/version.ts` (`APP_VERSION`) in the topbar brand and the Settings → 连通性 card.
+
+- Local dev/build: falls back to `git describe`, so it tracks the nearest tag automatically.
+- Docker: `.dockerignore` excludes `.git`, so CI must pass the tag — `release-ghcr.yml` sets `build-args: APP_VERSION=${{ github.ref_name }}`, and the `frontend` stage in `Dockerfile` forwards it via `ARG APP_VERSION`.
+- Plain local `docker build` without the arg yields `dev`.
+
+**Backend version** uses the same source of truth: `Settings.version` (`backend/app/config.py`) resolves `APP_VERSION` env → `git describe --tags --always` → `"dev"`, and feeds `FastAPI(version=...)` (`/docs` OpenAPI) plus `version` in `GET /api/health`. The `runtime` stage of `Dockerfile` also declares `ARG APP_VERSION` so the CI tag reaches the container. Frontend and backend are therefore built from the same tag and stay in sync.
+
 ### Docker / production
 
 ```bash

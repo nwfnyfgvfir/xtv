@@ -27,10 +27,15 @@ async function onSubmit() {
 </script>
 
 <template>
-  <div class="page login-page">
+  <div class="login-page">
     <div class="card">
-      <h1 class="page-title">登录</h1>
-      <p class="muted">
+      <div class="brand">
+        <span class="brand-mark">TV</span>
+        <span class="brand-divider" aria-hidden="true" />
+        <span class="brand-sub">影院</span>
+      </div>
+      <h1 class="login-title">登录</h1>
+      <p class="muted login-hint">
         {{ authEnabled ? '输入管理员密码以继续' : '当前未配置 ADMIN_PASSWORD，开发模式可直接进入' }}
       </p>
       <el-form @submit.prevent="onSubmit">
@@ -39,11 +44,12 @@ async function onSubmit() {
             v-model="password"
             type="password"
             show-password
+            size="large"
             placeholder="管理员密码"
             @keyup.enter="onSubmit"
           />
         </el-form-item>
-        <el-button type="primary" :loading="loading" style="width: 100%" @click="onSubmit">
+        <el-button type="primary" size="large" :loading="loading" class="submit" @click="onSubmit">
           进入
         </el-button>
       </el-form>
@@ -56,17 +62,54 @@ async function onSubmit() {
   display: flex;
   justify-content: center;
   align-items: center;
-  min-height: calc(100vh - 80px);
+  min-height: 100vh;
+  padding: var(--space-6) var(--gutter);
 }
 .card {
   width: min(400px, 100%);
-  padding: 28px;
+  padding: var(--space-10) var(--space-8) var(--space-8);
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 16px;
-  box-shadow: var(--shadow-card);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
 }
-.muted {
-  margin: 0 0 18px;
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-8);
+}
+.brand-mark {
+  font-family: var(--font-serif);
+  font-size: 30px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: var(--tracking-tight);
+  color: var(--accent);
+}
+.brand-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--accent-line);
+}
+.brand-sub {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  letter-spacing: var(--tracking-widest);
+  color: var(--muted);
+}
+.login-title {
+  margin: 0;
+  font-size: var(--text-xl);
+  font-weight: 500;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text);
+}
+.login-hint {
+  margin: var(--space-2) 0 var(--space-6);
+  font-size: var(--text-sm);
+}
+.submit {
+  width: 100%;
 }
 </style>

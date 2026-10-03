@@ -48,8 +48,8 @@ async def lifespan(_app: FastAPI):
         logger.exception("Failed to stop filesystem watcher")
 
 
-app = FastAPI(title="TV", version="0.2.0", lifespan=lifespan)
 settings = get_settings()
+app = FastAPI(title="TV", version=settings.version, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

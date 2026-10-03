@@ -283,38 +283,38 @@ onMounted(() => {
   padding-bottom: 24px;
 }
 .page.has-bar {
-  padding-bottom: 88px;
+  padding-bottom: 96px;
 }
 .head {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px 16px;
+  gap: var(--space-3) var(--space-4);
   align-items: flex-end;
   justify-content: space-between;
-  margin-bottom: 18px;
+  margin-bottom: var(--space-6);
 }
 .intro {
-  margin: 4px 0 0;
-  font-size: 13px;
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
 }
 .head-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-2);
   align-items: center;
 }
 .search {
   width: min(220px, 100%);
 }
 .empty {
-  padding: 48px 12px;
+  padding: var(--space-12) var(--space-3);
   text-align: center;
 }
 .group {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 14px;
-  margin-bottom: 14px;
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--space-4);
   overflow: hidden;
 }
 .group-head {
@@ -322,23 +322,24 @@ onMounted(() => {
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--border);
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
 }
 .group-title {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: var(--space-2);
 }
 .num {
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: var(--tracking-wide);
+  font-size: var(--text-md);
+  color: var(--accent);
 }
 .group-actions {
   display: flex;
-  gap: 4px;
+  gap: var(--space-1);
 }
 .rows {
   list-style: none;
@@ -348,10 +349,10 @@ onMounted(() => {
 .row {
   display: grid;
   grid-template-columns: auto 64px 1fr;
-  gap: 10px 12px;
+  gap: var(--space-3);
   align-items: center;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
 }
 .row:last-child {
   border-bottom: none;
@@ -361,9 +362,9 @@ onMounted(() => {
   height: 90px;
   border: none;
   padding: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
-  background: var(--bg, #111);
+  background: var(--bg-elevated);
   cursor: pointer;
 }
 .thumb img {
@@ -379,39 +380,43 @@ onMounted(() => {
 .line1 {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 8px;
+  gap: var(--space-2);
   align-items: center;
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 .lib {
   font-weight: 600;
 }
 .pill {
-  font-size: 11px;
-  padding: 1px 6px;
-  border-radius: 999px;
+  font-size: var(--text-2xs);
+  padding: 1px 7px;
+  border-radius: var(--radius-full);
   border: 1px solid var(--border);
+  color: var(--muted);
   text-transform: lowercase;
 }
 .pill.local {
-  color: var(--ok, #3d9);
+  color: var(--ok);
 }
 .pill.strm {
-  color: var(--warn, #db8);
+  color: var(--muted);
 }
 .pill.sub {
-  color: #6af;
+  color: var(--accent);
+  border-color: var(--accent-line);
 }
 .pill.disc {
   opacity: 0.85;
 }
 .size {
-  font-size: 12px;
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
 }
 .line2,
 .line3 {
-  margin-top: 4px;
-  font-size: 12px;
+  margin-top: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -420,17 +425,18 @@ onMounted(() => {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: calc(64px + env(safe-area-inset-bottom));
-  z-index: 20;
+  bottom: calc(66px + env(safe-area-inset-bottom));
+  z-index: var(--z-sticky);
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: var(--space-3);
   align-items: center;
   justify-content: center;
-  padding: 12px 16px;
-  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  padding: var(--space-3) var(--space-4);
+  background: color-mix(in oklab, var(--panel) 92%, transparent);
   border-top: 1px solid var(--border);
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 @media (min-width: 861px) {
   .action-bar {

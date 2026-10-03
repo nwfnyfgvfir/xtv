@@ -263,16 +263,19 @@ watch(
 </template>
 
 <style scoped>
+.page-title {
+  margin-bottom: var(--space-2);
+}
 .intro {
-  margin: -4px 0 16px;
-  font-size: 13px;
+  margin: 0 0 var(--space-5);
+  font-size: var(--text-sm);
 }
 .tabs {
   display: inline-flex;
-  gap: 6px;
-  margin-bottom: 14px;
-  padding: 4px;
-  border-radius: 999px;
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
+  padding: var(--space-1);
+  border-radius: var(--radius-full);
   border: 1px solid var(--border);
   background: var(--panel);
 }
@@ -280,20 +283,28 @@ watch(
   border: none;
   background: transparent;
   color: var(--muted);
-  padding: 6px 14px;
-  border-radius: 999px;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-full);
   cursor: pointer;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  min-height: 34px;
+  transition:
+    color var(--dur-2) var(--ease-out),
+    background-color var(--dur-2) var(--ease-out);
+}
+.tab:hover:not(.on) {
+  color: var(--text);
 }
 .tab.on {
   background: var(--accent-soft);
   color: var(--accent);
+  font-weight: 600;
 }
 .bar {
   display: flex;
-  gap: 10px;
-  margin-bottom: 20px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-6);
   max-width: 760px;
   flex-wrap: wrap;
   align-items: center;
@@ -302,13 +313,19 @@ watch(
 .bar :deep(.el-input) {
   min-width: 0;
 }
+/* Without a flex basis the input takes EP's width:100% and wraps onto its own
+   row, leaving the search bar three lines tall. */
+.bar :deep(.el-input) {
+  flex: 1 1 220px;
+}
 .actor-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
-  gap: 16px;
+  gap: var(--space-6) var(--space-4);
 }
 .tip {
-  margin-top: 24px;
+  margin-top: var(--space-8);
+  font-size: var(--text-sm);
 }
 @media (max-width: 640px) {
   .bar {
@@ -332,13 +349,13 @@ watch(
   }
   .actor-grid {
     grid-template-columns: repeat(3, 1fr);
-    gap: 10px;
+    gap: var(--space-4) var(--space-2);
   }
 }
 @media (max-width: 380px) {
   .actor-grid {
     grid-template-columns: repeat(3, 1fr);
-    gap: 8px;
+    gap: var(--space-3) 6px;
   }
 }
 </style>

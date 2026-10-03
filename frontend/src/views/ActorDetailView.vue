@@ -175,7 +175,7 @@ onMounted(() => {
             </svg>
             <span>{{ actor.favorited ? '已收藏' : '收藏' }}</span>
           </button>
-          <el-select :model-value="sort" size="small" style="width: 168px" @change="onSortChange">
+          <el-select :model-value="sort" style="width: 168px" @change="onSortChange">
             <el-option
               v-for="opt in MEDIA_SORT_OPTIONS"
               :key="opt.value"
@@ -183,7 +183,7 @@ onMounted(() => {
               :value="opt.value"
             />
           </el-select>
-          <el-button size="small" :loading="imgLoading" @click="onRescrapeImage">
+          <el-button :loading="imgLoading" @click="onRescrapeImage">
             重新刮削头像
           </el-button>
         </div>
@@ -198,9 +198,9 @@ onMounted(() => {
 <style scoped>
 .hero {
   display: flex;
-  gap: 18px;
+  gap: var(--space-5);
   align-items: center;
-  margin-bottom: 20px;
+  margin-bottom: var(--space-6);
   flex-wrap: wrap;
 }
 .avatar {
@@ -208,14 +208,14 @@ onMounted(() => {
   height: 96px;
   border-radius: 50%;
   object-fit: cover;
-  border: 2px solid var(--border);
+  box-shadow: 0 0 0 1px var(--border), 0 0 0 4px var(--accent-soft);
   flex-shrink: 0;
 }
 .mono {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: var(--font-display);
+  font-family: var(--font-serif);
   font-size: 36px;
   color: var(--accent);
   background: var(--panel);
@@ -223,46 +223,42 @@ onMounted(() => {
 .hero-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-2);
   align-items: center;
-  margin-top: 8px;
+  margin-top: var(--space-3);
 }
 .btn-fav {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  min-height: 32px;
-  padding: 0 14px;
-  border-radius: 999px;
-  font-size: 13px;
+  gap: var(--space-2);
+  min-height: 36px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-full);
+  font-size: var(--text-sm);
   font-weight: 600;
-  letter-spacing: 0.04em;
   cursor: pointer;
   border: 1px solid var(--border);
   background: var(--panel);
   color: var(--text);
   min-width: 96px;
   transition:
-    transform 0.15s ease,
-    box-shadow 0.15s ease,
-    border-color 0.15s ease,
-    background 0.15s ease,
-    color 0.15s ease;
+    border-color var(--dur-2) var(--ease-out),
+    background-color var(--dur-2) var(--ease-out),
+    color var(--dur-2) var(--ease-out);
 }
 .btn-fav:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  border-color: var(--accent-line);
   color: var(--accent);
-  background: var(--accent-soft);
+  background: var(--panel-hover);
 }
 .btn-fav.on {
   color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  border-color: var(--accent-line);
   background: var(--accent-soft);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 .btn-fav:disabled {
-  opacity: 0.75;
+  opacity: 0.7;
   cursor: wait;
 }
 .btn-ico {
@@ -272,7 +268,7 @@ onMounted(() => {
 .btn-spin {
   width: 14px;
   height: 14px;
-  border: 2px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border: 2px solid color-mix(in oklab, var(--accent) 35%, transparent);
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: fav-rotate 0.7s linear infinite;
@@ -287,14 +283,14 @@ onMounted(() => {
   flex: 1 1 200px;
 }
 .info .page-title {
-  margin-bottom: 4px;
+  margin-bottom: var(--space-1);
 }
 .info .muted {
-  margin: 0 0 10px;
+  margin: 0 0 var(--space-3);
 }
 @media (max-width: 640px) {
   .hero {
-    gap: 12px;
+    gap: var(--space-4);
   }
   .avatar {
     width: 80px;

@@ -28,6 +28,7 @@ async def health() -> HealthOut:
         watcher = {"running": False}
     return HealthOut(
         status="ok",
+        version=settings.version,
         metatube=metatube,
         auth_enabled=settings.auth_enabled,
         watcher=watcher,

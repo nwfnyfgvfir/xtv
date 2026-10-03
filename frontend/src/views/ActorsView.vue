@@ -133,11 +133,14 @@ watch(
 </template>
 
 <style scoped>
+.page-title {
+  margin-bottom: var(--space-5);
+}
 .bar {
   display: flex;
-  gap: 10px;
+  gap: var(--space-3);
   max-width: 640px;
-  margin-bottom: 18px;
+  margin-bottom: var(--space-6);
   flex-wrap: wrap;
   align-items: center;
 }
@@ -152,7 +155,7 @@ watch(
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
-  gap: 16px;
+  gap: var(--space-6) var(--space-4);
 }
 @media (max-width: 640px) {
   .bar {
@@ -178,13 +181,13 @@ watch(
   }
   .grid {
     grid-template-columns: repeat(3, 1fr);
-    gap: 10px;
+    gap: var(--space-4) var(--space-2);
   }
 }
 @media (max-width: 380px) {
   .grid {
     grid-template-columns: repeat(3, 1fr);
-    gap: 8px;
+    gap: var(--space-3) 6px;
   }
 }
 </style>

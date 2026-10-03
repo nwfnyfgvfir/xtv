@@ -118,7 +118,11 @@ watch(
     <ul v-else-if="result?.directories?.length" class="dir-list" :class="{ dim: loading }">
       <li v-for="d in result.directories" :key="d.path">
         <button type="button" class="dir-item" @click="enterDir(d)">
-          <span class="folder-ico" aria-hidden="true">📁</span>
+          <svg class="folder-ico" viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4.2l1.8 2.2h8A1.5 1.5 0 0 1 20 9.7v7.8a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z"
+            />
+          </svg>
           <span class="dir-name">{{ d.name }}</span>
         </button>
       </li>
@@ -139,25 +143,24 @@ watch(
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 12px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
   flex-wrap: wrap;
 }
 .path-label {
   flex: 1;
   min-width: 0;
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--accent);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: var(--font-display);
-  letter-spacing: 0.02em;
+  font-family: var(--font-mono);
 }
 .picker-actions {
   display: flex;
-  gap: 6px;
+  gap: var(--space-2);
   flex-shrink: 0;
 }
 .dir-list {
@@ -167,7 +170,7 @@ watch(
   max-height: min(360px, 50vh);
   overflow: auto;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--bg-elevated);
 }
 .dir-list.dim {
@@ -175,21 +178,24 @@ watch(
   pointer-events: none;
 }
 .dir-list li + li {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--border-subtle);
 }
 .dir-item {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-3);
   width: 100%;
   border: 0;
   background: transparent;
   color: var(--text);
-  padding: 10px 12px;
+  padding: var(--space-3);
   cursor: pointer;
   text-align: left;
-  font-size: 14px;
+  font-size: var(--text-base);
   min-height: 44px;
+  transition:
+    background-color var(--dur-2) var(--ease-out),
+    color var(--dur-2) var(--ease-out);
 }
 .dir-item:hover {
   background: var(--accent-soft);
@@ -197,8 +203,14 @@ watch(
 }
 .folder-ico {
   flex-shrink: 0;
-  font-size: 16px;
-  line-height: 1;
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.85;
 }
 .dir-name {
   overflow: hidden;
@@ -206,21 +218,21 @@ watch(
   white-space: nowrap;
 }
 .picker-empty {
-  padding: 28px 12px;
+  padding: var(--space-7) var(--space-3);
   text-align: center;
   border: 1px dashed var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
 }
 .picker-error {
-  padding: 12px;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--danger-soft);
   color: var(--danger);
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 .picker-hint {
-  margin: 12px 0 0;
-  font-size: 12px;
-  line-height: 1.45;
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-xs);
+  line-height: var(--leading-snug);
 }
 </style>

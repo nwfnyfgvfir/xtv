@@ -2,6 +2,9 @@
 
 # --- frontend build ---
 FROM node:22-alpine AS frontend
+# App version baked into the SPA; CI passes the git tag (e.g. v0.9.8).
+ARG APP_VERSION=dev
+ENV APP_VERSION=$APP_VERSION
 WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
@@ -10,10 +13,13 @@ RUN npm run build
 
 # --- backend runtime ---
 FROM python:3.12-slim AS runtime
+# Same tag as the frontend stage; exposed via FastAPI version + /api/health.
+ARG APP_VERSION=
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     MEDIA_ROOT=/media \
-    DATABASE_URL=sqlite:////data/app.db
+    DATABASE_URL=sqlite:////data/app.db \
+    APP_VERSION=${APP_VERSION}
 
 WORKDIR /app
 

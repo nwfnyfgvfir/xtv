@@ -258,11 +258,11 @@ async function onCopy() {
 
 <style scoped>
 .external-players {
-  margin: 4px 0 14px;
-  padding: 12px 14px;
-  border-radius: 12px;
+  margin: var(--space-1) 0 var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
   border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--panel) 92%, var(--bg));
+  background: var(--bg-elevated);
 }
 .external-players.busy {
   opacity: 0.85;
@@ -271,41 +271,42 @@ async function onCopy() {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 12px;
-  margin-bottom: 10px;
+  gap: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-3);
 }
 .ep-label {
-  font-size: 13px;
+  font-size: var(--text-2xs);
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--tracking-widest);
+  text-transform: uppercase;
   color: var(--muted);
 }
 .ep-status {
-  font-size: 12px;
-  color: var(--muted);
+  font-size: var(--text-xs);
+  color: var(--faint);
 }
 .ep-action,
 .ep-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  min-height: 28px;
-  padding: 0 10px;
-  border-radius: 999px;
+  gap: var(--space-1);
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-full);
   border: 1px solid var(--border);
   background: var(--panel);
-  color: var(--text);
-  font-size: 12px;
+  color: var(--text-soft);
+  font-size: var(--text-xs);
   font-weight: 500;
   cursor: pointer;
   transition:
-    border-color 0.15s ease,
-    color 0.15s ease,
-    background 0.15s ease;
+    border-color var(--dur-2) var(--ease-out),
+    color var(--dur-2) var(--ease-out),
+    background-color var(--dur-2) var(--ease-out);
 }
 .ep-action:hover:not(:disabled),
 .ep-toggle:hover {
-  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  border-color: var(--accent-line);
   color: var(--accent);
   background: var(--accent-soft);
 }
@@ -314,12 +315,12 @@ async function onCopy() {
   cursor: wait;
 }
 .ep-toggle[aria-pressed='true'] {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-color: var(--accent-line);
   color: var(--accent);
   background: var(--accent-soft);
 }
 .ep-arrow {
-  transition: transform 0.2s ease;
+  transition: transform var(--dur-2) var(--ease-out);
   flex-shrink: 0;
 }
 .ep-arrow.open {
@@ -328,7 +329,7 @@ async function onCopy() {
 .ep-icons {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-2);
   align-items: center;
   justify-content: flex-start;
 }
@@ -336,34 +337,32 @@ async function onCopy() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
+  width: 42px;
+  height: 42px;
   padding: 0;
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: transparent;
   cursor: pointer;
   text-decoration: none;
   color: inherit;
   -webkit-touch-callout: none;
   transition:
-    transform 0.15s ease,
-    border-color 0.15s ease,
-    background 0.15s ease,
-    box-shadow 0.15s ease;
+    transform var(--dur-2) var(--ease-out),
+    border-color var(--dur-2) var(--ease-out),
+    background-color var(--dur-2) var(--ease-out);
 }
 .ep-icon-btn img {
   width: 32px;
   height: 32px;
   object-fit: contain;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   pointer-events: none;
 }
 .ep-icon-btn:hover:not(.disabled) {
   transform: translateY(-1px) scale(1.06);
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  border-color: var(--accent-line);
   background: var(--accent-soft);
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .ep-icon-btn.disabled {
   opacity: 0.55;
@@ -372,10 +371,10 @@ async function onCopy() {
 }
 @media (max-width: 720px) {
   .external-players {
-    padding: 10px 12px;
+    padding: var(--space-3);
   }
   .ep-icons {
-    gap: 6px;
+    gap: var(--space-2);
   }
   /* Larger tap targets on phone/tablet */
   .ep-icon-btn {

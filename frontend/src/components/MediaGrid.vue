@@ -11,8 +11,8 @@ const props = withDefaults(
     emptyHint?: string
   }>(),
   {
-    emptyTitle: '暂无媒体',
-    emptyHint: '请先添加媒体库并扫描本地 / strm 目录',
+    emptyTitle: '这里还是空的',
+    emptyHint: '添加一个媒体库并扫描本地 / strm 目录，影片会出现在这里',
   },
 )
 
@@ -40,48 +40,58 @@ watch(
     <MediaCard v-for="item in items" :key="item.id" :item="item" @refreshed="onRefreshed" />
   </div>
   <div v-else class="empty">
-    <div class="empty-mark">TV影院</div>
-    <p>{{ emptyTitle }}</p>
-    <p class="muted">{{ emptyHint }}</p>
+    <span class="empty-mark" aria-hidden="true">TV</span>
+    <p class="empty-title">{{ emptyTitle }}</p>
+    <p class="empty-hint muted">{{ emptyHint }}</p>
   </div>
 </template>
 
 <style scoped>
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(166px, 1fr));
+  gap: var(--space-6) var(--space-4);
 }
 @media (max-width: 640px) {
   .grid {
     grid-template-columns: repeat(3, 1fr);
-    gap: 10px;
+    gap: var(--space-4) var(--space-2);
   }
 }
 @media (max-width: 380px) {
   .grid {
     grid-template-columns: repeat(3, 1fr);
-    gap: 8px;
+    gap: var(--space-3) 6px;
   }
 }
+
+/* Empty state: teach, don't just announce emptiness. */
 .empty {
-  margin-top: 48px;
+  margin-top: var(--space-12);
+  padding: var(--space-12) var(--space-4);
   text-align: center;
-  padding: 40px 16px;
+  border-radius: var(--radius-lg);
   border: 1px dashed var(--border);
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--panel) 80%, transparent);
+  background: color-mix(in oklab, var(--panel) 55%, transparent);
 }
 .empty-mark {
-  font-family: var(--font-display);
-  font-size: 32px;
-  letter-spacing: 0.08em;
+  display: block;
+  font-family: var(--font-serif);
+  font-size: var(--text-4xl);
+  line-height: 1;
+  letter-spacing: var(--tracking-tight);
   color: var(--accent);
-  opacity: 0.85;
-  margin-bottom: 8px;
-  font-weight: 700;
+  opacity: 0.5;
 }
-.empty p {
-  margin: 6px 0;
+.empty-title {
+  margin: var(--space-4) 0 var(--space-1);
+  font-size: var(--text-md);
+  font-weight: 500;
+  color: var(--text);
+}
+.empty-hint {
+  margin: 0 auto;
+  max-width: 42ch;
+  font-size: var(--text-sm);
 }
 </style>

@@ -1,139 +1,424 @@
-/* System font stack — no external Google Fonts (FCP + offline friendly). */
+/* ============================================================================
+   TV — Design System
+   影院暗夜 · 金调 / cinema dark, gold-accented
+   See .impeccable.md for the design context this file implements.
+
+   Layers:
+     1. Primitive tokens  — raw ramps + scales (theme-independent)
+     2. Semantic tokens   — dark (default) / light mappings
+     3. Base + layout     — reset, page shell, utilities
+     4. Components        — skeleton, route progress
+     5. Element Plus bridge
+     6. Motion preferences
+   ========================================================================= */
+
+/* ---------------------------------------------------------------- 1. primitives */
+
+:root {
+  /* Gold ramp — brand hue ≈ 82 (metallic gold, not orange amber). */
+  --gold-200: oklch(94.5% 0.05 86);
+  --gold-300: oklch(89% 0.095 85);
+  --gold-400: oklch(84% 0.12 84);
+  --gold-500: oklch(79.5% 0.13 82);
+  --gold-600: oklch(69.5% 0.13 79);
+  --gold-700: oklch(59% 0.12 76);
+  --gold-750: oklch(53% 0.115 74);
+  --gold-800: oklch(45% 0.1 72);
+
+  /* Warm neutral ramp — every grey carries a trace of the brand hue.
+     Pure grey is dead; 0.006–0.020 chroma is felt but never obvious. */
+  --ink-950: oklch(12.5% 0.01 75);
+  --ink-900: oklch(16% 0.012 75);
+  --ink-850: oklch(19.5% 0.013 75);
+  --ink-800: oklch(23.5% 0.014 75);
+  --ink-750: oklch(28.5% 0.016 75);
+  --ink-700: oklch(34% 0.018 75);
+  --ink-600: oklch(44% 0.02 75);
+  --ink-500: oklch(57% 0.018 78);
+  --ink-400: oklch(71% 0.015 80);
+  --ink-300: oklch(80% 0.012 82);
+  --ink-200: oklch(88% 0.01 84);
+  --ink-100: oklch(94% 0.008 85);
+  --ink-50: oklch(97.5% 0.006 85);
+
+  /* Type scale — fixed rem for app UI (no fluid type in product surfaces). */
+  --text-2xs: 0.6875rem; /* 11 — badges */
+  --text-xs: 0.75rem; /* 12 — meta */
+  --text-sm: 0.8125rem; /* 13 — secondary */
+  --text-base: 0.9375rem; /* 15 — body */
+  --text-md: 1.0625rem; /* 17 — card titles */
+  --text-lg: 1.25rem; /* 20 */
+  --text-xl: 1.5rem; /* 24 — h2 */
+  --text-2xl: 1.875rem; /* 30 — h1 */
+  --text-3xl: 2.375rem; /* 38 */
+  --text-4xl: 3rem; /* 48 — display */
+
+  --leading-none: 1;
+  --leading-tight: 1.15;
+  --leading-snug: 1.35;
+  --leading-normal: 1.6; /* light-on-dark reads lighter → more leading */
+  --leading-relaxed: 1.75;
+
+  --tracking-tight: -0.015em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.04em;
+  --tracking-wider: 0.1em;
+  --tracking-widest: 0.16em;
+
+  /* Spacing — 4pt base (8pt is too coarse; 12px is needed constantly). */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-20: 80px;
+  --space-24: 96px;
+
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+  --radius-full: 999px;
+
+  /* Motion — exponential easing only; bounce reads as amateur. */
+  --dur-1: 120ms; /* instant feedback */
+  --dur-2: 200ms; /* state change */
+  --dur-3: 320ms; /* layout change */
+  --dur-4: 480ms; /* entrance */
+  --ease-out: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* z-index scale — semantic, never arbitrary */
+  --z-sticky: 20;
+  --z-nav: 30;
+  --z-overlay: 40;
+  --z-modal: 50;
+  --z-toast: 60;
+  --z-progress: 100;
+
+  --page-max: 1440px;
+  --gutter: clamp(14px, 2.6vw, 32px);
+
+  /* Font stacks. System fonts are a deliberate choice here — see .impeccable.md.
+     No external web fonts: this app must work offline / on a LAN. */
+  --font-body:
+    system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
+    sans-serif;
+  --font-serif:
+    'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, 'Times New Roman',
+    serif;
+  --font-mono:
+    ui-monospace, 'SF Mono', 'Cascadia Mono', 'Segoe UI Mono', Consolas, 'Liberation Mono',
+    monospace;
+  --font-display: var(--font-body);
+}
+
+/* ------------------------------------------------------- 2. semantic tokens — dark */
+
 :root,
 :root[data-theme='dark'] {
   color-scheme: dark;
-  --bg: #0b0d12;
-  --bg-elevated: #12161f;
-  --panel: #161b26;
-  --panel-hover: #1e2533;
-  --border: #343c4f;
-  --border-strong: #4a546b;
-  --text: #f3f0e8;
-  --muted: #b8b2a6;
-  --accent: #e8a838;
-  --accent-soft: rgba(232, 168, 56, 0.18);
-  --accent-glow: rgba(232, 168, 56, 0.32);
-  --danger: #f07171;
-  --ok: #6bcf7f;
-  --skeleton: #222836;
-  --skeleton-shine: #2c3344;
-  --overlay: rgba(8, 10, 14, 0.45);
-  --font-display: 'Segoe UI', system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei',
-    sans-serif;
-  --font-body: 'Segoe UI', system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  --radius: 14px;
-  --shadow-card: 0 10px 28px rgba(0, 0, 0, 0.4);
 
-  /* Element Plus tokens (EP defaults are light-theme; map to app theme) */
-  --el-color-primary: var(--accent);
-  --el-color-primary-light-3: #f0b84a;
-  --el-color-primary-light-5: #e8a838aa;
-  --el-color-primary-light-7: #e8a83866;
-  --el-color-primary-light-8: #e8a83844;
-  --el-color-primary-light-9: var(--accent-soft);
-  --el-color-primary-dark-2: #c4841a;
-  --el-color-danger: var(--danger);
-  --el-color-white: #1a1205;
-  --el-text-color-primary: var(--text);
-  --el-text-color-regular: var(--text);
-  --el-text-color-secondary: var(--muted);
-  --el-text-color-placeholder: var(--muted);
-  --el-text-color-disabled: var(--muted);
-  --el-border-color: var(--border);
-  --el-border-color-light: var(--border);
-  --el-border-color-lighter: var(--border);
-  --el-border-color-extra-light: var(--border);
-  --el-border-color-hover: var(--border-strong);
-  --el-bg-color: var(--bg);
-  --el-bg-color-page: var(--bg);
-  --el-bg-color-overlay: var(--panel);
-  --el-fill-color: var(--panel);
-  --el-fill-color-light: var(--panel-hover);
-  --el-fill-color-lighter: var(--panel-hover);
-  --el-fill-color-extra-light: var(--bg-elevated);
-  --el-fill-color-blank: var(--bg-elevated);
-  --el-fill-color-dark: var(--panel-hover);
-  --el-disabled-bg-color: var(--panel);
-  --el-disabled-text-color: var(--muted);
-  --el-disabled-border-color: var(--border);
-  --el-mask-color: var(--overlay);
-  --el-box-shadow: var(--shadow-card);
-  --el-box-shadow-light: var(--shadow-card);
+  --bg: var(--ink-950);
+  --bg-elevated: var(--ink-900);
+  --panel: var(--ink-850);
+  --panel-hover: var(--ink-800);
+  --panel-active: var(--ink-750);
+  --border: var(--ink-700);
+  --border-strong: var(--ink-600);
+  --border-subtle: color-mix(in oklab, var(--ink-700) 55%, transparent);
+
+  --text: var(--ink-100);
+  --text-soft: var(--ink-200);
+  --muted: var(--ink-400);
+  /* 61% keeps tertiary text at >=4.5:1 on both --bg and --panel. */
+  --faint: oklch(61% 0.018 78);
+
+  --accent: var(--gold-500);
+  --accent-hover: var(--gold-400);
+  --accent-press: var(--gold-600);
+  --accent-soft: color-mix(in oklab, var(--gold-500) 15%, transparent);
+  --accent-line: color-mix(in oklab, var(--gold-500) 40%, transparent);
+  --accent-glow: color-mix(in oklab, var(--gold-500) 28%, transparent);
+  --on-accent: oklch(21% 0.035 70);
+
+  --danger: oklch(67% 0.18 25);
+  --danger-soft: color-mix(in oklab, oklch(67% 0.18 25) 16%, transparent);
+  --ok: oklch(76% 0.14 152);
+
+  --skeleton: var(--ink-800);
+  --skeleton-shine: var(--ink-750);
+  --overlay: oklch(11% 0.01 75 / 0.64);
+  --scrim: linear-gradient(
+    180deg,
+    oklch(10% 0.01 75 / 0) 38%,
+    oklch(10% 0.01 75 / 0.5) 68%,
+    oklch(10% 0.01 75 / 0.88) 100%
+  );
+
+  /* Depth in dark mode comes from surface lightness, not shadow. */
+  --shadow-sm: 0 1px 2px oklch(0% 0 0 / 0.32);
+  --shadow-md: 0 6px 18px oklch(0% 0 0 / 0.36);
+  --shadow-lg: 0 18px 44px oklch(0% 0 0 / 0.46);
+
+  /* legacy aliases still referenced by components */
+  --radius: var(--radius-md);
+  --shadow-card: var(--shadow-md);
 }
+
+/* ------------------------------------------------------ 2b. semantic tokens — light */
 
 :root[data-theme='light'] {
   color-scheme: light;
-  --bg: #f4f1ea;
-  --bg-elevated: #fffdf8;
-  --panel: #ffffff;
-  --panel-hover: #f7f3ea;
-  --border: #ddd4c4;
-  --border-strong: #c4b8a2;
-  --text: #1c1914;
-  --muted: #5c564c;
-  --accent: #c4841a;
-  --accent-soft: rgba(196, 132, 26, 0.14);
-  --accent-glow: rgba(196, 132, 26, 0.22);
-  --danger: #c43c3c;
-  --ok: #2f8f48;
-  --skeleton: #e8e2d6;
-  --skeleton-shine: #f3eee4;
-  --overlay: rgba(255, 255, 255, 0.5);
-  --shadow-card: 0 8px 22px rgba(40, 30, 10, 0.08);
 
+  --bg: var(--ink-100);
+  --bg-elevated: var(--ink-50);
+  --panel: oklch(99.5% 0.004 85);
+  --panel-hover: var(--ink-200);
+  --panel-active: var(--ink-300);
+  --border: var(--ink-300);
+  --border-strong: var(--ink-400);
+  --border-subtle: color-mix(in oklab, var(--ink-300) 60%, transparent);
+
+  --text: oklch(24% 0.02 72);
+  --text-soft: oklch(34% 0.02 73);
+  --muted: oklch(46% 0.022 75);
+  /* 52% keeps tertiary text at >=4.5:1 on the warm paper background. */
+  --faint: oklch(52% 0.02 76);
+
+  --accent: var(--gold-750);
+  --accent-hover: var(--gold-700);
+  --accent-press: var(--gold-800);
+  --accent-soft: color-mix(in oklab, var(--gold-750) 13%, transparent);
+  --accent-line: color-mix(in oklab, var(--gold-750) 42%, transparent);
+  --accent-glow: color-mix(in oklab, var(--gold-750) 20%, transparent);
+  --on-accent: oklch(99% 0.005 85);
+
+  --danger: oklch(52% 0.19 25);
+  --danger-soft: color-mix(in oklab, oklch(52% 0.19 25) 12%, transparent);
+  --ok: oklch(48% 0.13 152);
+
+  --skeleton: var(--ink-200);
+  --skeleton-shine: var(--ink-100);
+  --overlay: oklch(97% 0.006 85 / 0.6);
+  --scrim: linear-gradient(
+    180deg,
+    oklch(12% 0.01 75 / 0) 38%,
+    oklch(12% 0.01 75 / 0.45) 68%,
+    oklch(12% 0.01 75 / 0.86) 100%
+  );
+
+  --shadow-sm: 0 1px 2px oklch(30% 0.03 70 / 0.08);
+  --shadow-md: 0 6px 18px oklch(30% 0.03 70 / 0.1);
+  --shadow-lg: 0 18px 44px oklch(30% 0.03 70 / 0.14);
+}
+
+/* ------------------------------------------- 2c. Element Plus theme bridge
+   Element Plus derives every variant (plain, hover, active, disabled) from
+   these. Without them EP falls back to its stock blue. Must be per-theme. */
+
+:root,
+:root[data-theme='dark'] {
   --el-color-primary: var(--accent);
-  --el-color-primary-light-3: #d49a2e;
-  --el-color-primary-light-5: #c4841aaa;
-  --el-color-primary-light-7: #c4841a66;
-  --el-color-primary-light-8: #c4841a44;
-  --el-color-primary-light-9: var(--accent-soft);
-  --el-color-primary-dark-2: #9a6810;
+  --el-color-primary-light-3: color-mix(in oklab, var(--accent) 55%, var(--bg-elevated));
+  --el-color-primary-light-5: color-mix(in oklab, var(--accent) 40%, var(--bg-elevated));
+  --el-color-primary-light-7: color-mix(in oklab, var(--accent) 26%, var(--bg-elevated));
+  --el-color-primary-light-8: color-mix(in oklab, var(--accent) 20%, var(--bg-elevated));
+  --el-color-primary-light-9: color-mix(in oklab, var(--accent) 14%, var(--bg-elevated));
+  --el-color-primary-dark-2: color-mix(in oklab, var(--accent) 82%, black);
   --el-color-danger: var(--danger);
-  --el-color-white: #fffdf8;
+  --el-color-danger-light-3: color-mix(in oklab, var(--danger) 55%, var(--bg-elevated));
+  --el-color-danger-light-5: color-mix(in oklab, var(--danger) 40%, var(--bg-elevated));
+  --el-color-danger-light-7: color-mix(in oklab, var(--danger) 26%, var(--bg-elevated));
+  --el-color-danger-light-8: color-mix(in oklab, var(--danger) 20%, var(--bg-elevated));
+  --el-color-danger-light-9: color-mix(in oklab, var(--danger) 14%, var(--bg-elevated));
+  --el-color-danger-dark-2: color-mix(in oklab, var(--danger) 82%, black);
+  --el-color-success: var(--ok);
+  --el-color-success-light-3: color-mix(in oklab, var(--ok) 55%, var(--bg-elevated));
+  --el-color-success-light-5: color-mix(in oklab, var(--ok) 40%, var(--bg-elevated));
+  --el-color-success-light-7: color-mix(in oklab, var(--ok) 26%, var(--bg-elevated));
+  --el-color-success-light-8: color-mix(in oklab, var(--ok) 20%, var(--bg-elevated));
+  --el-color-success-light-9: color-mix(in oklab, var(--ok) 14%, var(--bg-elevated));
+  --el-color-warning: var(--gold-600);
+  --el-color-warning-light-3: color-mix(in oklab, var(--gold-600) 55%, var(--bg-elevated));
+  --el-color-warning-light-5: color-mix(in oklab, var(--gold-600) 40%, var(--bg-elevated));
+  --el-color-warning-light-7: color-mix(in oklab, var(--gold-600) 26%, var(--bg-elevated));
+  --el-color-warning-light-8: color-mix(in oklab, var(--gold-600) 20%, var(--bg-elevated));
+  --el-color-warning-light-9: color-mix(in oklab, var(--gold-600) 14%, var(--bg-elevated));
+  --el-color-info: var(--muted);
+  --el-color-info-light-3: color-mix(in oklab, var(--muted) 55%, var(--bg-elevated));
+  --el-color-info-light-5: color-mix(in oklab, var(--muted) 40%, var(--bg-elevated));
+  --el-color-info-light-7: color-mix(in oklab, var(--muted) 26%, var(--bg-elevated));
+  --el-color-info-light-8: color-mix(in oklab, var(--muted) 20%, var(--bg-elevated));
+  --el-color-info-light-9: color-mix(in oklab, var(--muted) 14%, var(--bg-elevated));
+  --el-color-white: var(--on-accent);
+
   --el-text-color-primary: var(--text);
-  --el-text-color-regular: var(--text);
+  --el-text-color-regular: var(--text-soft);
   --el-text-color-secondary: var(--muted);
-  --el-text-color-placeholder: var(--muted);
-  --el-text-color-disabled: var(--muted);
+  --el-text-color-placeholder: var(--faint);
+  --el-text-color-disabled: var(--faint);
+
   --el-border-color: var(--border);
   --el-border-color-light: var(--border);
-  --el-border-color-lighter: var(--border);
-  --el-border-color-extra-light: var(--border);
+  --el-border-color-lighter: var(--border-subtle);
+  --el-border-color-extra-light: var(--border-subtle);
   --el-border-color-hover: var(--border-strong);
-  --el-bg-color: var(--bg);
+
+  --el-bg-color: var(--bg-elevated);
   --el-bg-color-page: var(--bg);
   --el-bg-color-overlay: var(--panel);
+
+  --el-fill-color: var(--panel-hover);
+  --el-fill-color-light: var(--panel-hover);
+  --el-fill-color-lighter: var(--bg-elevated);
+  --el-fill-color-extra-light: var(--bg-elevated);
+  --el-fill-color-blank: var(--bg-elevated);
+  --el-fill-color-dark: var(--panel-active);
+
+  --el-disabled-bg-color: var(--panel);
+  --el-disabled-text-color: var(--faint);
+  --el-disabled-border-color: var(--border);
+
+  --el-mask-color: var(--overlay);
+  --el-box-shadow: var(--shadow-md);
+  --el-box-shadow-light: var(--shadow-sm);
+  --el-box-shadow-lighter: var(--shadow-sm);
+  --el-border-radius-base: var(--radius-sm);
+}
+
+:root[data-theme='light'] {
+  --el-color-primary: var(--accent);
+  --el-color-primary-light-3: color-mix(in oklab, var(--accent) 78%, white);
+  --el-color-primary-light-5: color-mix(in oklab, var(--accent) 60%, white);
+  --el-color-primary-light-7: color-mix(in oklab, var(--accent) 42%, white);
+  --el-color-primary-light-8: color-mix(in oklab, var(--accent) 34%, white);
+  --el-color-primary-light-9: color-mix(in oklab, var(--accent) 18%, white);
+  --el-color-primary-dark-2: color-mix(in oklab, var(--accent) 82%, black);
+  --el-color-danger: var(--danger);
+  --el-color-danger-light-3: color-mix(in oklab, var(--danger) 78%, white);
+  --el-color-danger-light-5: color-mix(in oklab, var(--danger) 60%, white);
+  --el-color-danger-light-7: color-mix(in oklab, var(--danger) 42%, white);
+  --el-color-danger-light-8: color-mix(in oklab, var(--danger) 34%, white);
+  --el-color-danger-light-9: color-mix(in oklab, var(--danger) 18%, white);
+  --el-color-danger-dark-2: color-mix(in oklab, var(--danger) 82%, black);
+  --el-color-success: var(--ok);
+  --el-color-success-light-3: color-mix(in oklab, var(--ok) 78%, white);
+  --el-color-success-light-5: color-mix(in oklab, var(--ok) 60%, white);
+  --el-color-success-light-7: color-mix(in oklab, var(--ok) 42%, white);
+  --el-color-success-light-8: color-mix(in oklab, var(--ok) 34%, white);
+  --el-color-success-light-9: color-mix(in oklab, var(--ok) 18%, white);
+  --el-color-warning: var(--gold-600);
+  --el-color-warning-light-3: color-mix(in oklab, var(--gold-600) 78%, white);
+  --el-color-warning-light-5: color-mix(in oklab, var(--gold-600) 60%, white);
+  --el-color-warning-light-7: color-mix(in oklab, var(--gold-600) 42%, white);
+  --el-color-warning-light-8: color-mix(in oklab, var(--gold-600) 34%, white);
+  --el-color-warning-light-9: color-mix(in oklab, var(--gold-600) 18%, white);
+  --el-color-info: var(--muted);
+  --el-color-info-light-3: color-mix(in oklab, var(--muted) 78%, white);
+  --el-color-info-light-5: color-mix(in oklab, var(--muted) 60%, white);
+  --el-color-info-light-7: color-mix(in oklab, var(--muted) 42%, white);
+  --el-color-info-light-8: color-mix(in oklab, var(--muted) 34%, white);
+  --el-color-info-light-9: color-mix(in oklab, var(--muted) 18%, white);
+  --el-color-white: var(--on-accent);
+
+  --el-text-color-primary: var(--text);
+  --el-text-color-regular: var(--text-soft);
+  --el-text-color-secondary: var(--muted);
+  --el-text-color-placeholder: var(--faint);
+  --el-text-color-disabled: var(--faint);
+
+  --el-border-color: var(--border);
+  --el-border-color-light: var(--border);
+  --el-border-color-lighter: var(--border-subtle);
+  --el-border-color-extra-light: var(--border-subtle);
+  --el-border-color-hover: var(--border-strong);
+
+  --el-bg-color: var(--panel);
+  --el-bg-color-page: var(--bg);
+  --el-bg-color-overlay: var(--panel);
+
   --el-fill-color: var(--panel-hover);
   --el-fill-color-light: var(--panel-hover);
   --el-fill-color-lighter: var(--bg-elevated);
   --el-fill-color-extra-light: var(--bg-elevated);
   --el-fill-color-blank: var(--panel);
-  --el-fill-color-dark: var(--border);
+  --el-fill-color-dark: var(--panel-active);
+
   --el-disabled-bg-color: var(--panel-hover);
-  --el-disabled-text-color: var(--muted);
+  --el-disabled-text-color: var(--faint);
   --el-disabled-border-color: var(--border);
+
   --el-mask-color: var(--overlay);
-  --el-box-shadow: var(--shadow-card);
-  --el-box-shadow-light: var(--shadow-card);
+  --el-box-shadow: var(--shadow-md);
+  --el-box-shadow-light: var(--shadow-sm);
+  --el-box-shadow-lighter: var(--shadow-sm);
+  --el-border-radius-base: var(--radius-sm);
 }
 
-* {
+/* ------------------------------------------------------------- 3. base + layout */
+
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
-html,
+html {
+  -webkit-text-size-adjust: 100%;
+  /* Keep rem anchored to the user's browser default (usually 16px).
+     Setting a rem-based font-size here would rescale the whole type scale. */
+  font-size: 100%;
+}
+
 body,
 #app {
   margin: 0;
   min-height: 100%;
-  background:
-    radial-gradient(ellipse 80% 50% at 50% -10%, var(--accent-soft), transparent 55%),
-    var(--bg);
+  background: var(--bg);
   color: var(--text);
   font-family: var(--font-body);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  font-kerning: normal;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   -webkit-tap-highlight-color: transparent;
   overflow-x: clip;
+}
+
+/* A single soft pool of light from the top — the auditorium ceiling. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: 62vh;
+  pointer-events: none;
+  z-index: 0;
+  background: radial-gradient(
+    ellipse 70% 100% at 50% -18%,
+    color-mix(in oklab, var(--accent) 9%, transparent),
+    transparent 62%
+  );
+}
+
+#app {
+  position: relative;
+  z-index: 1;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--accent) 32%, transparent);
+  color: var(--text);
 }
 
 a {
@@ -146,53 +431,125 @@ input,
 select,
 textarea {
   font-family: inherit;
+  font-size: inherit;
+}
+
+img {
+  display: block;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+/* Scrollbars — quiet, warm, never bright. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border: 3px solid transparent;
+  border-radius: var(--radius-full);
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--faint);
+  background-clip: content-box;
 }
 
 .page {
-  padding: 20px 22px 48px;
-  max-width: 1400px;
+  padding: var(--space-8) var(--gutter) var(--space-16);
+  max-width: var(--page-max);
   margin: 0 auto;
 }
 
 .page-title {
-  margin: 0 0 10px;
+  margin: 0;
   font-family: var(--font-display);
-  font-size: 34px;
-  font-weight: 400;
-  letter-spacing: 0.06em;
+  font-size: var(--text-3xl);
+  font-weight: 500;
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-tight);
   color: var(--text);
+  text-wrap: balance;
+}
+
+/* Small uppercase label that sits above a heading. */
+.eyebrow {
+  display: inline-block;
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: var(--tracking-widest);
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: var(--space-2);
 }
 
 .muted {
   color: var(--muted);
 }
 
+/* Numbers are a first-class citizen in this library — 番号, counts, runtimes. */
+.num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  letter-spacing: var(--tracking-wide);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* A hairline rule with a gold lead-in — the recurring "scene marker" motif. */
+.rule {
+  height: 1px;
+  border: 0;
+  margin: var(--space-6) 0;
+  background: linear-gradient(
+    90deg,
+    var(--accent-line),
+    var(--border-subtle) 22%,
+    var(--border-subtle)
+  );
+}
+
+code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  color: var(--accent);
+}
+
 @media (max-width: 860px) {
   .page {
-    padding: 14px 12px 28px;
-    padding-left: max(12px, env(safe-area-inset-left));
-    padding-right: max(12px, env(safe-area-inset-right));
+    padding: var(--space-6) var(--gutter) var(--space-12);
   }
 }
 
 @media (max-width: 640px) {
   .page-title {
-    font-size: 26px;
-    letter-spacing: 0.04em;
-  }
-
-  .skeleton-grid {
-    grid-template-columns: repeat(3, 1fr);
-    gap: 10px;
+    font-size: var(--text-2xl);
   }
 }
 
-@media (max-width: 380px) {
-  .skeleton-grid {
-    grid-template-columns: repeat(3, 1fr);
-    gap: 8px;
-  }
-}
+/* ------------------------------------------------------------- 4. components */
 
 /* Top progress bar */
 .route-progress {
@@ -201,11 +558,11 @@ textarea {
   left: 0;
   right: 0;
   height: 2px;
-  z-index: 100;
+  z-index: var(--z-progress);
   overflow: hidden;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 0.2s ease;
+  transition: opacity var(--dur-2) var(--ease-out);
 }
 .route-progress.on {
   opacity: 1;
@@ -214,9 +571,9 @@ textarea {
   height: 100%;
   width: 40%;
   background: linear-gradient(90deg, transparent, var(--accent), transparent);
-  animation: slide 1s ease-in-out infinite;
+  animation: route-slide 1s var(--ease-in-out) infinite;
 }
-@keyframes slide {
+@keyframes route-slide {
   0% {
     transform: translateX(-100%);
   }
@@ -229,30 +586,29 @@ textarea {
 .skeleton-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
-  gap: 16px;
+  gap: var(--space-5) var(--space-4);
 }
 .skeleton-card {
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   overflow: hidden;
-  border: 1px solid var(--border);
   background: var(--panel);
 }
 .skeleton-poster {
   aspect-ratio: 3 / 4;
   background: linear-gradient(90deg, var(--skeleton), var(--skeleton-shine), var(--skeleton));
   background-size: 200% 100%;
-  animation: shimmer 1.2s ease-in-out infinite;
+  animation: shimmer 1.4s var(--ease-in-out) infinite;
 }
 .skeleton-line {
-  height: 12px;
-  margin: 10px 12px;
-  border-radius: 6px;
+  height: 11px;
+  margin: var(--space-3) var(--space-3);
+  border-radius: var(--radius-xs);
   background: linear-gradient(90deg, var(--skeleton), var(--skeleton-shine), var(--skeleton));
   background-size: 200% 100%;
-  animation: shimmer 1.2s ease-in-out infinite;
+  animation: shimmer 1.4s var(--ease-in-out) infinite;
 }
 .skeleton-line.short {
-  width: 40%;
+  width: 42%;
 }
 @keyframes shimmer {
   0% {
@@ -263,13 +619,50 @@ textarea {
   }
 }
 
-/* Element Plus theme bridge */
+@media (max-width: 640px) {
+  .skeleton-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-3) var(--space-2);
+  }
+}
+
+/* ------------------------------------------------------------- 4b. field widths
+   A control should be about as wide as its content needs. Full-bleed inputs in
+   a wide card read as unfinished. These cap Element Plus's default width:100%
+   via max-width — a different property, so there is no specificity war. */
+.field-xs {
+  max-width: 150px;
+}
+.field-sm {
+  max-width: 220px;
+}
+.field-md {
+  max-width: 300px;
+}
+.field-lg {
+  max-width: 420px;
+}
+.field-full {
+  max-width: none;
+}
+
+/* -------------------------------------------------- 5. Element Plus bridge */
+
+/* One component-size scale drives buttons AND form controls, so a button
+   sitting next to an input in a toolbar always lines up on the same baseline. */
+:root {
+  --el-component-size: 36px;
+  --el-component-size-large: 44px;
+  --el-component-size-small: 30px;
+}
+
 .el-card {
   --el-card-bg-color: var(--panel);
   --el-card-border-color: var(--border);
   background: var(--panel) !important;
   border-color: var(--border) !important;
   color: var(--text);
+  border-radius: var(--radius-lg) !important;
 }
 
 .el-button {
@@ -280,20 +673,94 @@ textarea {
   --el-button-hover-bg-color: var(--panel-hover);
   --el-button-hover-border-color: var(--border-strong);
   --el-button-active-text-color: var(--accent);
-  --el-button-disabled-text-color: var(--muted);
+  --el-button-disabled-text-color: var(--faint);
   --el-button-disabled-bg-color: var(--panel);
   --el-button-disabled-border-color: var(--border);
+  font-weight: 500;
+  letter-spacing: var(--tracking-wide);
+  transition:
+    background-color var(--dur-1) var(--ease-out),
+    border-color var(--dur-1) var(--ease-out),
+    color var(--dur-1) var(--ease-out);
+}
+
+/*
+  Button system. Element Plus ships its own .el-button declarations and its
+  stylesheet is injected AFTER this one, so equal-specificity rules lose.
+  Every override below is therefore written as a doubled class selector
+  (.el-button.el-button) to win on specificity rather than on source order.
+  Do NOT "simplify" these back to a single class.
+*/
+.el-button.el-button {
+  height: 36px;
+  min-height: 36px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-full);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  letter-spacing: var(--tracking-wide);
+}
+
+/* Size variants only change height, horizontal padding and font size. */
+.el-button.el-button--large {
+  height: 44px;
+  min-height: 44px;
+  padding: 0 var(--space-6);
+  font-size: 0.875rem; /* 14px — hero actions */
+}
+.el-button.el-button--small {
+  height: 30px;
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  font-size: var(--text-xs);
+}
+.el-button.el-button.is-circle {
+  width: auto;
+  padding: 0;
+  min-width: 36px;
+}
+.el-button.el-button--large.is-circle {
+  min-width: 44px;
+}
+.el-button.el-button--small.is-circle {
+  min-width: 30px;
+}
+
+/* Text buttons have no box, so they must not inherit the pill sizing. */
+.el-button.el-button.is-text,
+.el-button.el-button.is-link {
+  height: auto;
+  min-height: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
 }
 
 .el-button--primary {
   --el-button-bg-color: var(--accent);
   --el-button-border-color: var(--accent);
-  --el-button-hover-bg-color: #f0b84a;
-  --el-button-hover-border-color: #f0b84a;
-  --el-button-text-color: #1a1205;
-  --el-button-hover-text-color: #1a1205;
-  --el-button-disabled-text-color: #1a1205;
+  --el-button-hover-bg-color: var(--accent-hover);
+  --el-button-hover-border-color: var(--accent-hover);
+  --el-button-active-bg-color: var(--accent-press);
+  --el-button-active-border-color: var(--accent-press);
+  --el-button-text-color: var(--on-accent);
+  --el-button-hover-text-color: var(--on-accent);
+  --el-button-disabled-text-color: var(--on-accent);
   font-weight: 600;
+}
+
+.el-button--warning {
+  --el-button-bg-color: var(--gold-600);
+  --el-button-border-color: var(--gold-600);
+  --el-button-text-color: var(--on-accent);
+  --el-button-hover-bg-color: var(--gold-500);
+  --el-button-hover-border-color: var(--gold-500);
+  --el-button-hover-text-color: var(--on-accent);
+}
+
+.el-button--danger {
+  --el-button-text-color: var(--danger);
+  --el-button-border-color: color-mix(in oklab, var(--danger) 45%, var(--border));
 }
 
 .el-button.is-text,
@@ -320,7 +787,7 @@ textarea {
 .el-button.is-text.el-button--danger:not(.is-disabled):hover,
 .el-button.is-link.el-button--danger:not(.is-disabled):hover {
   color: var(--danger) !important;
-  background: color-mix(in srgb, var(--danger) 14%, transparent) !important;
+  background: var(--danger-soft) !important;
 }
 
 .el-input__wrapper,
@@ -329,6 +796,14 @@ textarea {
   background-color: var(--bg-elevated) !important;
   box-shadow: 0 0 0 1px var(--border) inset !important;
   color: var(--text) !important;
+  border-radius: var(--radius-sm);
+  transition: box-shadow var(--dur-1) var(--ease-out);
+}
+
+.el-input__wrapper.is-focus,
+.el-select__wrapper.is-focused,
+.el-textarea__inner:focus {
+  box-shadow: 0 0 0 1px var(--accent) inset !important;
 }
 
 .el-input__inner,
@@ -341,7 +816,7 @@ textarea {
 
 .el-select__placeholder,
 .el-select__placeholder.is-transparent {
-  color: var(--muted) !important;
+  color: var(--faint) !important;
 }
 
 .el-select__caret,
@@ -365,6 +840,7 @@ textarea {
   background: var(--panel) !important;
   border: 1px solid var(--border) !important;
   color: var(--text) !important;
+  border-radius: var(--radius-md) !important;
 }
 
 .el-select-dropdown__item {
@@ -381,21 +857,56 @@ textarea {
 }
 
 .el-select-dropdown__item.is-disabled {
-  color: var(--muted) !important;
+  color: var(--faint) !important;
 }
 
 .el-select-dropdown__empty {
   color: var(--muted) !important;
 }
 
+.el-dropdown-menu {
+  background: var(--panel) !important;
+  border-radius: var(--radius-md) !important;
+}
+
+.el-dropdown-menu__item {
+  color: var(--text) !important;
+}
+
+.el-dropdown-menu__item:not(.is-disabled):hover {
+  background: var(--panel-hover) !important;
+  color: var(--accent) !important;
+}
+
 .el-dialog {
   --el-dialog-bg-color: var(--panel);
-  --el-dialog-title-font-size: 18px;
+  --el-dialog-title-font-size: var(--text-lg);
   background: var(--panel) !important;
   color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg) !important;
 }
 
 .el-dialog__title {
+  color: var(--text) !important;
+  font-weight: 600;
+}
+
+.el-message-box {
+  background: var(--panel) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-lg) !important;
+}
+
+.el-message-box__title,
+.el-message-box__message {
+  color: var(--text) !important;
+}
+
+.el-message {
+  background: var(--panel) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-md) !important;
   color: var(--text) !important;
 }
 
@@ -410,14 +921,14 @@ textarea {
   --el-pagination-button-color: var(--text) !important;
   --el-pagination-text-color: var(--text) !important;
   --el-pagination-hover-color: var(--accent) !important;
-  --el-pagination-button-disabled-color: var(--muted) !important;
+  --el-pagination-button-disabled-color: var(--faint) !important;
   --el-pagination-button-disabled-bg-color: var(--panel) !important;
   --el-text-color-primary: var(--text) !important;
   --el-text-color-regular: var(--muted) !important;
   --el-text-color-secondary: var(--muted) !important;
-  --el-text-color-placeholder: var(--muted) !important;
+  --el-text-color-placeholder: var(--faint) !important;
   --el-color-primary: var(--accent) !important;
-  --el-color-white: #1a1205 !important;
+  --el-color-white: var(--on-accent) !important;
   --el-disabled-bg-color: var(--panel-hover) !important;
   --el-fill-color: var(--panel) !important;
   --el-fill-color-blank: var(--bg-elevated) !important;
@@ -431,14 +942,17 @@ textarea {
   background-color: var(--panel) !important;
   color: var(--text) !important;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
+  transition:
+    color var(--dur-1) var(--ease-out),
+    border-color var(--dur-1) var(--ease-out);
 }
 
 .el-pagination .btn-prev:hover:not(:disabled):not(.is-disabled),
 .el-pagination .btn-next:hover:not(:disabled):not(.is-disabled),
 .el-pagination .el-pager li:hover:not(.is-active):not(.is-disabled) {
   color: var(--accent) !important;
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  border-color: var(--accent-line);
 }
 
 .el-pagination .btn-prev:disabled,
@@ -446,15 +960,15 @@ textarea {
 .el-pagination .btn-next:disabled,
 .el-pagination .btn-next.is-disabled,
 .el-pagination .el-pager li.is-disabled {
-  color: var(--muted) !important;
+  color: var(--faint) !important;
   background-color: var(--panel) !important;
   border-color: var(--border);
-  opacity: 0.65;
+  opacity: 0.6;
 }
 
 .el-pagination.is-background .el-pager li.is-active {
   background-color: var(--accent) !important;
-  color: #1a1205 !important;
+  color: var(--on-accent) !important;
   border-color: var(--accent);
   font-weight: 700;
 }
@@ -477,7 +991,7 @@ textarea {
   .el-pagination {
     flex-wrap: wrap;
     justify-content: center;
-    row-gap: 8px;
+    row-gap: var(--space-2);
   }
 }
 
@@ -489,25 +1003,35 @@ textarea {
   background-color: var(--overlay) !important;
 }
 
+.el-switch.is-checked .el-switch__core {
+  background-color: var(--accent) !important;
+  border-color: var(--accent) !important;
+}
+
+.el-switch__core {
+  border-color: var(--border-strong) !important;
+  background-color: var(--panel-hover) !important;
+}
+
 .el-tag {
-  --el-tag-bg-color: color-mix(in srgb, var(--panel-hover) 88%, var(--accent-soft)) !important;
-  --el-tag-border-color: color-mix(in srgb, var(--border) 78%, var(--accent) 22%) !important;
+  --el-tag-bg-color: var(--panel-hover) !important;
+  --el-tag-border-color: var(--border) !important;
   --el-tag-text-color: var(--text) !important;
   --el-tag-hover-color: var(--accent) !important;
-  background-color: color-mix(in srgb, var(--panel-hover) 88%, var(--accent-soft)) !important;
-  border-color: color-mix(in srgb, var(--border) 78%, var(--accent) 22%) !important;
+  background-color: var(--panel-hover) !important;
+  border-color: var(--border) !important;
   color: var(--text) !important;
-  border-radius: 999px !important;
+  border-radius: var(--radius-full) !important;
   font-weight: 500;
-  letter-spacing: 0.02em;
+  letter-spacing: var(--tracking-wide);
 }
 
 .el-tag--dark {
   --el-tag-bg-color: var(--accent-soft) !important;
-  --el-tag-border-color: color-mix(in srgb, var(--accent) 40%, var(--border)) !important;
+  --el-tag-border-color: var(--accent-line) !important;
   --el-tag-text-color: var(--accent) !important;
   background-color: var(--accent-soft) !important;
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--border)) !important;
+  border-color: var(--accent-line) !important;
   color: var(--accent) !important;
 }
 
@@ -516,13 +1040,36 @@ textarea {
 }
 
 .el-tag .el-tag__close:hover {
-  color: #1a1205 !important;
+  color: var(--on-accent) !important;
   background-color: var(--accent) !important;
 }
 
 .el-select__selection .el-tag {
-  background-color: color-mix(in srgb, var(--panel-hover) 88%, var(--accent-soft)) !important;
-  border-color: color-mix(in srgb, var(--border) 78%, var(--accent) 22%) !important;
+  background-color: var(--panel-hover) !important;
+  border-color: var(--border) !important;
   color: var(--text) !important;
-  border-radius: 999px !important;
+  border-radius: var(--radius-full) !important;
+}
+
+/* ------------------------------------------------------------- 6. motion prefs */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  /* Keep functional indicators alive, just without spatial movement. */
+  .route-progress .bar,
+  .skeleton-poster,
+  .skeleton-line {
+    animation: none !important;
+  }
+  .route-progress .bar {
+    width: 100%;
+    background: var(--accent);
+  }
 }

@@ -24,5 +24,10 @@ backend/.venv/
 Thumbs.db
 .idea/
 .vscode/
+# WorkBuddy AI workspace data (project memory / local notes) — keep local only
+.workbuddy-ai/
+# Claude Code local permission allowlist — personal, machine-specific.
+# Ignore the file, not the whole .claude/ dir, so shared config stays committable.
+.claude/settings.local.json
 *.db
 *.sqlite3

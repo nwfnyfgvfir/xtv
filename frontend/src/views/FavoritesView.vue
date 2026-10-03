@@ -140,7 +140,6 @@ watch(
       <el-select
         v-if="tab === 'media'"
         :model-value="sort"
-        size="small"
         style="width: 168px"
         @change="onSortChange"
       >
@@ -211,22 +210,23 @@ watch(
 <style scoped>
 .head {
   display: flex;
-  align-items: flex-start;
+  align-items: flex-end;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-4);
   flex-wrap: wrap;
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
 }
 .intro {
-  margin: 0;
-  font-size: 13px;
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
 }
+/* Segmented control: one pill, two states, gold marks the active one. */
 .tabs {
   display: inline-flex;
-  gap: 4px;
-  padding: 4px;
-  margin-bottom: 16px;
-  border-radius: 999px;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  margin-bottom: var(--space-5);
+  border-radius: var(--radius-full);
   background: var(--panel);
   border: 1px solid var(--border);
 }
@@ -234,39 +234,43 @@ watch(
   border: none;
   background: transparent;
   color: var(--muted);
-  font-size: 13px;
-  font-weight: 600;
-  padding: 6px 16px;
-  border-radius: 999px;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-full);
   cursor: pointer;
-  transition: color 0.15s ease, background 0.15s ease;
+  min-height: 34px;
+  transition:
+    color var(--dur-2) var(--ease-out),
+    background-color var(--dur-2) var(--ease-out);
 }
-.tab:hover {
+.tab:hover:not(.active) {
   color: var(--text);
 }
 .tab.active {
   color: var(--accent);
   background: var(--accent-soft);
+  font-weight: 600;
 }
 .actor-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
-  gap: 16px;
+  gap: var(--space-6) var(--space-4);
 }
 .empty-hint {
-  margin: 4px 0 0;
-  font-size: 13px;
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-sm);
 }
 @media (max-width: 640px) {
   .actor-grid {
     grid-template-columns: repeat(3, 1fr);
-    gap: 10px;
+    gap: var(--space-4) var(--space-2);
   }
 }
 @media (max-width: 380px) {
   .actor-grid {
     grid-template-columns: repeat(3, 1fr);
-    gap: 8px;
+    gap: var(--space-3) 6px;
   }
 }
 </style>

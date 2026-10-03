@@ -65,13 +65,13 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .pager {
-  margin-top: 22px;
+  margin-top: var(--space-10);
   display: flex;
   justify-content: center;
   flex-wrap: wrap;
   width: 100%;
   max-width: 100%;
-  padding: 0 4px;
+  padding: 0 var(--space-1);
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
@@ -79,12 +79,12 @@ onBeforeUnmount(() => {
 .pager :deep(.el-pagination) {
   flex-wrap: wrap;
   justify-content: center;
-  row-gap: 8px;
+  row-gap: var(--space-2);
   max-width: 100%;
 }
 
 .pager :deep(.el-pagination__jump) {
-  margin-left: 4px;
+  margin-left: var(--space-1);
 }
 
 .pager :deep(.el-pagination__editor.el-input) {
@@ -93,15 +93,15 @@ onBeforeUnmount(() => {
 
 @media (max-width: 640px) {
   .pager {
-    margin-top: 16px;
+    margin-top: var(--space-6);
   }
 
   .pager :deep(.el-pagination) {
-    font-size: 13px;
+    font-size: var(--text-sm);
   }
 
   .pager :deep(.el-pagination__total) {
-    font-size: 12px;
+    font-size: var(--text-xs);
   }
 }
 </style>

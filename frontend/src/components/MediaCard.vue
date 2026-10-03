@@ -20,6 +20,15 @@ const title = computed(() => props.item.title || props.item.number || props.item
 const cover = computed(() => props.item.thumb_url || props.item.cover_url || '')
 const showImage = computed(() => Boolean(cover.value) && !imgFailed.value)
 const isChineseSub = computed(() => props.item.subtitle_flag === 'C')
+const score = computed(() =>
+  typeof props.item.score === 'number' ? props.item.score.toFixed(1) : '',
+)
+const year = computed(() => (props.item.release_date || '').slice(0, 4))
+// Prefer something human-readable over the raw "local"/"strm" token.
+const metaText = computed(() => {
+  const parts = [year.value, score.value ? `★ ${score.value}` : ''].filter(Boolean)
+  return parts.length ? parts.join('  ') : props.item.source_type
+})
 
 watch(
   () => props.item.favorited,
@@ -83,6 +92,9 @@ async function toggleFav(e: Event) {
         :title="item.title"
         :filename="item.filename"
       />
+
+      <span v-if="isChineseSub" class="tag-sub">中字</span>
+
       <button
         class="fav"
         type="button"
@@ -93,17 +105,11 @@ async function toggleFav(e: Event) {
         @click="toggleFav"
       >
         <span v-if="favLoading" class="fav-spin" aria-hidden="true" />
-        <svg
-          v-else
-          class="fav-icon"
-          viewBox="0 0 24 24"
-          width="18"
-          height="18"
-          aria-hidden="true"
-        >
+        <svg v-else class="fav-icon" viewBox="0 0 24 24" aria-hidden="true">
           <path
             v-if="favorited"
             fill="currentColor"
+            stroke="none"
             d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"
           />
           <path
@@ -115,13 +121,16 @@ async function toggleFav(e: Event) {
           />
         </svg>
       </button>
-      <span v-if="isChineseSub" class="sub-badge">中字</span>
-      <span v-if="item.number" class="badge">{{ item.number }}</span>
-      <span v-if="!item.scraped_at" class="chip">未刮削</span>
+
+      <div class="foot">
+        <span v-if="item.number" class="tag-num num">{{ item.number }}</span>
+        <span v-if="!item.scraped_at" class="tag-pending">未刮削</span>
+      </div>
     </div>
+
     <div class="meta">
       <div class="title" :title="title">{{ title }}</div>
-      <div class="sub muted">{{ item.source_type }}</div>
+      <div class="sub num">{{ metaText }}</div>
     </div>
   </article>
 </template>
@@ -129,28 +138,56 @@ async function toggleFav(e: Event) {
 <style scoped>
 .card {
   cursor: pointer;
-  border-radius: var(--radius);
-  overflow: hidden;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-card);
+  min-width: 0;
   /* GPU layer + clip: avoids 1px light fringe on rounded corners */
   transform: translateZ(0);
   backface-visibility: hidden;
-  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
 }
-.card:hover,
-.card:focus-visible {
-  transform: translateY(-3px) translateZ(0);
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
-  outline: none;
-}
+
+/* The poster IS the card. No chrome, no border box — just the artwork
+   lifted off the backdrop, with a hairline ring that turns gold on hover. */
 .poster {
   position: relative;
   aspect-ratio: 3 / 4;
+  border-radius: var(--radius-md);
   overflow: hidden;
   background: var(--bg-elevated);
+  /* Component-level container: the card adapts to its own width, not the
+     viewport — the same card works in a 3-up phone grid and a wide desktop one. */
+  container-type: inline-size;
+  box-shadow:
+    var(--shadow-sm),
+    0 0 0 1px var(--border-subtle);
+  transition:
+    transform var(--dur-3) var(--ease-out),
+    box-shadow var(--dur-3) var(--ease-out);
 }
+.card:hover .poster,
+.card:focus-visible .poster {
+  transform: translateY(-4px);
+  box-shadow:
+    var(--shadow-lg),
+    0 0 0 1px var(--accent-line);
+}
+.card:focus-visible {
+  outline: none;
+}
+
+/* Cinematic scrim: keeps badges legible over any artwork, deepens on hover. */
+.poster::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: var(--scrim);
+  opacity: 0.5;
+  transition: opacity var(--dur-3) var(--ease-out);
+  pointer-events: none;
+}
+.card:hover .poster::after {
+  opacity: 0.9;
+}
+
 .poster img {
   position: absolute;
   inset: 0;
@@ -158,11 +195,14 @@ async function toggleFav(e: Event) {
   height: 100%;
   object-fit: cover;
   object-position: center center;
-  display: block;
   /* Crop thin white margins common in scraped package art */
   transform: scale(1.04);
   transform-origin: center center;
   background: var(--bg-elevated);
+  transition: transform var(--dur-4) var(--ease-out);
+}
+.card:hover .poster img {
+  transform: scale(1.07);
 }
 .poster :deep(.cover-placeholder) {
   position: absolute;
@@ -173,54 +213,59 @@ async function toggleFav(e: Event) {
   border: none;
   border-radius: 0;
 }
+
 .fav {
   position: absolute;
-  top: 8px;
-  left: 8px;
-  z-index: 2;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  width: 40px;
-  height: 40px;
-  min-width: 40px;
-  border-radius: 999px;
-  background: rgba(8, 10, 14, 0.58);
-  backdrop-filter: blur(6px);
-  color: var(--text);
+  top: var(--space-2);
+  right: var(--space-2);
+  z-index: 3;
+  border: 1px solid oklch(100% 0 0 / 0.14);
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  border-radius: var(--radius-full);
+  background: oklch(12% 0.01 75 / 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: var(--ink-100);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0;
+  opacity: 0;
   transition:
-    transform 0.16s ease,
-    color 0.16s ease,
-    border-color 0.16s ease,
-    box-shadow 0.16s ease,
-    background 0.16s ease;
+    opacity var(--dur-2) var(--ease-out),
+    transform var(--dur-2) var(--ease-out),
+    color var(--dur-2) var(--ease-out),
+    background-color var(--dur-2) var(--ease-out);
+}
+/* Reveal on hover, but never hide an already-favourited item. */
+.card:hover .fav,
+.card:focus-within .fav,
+.fav.on,
+.fav:focus-visible {
+  opacity: 1;
 }
 .fav:hover:not(:disabled) {
-  transform: scale(1.08);
+  transform: scale(1.1);
   color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-  box-shadow: 0 0 14px var(--accent-glow);
 }
 .fav.on {
   color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  background: color-mix(in srgb, var(--accent) 18%, rgba(8, 10, 14, 0.65));
-  box-shadow: 0 0 12px var(--accent-glow);
+  background: color-mix(in oklab, var(--gold-600) 42%, oklch(12% 0.01 75 / 0.72));
 }
 .fav:disabled {
-  opacity: 0.75;
+  opacity: 1;
   cursor: wait;
 }
 .fav-icon {
   display: block;
 }
 .fav-spin {
-  width: 16px;
-  height: 16px;
-  border: 2px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  width: 15px;
+  height: 15px;
+  border: 2px solid color-mix(in oklab, var(--accent) 35%, transparent);
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: fav-rotate 0.7s linear infinite;
@@ -230,91 +275,125 @@ async function toggleFav(e: Event) {
     transform: rotate(360deg);
   }
 }
-.sub-badge {
+
+/* Top-left: the single most useful signal for this library. */
+.tag-sub {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: var(--space-2);
+  left: var(--space-2);
   z-index: 3;
-  font-size: 11px;
+  font-size: var(--text-2xs);
   font-weight: 700;
-  letter-spacing: 0.06em;
-  padding: 3px 7px;
-  border-radius: 6px;
-  background: var(--accent);
-  color: #1a1205;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
-}
-.badge {
-  position: absolute;
-  left: 8px;
-  bottom: 8px;
-  background: rgba(8, 10, 14, 0.82);
-  color: var(--accent);
-  font-family: var(--font-display);
-  font-size: 13px;
-  letter-spacing: 0.06em;
+  letter-spacing: var(--tracking-wide);
   padding: 3px 8px;
-  border-radius: 6px;
-  border: 1px solid rgba(232, 168, 56, 0.25);
-  z-index: 2;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--on-accent);
 }
-.chip {
+
+/* Bottom row sits on the scrim: 番号 left, status right. */
+.foot {
   position: absolute;
-  bottom: 8px;
-  right: 8px;
-  font-size: 11px;
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.65);
-  color: #ddd;
-  border: 1px solid var(--border);
+  left: var(--space-2);
+  right: var(--space-2);
+  bottom: var(--space-2);
   z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  pointer-events: none;
 }
+.tag-num {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--gold-300);
+  text-shadow: 0 1px 6px oklch(0% 0 0 / 0.7);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tag-pending {
+  flex-shrink: 0;
+  font-size: var(--text-2xs);
+  padding: 2px 7px;
+  border-radius: var(--radius-full);
+  background: oklch(12% 0.01 75 / 0.7);
+  color: var(--ink-200);
+  border: 1px solid oklch(100% 0 0 / 0.14);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+/* Narrow cards (3-up phone grid): the 番号 is the identifier, so it wins the
+   space. The missing poster already signals "unscraped" visually. */
+@container (max-width: 134px) {
+  .tag-pending {
+    display: none;
+  }
+}
+
 .meta {
-  padding: 11px 12px 12px;
+  padding: var(--space-3) 2px 0;
 }
 .title {
-  font-size: 13.5px;
-  line-height: 1.35;
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
   min-height: 2.7em;
+  color: var(--text-soft);
+  transition: color var(--dur-2) var(--ease-out);
+}
+.card:hover .title {
   color: var(--text);
 }
 .sub {
-  margin-top: 4px;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  margin-top: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--faint);
 }
+
 @media (max-width: 640px) {
   .fav {
-    width: 34px;
-    height: 34px;
-    min-width: 34px;
+    width: 30px;
+    height: 30px;
+    min-width: 30px;
     top: 6px;
-    left: 6px;
+    right: 6px;
   }
   .fav-icon {
     width: 15px;
     height: 15px;
   }
+  .tag-sub {
+    top: 6px;
+    left: 6px;
+    padding: 2px 6px;
+  }
+  .foot {
+    left: 6px;
+    right: 6px;
+    bottom: 6px;
+  }
   .meta {
-    padding: 8px 8px 10px;
+    padding-top: var(--space-2);
   }
   .title {
-    font-size: 12.5px;
-    min-height: 2.5em;
+    font-size: var(--text-xs);
   }
-  .sub {
-    font-size: 11px;
+  .tag-num {
+    font-size: var(--text-xs);
   }
-  .badge {
-    font-size: 11px;
-    padding: 2px 6px;
+}
+
+/* Touch devices have no hover — keep the favourite affordance visible. */
+@media (hover: none) {
+  .fav {
+    opacity: 1;
   }
 }
 </style>

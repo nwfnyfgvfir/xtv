@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from functools import lru_cache
 from pathlib import Path
 
@@ -7,6 +8,24 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Project root: backend/app/config.py -> parents[2] = repo root
 ROOT_DIR = Path(__file__).resolve().parents[2]
+
+
+@lru_cache
+def _detect_git_version() -> str:
+    """Nearest git tag for local dev; empty when git is unavailable (e.g. container)."""
+    try:
+        out = subprocess.run(
+            ["git", "describe", "--tags", "--always"],
+            cwd=ROOT_DIR,
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        if out.returncode == 0:
+            return out.stdout.strip()
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
 
 
 class Settings(BaseSettings):
@@ -45,6 +64,7 @@ class Settings(BaseSettings):
     image_cache_max_mb: int = 2048  # 0 = no prune
     log_level: str = "INFO"
     debug: bool = False
+    app_version: str = ""  # injected via APP_VERSION (Docker/CI); empty → auto-detect
     admin_password: str = ""
     jwt_secret: str = "tv-dev-secret-change-me"
     jwt_expire_hours: int = 72
@@ -103,6 +123,11 @@ class Settings(BaseSettings):
     @property
     def auth_enabled(self) -> bool:
         return bool(self.admin_password.strip()) and self.auth_required
+
+    @property
+    def version(self) -> str:
+        """Resolved app version: APP_VERSION env → nearest git tag → 'dev'."""
+        return self.app_version.strip() or _detect_git_version() or "dev"
 
 
 @lru_cache

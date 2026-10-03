@@ -87,17 +87,11 @@ async function toggleFav(e: Event) {
         @click="toggleFav"
       >
         <span v-if="favLoading" class="fav-spin" aria-hidden="true" />
-        <svg
-          v-else
-          class="fav-icon"
-          viewBox="0 0 24 24"
-          width="18"
-          height="18"
-          aria-hidden="true"
-        >
+        <svg v-else class="fav-icon" viewBox="0 0 24 24" aria-hidden="true">
           <path
             v-if="favorited"
             fill="currentColor"
+            stroke="none"
             d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"
           />
           <path
@@ -112,30 +106,40 @@ async function toggleFav(e: Event) {
     </div>
     <div class="info">
       <div class="name">{{ actor.name }}</div>
-      <div class="muted count">{{ actor.media_count ?? 0 }} 部作品</div>
+      <div class="count num">{{ actor.media_count ?? 0 }} 部作品</div>
     </div>
   </article>
 </template>
 
 <style scoped>
 .actor-card {
-  border: 1px solid var(--border);
-  background: var(--panel);
-  border-radius: 14px;
-  overflow: hidden;
   cursor: pointer;
-  color: inherit;
-  box-shadow: var(--shadow-card);
-  transition: border-color 0.18s ease, transform 0.18s ease;
+  min-width: 0;
+  transform: translateZ(0);
+  backface-visibility: hidden;
 }
-.actor-card:hover,
-.actor-card:focus-visible {
-  border-color: var(--accent);
-  outline: none;
-  transform: translateY(-2px);
-}
+
 .portrait {
   position: relative;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--bg-elevated);
+  box-shadow:
+    var(--shadow-sm),
+    0 0 0 1px var(--border-subtle);
+  transition:
+    transform var(--dur-3) var(--ease-out),
+    box-shadow var(--dur-3) var(--ease-out);
+}
+.actor-card:hover .portrait,
+.actor-card:focus-visible .portrait {
+  transform: translateY(-4px);
+  box-shadow:
+    var(--shadow-lg),
+    0 0 0 1px var(--accent-line);
+}
+.actor-card:focus-visible {
+  outline: none;
 }
 .portrait img {
   width: 100%;
@@ -144,58 +148,67 @@ async function toggleFav(e: Event) {
   object-fit: cover;
   display: block;
   background: var(--bg-elevated);
+  transition: transform var(--dur-4) var(--ease-out);
+}
+.actor-card:hover .portrait img {
+  transform: scale(1.05);
 }
 .mono {
   width: 100%;
   aspect-ratio: 1;
-  object-fit: cover;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: var(--font-display);
+  font-family: var(--font-serif);
   font-size: 42px;
   color: var(--accent);
-  background: var(--bg-elevated);
+  background:
+    radial-gradient(ellipse at 34% 22%, var(--accent-soft), transparent 62%),
+    var(--bg-elevated);
 }
+
 .fav {
   position: absolute;
-  top: 8px;
-  left: 8px;
+  top: var(--space-2);
+  right: var(--space-2);
   z-index: 2;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  width: 36px;
-  height: 36px;
-  min-width: 36px;
-  border-radius: 999px;
-  background: rgba(8, 10, 14, 0.58);
-  backdrop-filter: blur(6px);
-  color: var(--text);
+  border: 1px solid oklch(100% 0 0 / 0.14);
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  border-radius: var(--radius-full);
+  background: oklch(12% 0.01 75 / 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: var(--ink-100);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0;
+  opacity: 0;
   transition:
-    transform 0.16s ease,
-    color 0.16s ease,
-    border-color 0.16s ease,
-    box-shadow 0.16s ease,
-    background 0.16s ease;
+    opacity var(--dur-2) var(--ease-out),
+    transform var(--dur-2) var(--ease-out),
+    color var(--dur-2) var(--ease-out),
+    background-color var(--dur-2) var(--ease-out);
+}
+.actor-card:hover .fav,
+.actor-card:focus-within .fav,
+.fav.on,
+.fav:focus-visible {
+  opacity: 1;
 }
 .fav:hover:not(:disabled) {
-  transform: scale(1.08);
+  transform: scale(1.1);
   color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-  box-shadow: 0 0 14px var(--accent-glow);
 }
 .fav.on {
   color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  background: color-mix(in srgb, var(--accent) 18%, rgba(8, 10, 14, 0.65));
-  box-shadow: 0 0 12px var(--accent-glow);
+  background: color-mix(in oklab, var(--gold-600) 42%, oklch(12% 0.01 75 / 0.72));
 }
 .fav:disabled {
-  opacity: 0.75;
+  opacity: 1;
   cursor: wait;
 }
 .fav-icon {
@@ -204,7 +217,7 @@ async function toggleFav(e: Event) {
 .fav-spin {
   width: 14px;
   height: 14px;
-  border: 2px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border: 2px solid color-mix(in oklab, var(--accent) 35%, transparent);
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: fav-rotate 0.7s linear infinite;
@@ -214,31 +227,51 @@ async function toggleFav(e: Event) {
     transform: rotate(360deg);
   }
 }
+
 .info {
-  padding: 10px;
+  padding: var(--space-3) 2px 0;
 }
 .name {
-  font-weight: 600;
-  font-size: 14px;
+  font-weight: 500;
+  font-size: var(--text-sm);
+  color: var(--text-soft);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  transition: color var(--dur-2) var(--ease-out);
+}
+.actor-card:hover .name {
+  color: var(--text);
 }
 .count {
-  font-size: 12px;
+  font-size: var(--text-xs);
+  color: var(--faint);
   margin-top: 2px;
 }
+
 @media (max-width: 640px) {
   .fav {
-    width: 32px;
-    height: 32px;
-    min-width: 32px;
+    width: 30px;
+    height: 30px;
+    min-width: 30px;
     top: 6px;
-    left: 6px;
+    right: 6px;
   }
   .fav-icon {
     width: 15px;
     height: 15px;
+  }
+  .info {
+    padding-top: var(--space-2);
+  }
+  .name {
+    font-size: var(--text-xs);
+  }
+}
+
+@media (hover: none) {
+  .fav {
+    opacity: 1;
   }
 }
 </style>

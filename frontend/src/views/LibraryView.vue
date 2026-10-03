@@ -387,8 +387,9 @@ onBeforeUnmount(stopSoftRefresh)
 <template>
   <div class="page">
     <div class="head">
-      <div>
+      <div class="head-left">
         <h1 class="page-title">媒体库</h1>
+        <span v-if="total" class="head-count num">{{ total }}</span>
       </div>
       <el-button class="add-lib-btn" type="primary" @click="showCreate = true">添加媒体库</el-button>
     </div>
@@ -417,12 +418,7 @@ onBeforeUnmount(stopSoftRefresh)
         <span>· 实时监听中</span>
       </div>
       <div class="actions">
-        <el-select
-          class="sort-select"
-          :model-value="sort"
-          size="small"
-          @change="onSortChange"
-        >
+        <el-select class="sort-select" :model-value="sort" @change="onSortChange">
           <el-option
             v-for="opt in MEDIA_SORT_OPTIONS"
             :key="opt.value"
@@ -431,8 +427,7 @@ onBeforeUnmount(stopSoftRefresh)
           />
         </el-select>
         <el-button
-          size="small"
-          type="warning"
+          type="primary"
           :loading="scanningId === currentLibrary.id"
           :disabled="scanningId != null && scanningId !== currentLibrary.id"
           @click="onScan(currentLibrary)"
@@ -440,9 +435,6 @@ onBeforeUnmount(stopSoftRefresh)
           扫描
         </el-button>
         <el-button
-          size="small"
-          type="primary"
-          plain
           :loading="scanningId === currentLibrary.id"
           :disabled="scanningId != null && scanningId !== currentLibrary.id"
           @click="onRescrapePending(currentLibrary)"
@@ -450,10 +442,10 @@ onBeforeUnmount(stopSoftRefresh)
           刮削未刮削
         </el-button>
         <div class="actions-more desktop-more">
-          <el-button size="small" type="danger" plain @click="onDelete(currentLibrary)">删除</el-button>
+          <el-button type="danger" plain @click="onDelete(currentLibrary)">删除</el-button>
         </div>
         <el-dropdown class="mobile-more" trigger="click" @command="onMoreCommand">
-          <el-button size="small">更多</el-button>
+          <el-button>更多</el-button>
           <template #dropdown>
             <el-dropdown-menu>
               <el-dropdown-item command="delete">
@@ -547,29 +539,47 @@ onBeforeUnmount(stopSoftRefresh)
 <style scoped>
 .head {
   display: flex;
-  align-items: flex-start;
+  align-items: flex-end;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
   flex-wrap: wrap;
+}
+.head-left {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.head-count {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--faint);
 }
 .lib-tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 14px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
 }
 .lib-tab {
   border: 1px solid var(--border);
   background: var(--panel);
-  color: var(--text);
-  border-radius: 999px;
-  padding: 8px 14px;
+  color: var(--muted);
+  border-radius: var(--radius-full);
+  padding: var(--space-2) var(--space-4);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   max-width: 100%;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  min-height: 38px;
+  transition:
+    color var(--dur-2) var(--ease-out),
+    border-color var(--dur-2) var(--ease-out),
+    background-color var(--dur-2) var(--ease-out);
 }
 .lib-tab .name {
   overflow: hidden;
@@ -577,49 +587,55 @@ onBeforeUnmount(stopSoftRefresh)
   white-space: nowrap;
   max-width: 140px;
 }
+.lib-tab:hover:not(.on) {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
 .lib-tab.on {
-  border-color: var(--accent);
+  border-color: var(--accent-line);
   background: var(--accent-soft);
   color: var(--accent);
   font-weight: 600;
 }
 .count {
-  font-size: 12px;
-  opacity: 0.8;
-  background: var(--bg);
+  font-size: var(--text-2xs);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+  background: color-mix(in oklab, var(--bg) 70%, transparent);
   padding: 1px 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   flex-shrink: 0;
 }
 .lib-toolbar {
   display: flex;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
   align-items: center;
-  margin-bottom: 12px;
-  padding: 10px 12px;
+  margin-bottom: var(--space-3);
+  padding: var(--space-3) var(--space-4);
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
 }
 .meta {
-  font-size: 13px;
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-2);
   min-width: 0;
   overflow: hidden;
 }
 .actions {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   flex-shrink: 0;
   flex-wrap: wrap;
   align-items: center;
 }
 .actions-more {
   display: inline-flex;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
   align-items: center;
 }
@@ -632,21 +648,25 @@ onBeforeUnmount(stopSoftRefresh)
 .filter-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 14px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-5);
 }
 .chip {
   border: 1px solid var(--border);
   background: var(--panel);
   color: var(--muted);
-  border-radius: 999px;
-  padding: 6px 12px;
-  font-size: 13px;
+  border-radius: var(--radius-full);
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
   cursor: pointer;
-  min-height: 34px;
+  min-height: 36px;
+  transition:
+    color var(--dur-2) var(--ease-out),
+    border-color var(--dur-2) var(--ease-out),
+    background-color var(--dur-2) var(--ease-out);
 }
 .chip.on {
-  border-color: var(--accent);
+  border-color: var(--accent-line);
   background: var(--accent-soft);
   color: var(--accent);
   font-weight: 600;
@@ -659,26 +679,27 @@ onBeforeUnmount(stopSoftRefresh)
   color: var(--danger);
 }
 .scan-banner {
-  margin-bottom: 16px;
-  padding: 12px 14px;
-  border-radius: 12px;
-  border: 1px solid rgba(232, 168, 56, 0.35);
+  margin-bottom: var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--accent-line);
   background: var(--accent-soft);
 }
 .scan-text {
   font-weight: 600;
   color: var(--accent);
-  font-size: 13px;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
 }
 .scan-msg {
-  font-size: 12px;
-  margin-top: 4px;
+  font-size: var(--text-xs);
+  margin-top: var(--space-1);
 }
 .scan-bar {
-  margin-top: 10px;
+  margin-top: var(--space-3);
   height: 3px;
   background: var(--border);
-  border-radius: 99px;
+  border-radius: var(--radius-full);
   overflow: hidden;
 }
 .scan-bar i {
@@ -686,7 +707,7 @@ onBeforeUnmount(stopSoftRefresh)
   height: 100%;
   width: 35%;
   background: var(--accent);
-  animation: scanmove 1.1s ease-in-out infinite;
+  animation: scanmove 1.1s var(--ease-in-out) infinite;
 }
 @keyframes scanmove {
   0% {
@@ -697,14 +718,11 @@ onBeforeUnmount(stopSoftRefresh)
   }
 }
 .hint {
-  margin-bottom: 18px;
-}
-code {
-  color: var(--accent);
+  margin-bottom: var(--space-5);
 }
 .path-row {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   align-items: center;
   width: 100%;
 }
@@ -713,13 +731,13 @@ code {
   min-width: 0;
 }
 .tip {
-  margin-top: 6px;
-  font-size: 12px;
+  margin-top: var(--space-1);
+  font-size: var(--text-xs);
 }
 .create-tip {
-  margin: 0 0 4px 0;
+  margin: 0 0 var(--space-1) 0;
   padding-left: 100px;
-  font-size: 12px;
+  font-size: var(--text-xs);
 }
 @media (max-width: 520px) {
   .create-tip {
@@ -735,9 +753,17 @@ code {
     width: 100%;
     flex-wrap: wrap;
   }
+  /* Touch targets: bump the toolbar controls to 44px on phones. */
+  .actions :deep(.el-button) {
+    flex: 1 1 auto;
+    height: 44px;
+  }
   .sort-select {
     width: min(168px, 100%);
     flex: 1 1 140px;
+  }
+  .sort-select :deep(.el-select__wrapper) {
+    min-height: 44px;
   }
   .desktop-more {
     display: none;
@@ -754,7 +780,7 @@ code {
     max-width: 100px;
   }
   .meta {
-    font-size: 12px;
+    font-size: var(--text-2xs);
   }
 }
 </style>
