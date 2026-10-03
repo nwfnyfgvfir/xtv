@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.db import get_db
+from app.db import SessionLocal, get_db
 from app.deps import require_auth
 from app.models import AppSetting
 from app.schemas import SettingsOut, SettingsUpdate
@@ -86,6 +86,23 @@ def _sanitize_priority(value: list[Any] | None) -> list[str]:
     if not value:
         return []
     return parse_priority_list(value)
+
+
+def apply_persisted_overrides() -> None:
+    """Apply DB-stored settings onto the runtime Settings object.
+
+    Must be called at startup. Without it, a restart silently ignores every
+    setting the user saved in the UI (scrape provider priority, translate
+    engine, image proxy…) until something happens to hit GET/PUT /api/settings
+    — which for a headless scan never happens.
+    """
+    db = SessionLocal()
+    try:
+        _apply_overrides_to_runtime(_db_map(db))
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to apply persisted settings overrides")
+    finally:
+        db.close()
 
 
 def _apply_overrides_to_runtime(db_map: dict[str, str]) -> None:

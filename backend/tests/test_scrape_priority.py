@@ -4,6 +4,7 @@ import asyncio
 from types import SimpleNamespace
 from typing import Any
 
+from app.services.metatube import MetaTubeError
 from app.services.scrape import _pick_best, _priority_list_from_settings, _search_with_chain
 
 
@@ -15,6 +16,19 @@ class FakeClient:
     async def search_movie(self, q: str, provider: str = "", fallback: bool = True):
         self.calls.append((q, provider, fallback))
         return list(self.responses.get((provider, fallback), []))
+
+
+class FlakyClient:
+    """Provider "A" raises; every other provider answers."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, bool]] = []
+
+    async def search_movie(self, q: str, provider: str = "", fallback: bool = True):
+        self.calls.append((q, provider, fallback))
+        if provider == "A":
+            raise MetaTubeError("provider A is down")
+        return [{"number": q, "id": "1", "provider": provider}]
 
 
 def test_priority_list_from_settings_json():
@@ -122,3 +136,46 @@ def test_empty_chain_auto():
         )
     )
     assert client.calls == [("X", "", True)]
+
+
+def test_chain_survives_a_failing_provider():
+    """A provider that errors must not abort the rest of the priority chain.
+
+    Regression: an exception from the first provider used to propagate out of
+    the loop, so a priority list silently degraded to "try only provider #1".
+    """
+    client = FlakyClient()
+    results = asyncio.run(
+        _search_with_chain(
+            client,  # type: ignore[arg-type]
+            "SSIS-001",
+            chain=["A", "B", "C"],
+            use_fallback=False,
+            force_auto=False,
+        )
+    )
+    assert _pick_best(results, "SSIS-001")["provider"] == "B"
+    assert client.calls == [
+        ("SSIS-001", "A", False),
+        ("SSIS-001", "B", False),
+    ]
+
+
+def test_chain_returns_empty_when_every_provider_fails():
+    """All providers erroring is a miss, not a crash."""
+
+    class AllFail:
+        async def search_movie(self, q: str, provider: str = "", fallback: bool = True):
+            raise MetaTubeError(f"{provider} is down")
+
+    results = asyncio.run(
+        _search_with_chain(
+            AllFail(),  # type: ignore[arg-type]
+            "SSIS-001",
+            chain=["A", "B"],
+            use_fallback=False,
+            force_auto=False,
+        )
+    )
+    assert results == []
+    assert _pick_best(results, "SSIS-001") is None

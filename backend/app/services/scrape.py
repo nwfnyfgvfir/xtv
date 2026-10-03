@@ -78,7 +78,15 @@ async def _search_with_chain(
     results: list[dict[str, Any]] = []
     for p in chain:
         logger.info("scrape try %s provider=%s", number, p)
-        results = await client.search_movie(number, provider=p, fallback=False)
+        try:
+            results = await client.search_movie(number, provider=p, fallback=False)
+        except MetaTubeError as exc:
+            # A provider that errors (rate limit, 5xx, network) must not abort
+            # the rest of the chain — otherwise a priority list silently
+            # degrades into "try only the first provider".
+            logger.warning("scrape provider=%s failed for %s: %s", p, number, exc)
+            results = []
+            continue
         if _pick_best(results, number):
             return results
 

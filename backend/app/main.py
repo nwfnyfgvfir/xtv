@@ -24,6 +24,11 @@ async def lifespan(_app: FastAPI):
     # Re-apply after uvicorn may have installed its own loggers/handlers.
     configure_logging()
     init_db()
+    # Apply UI-saved settings (scrape priority, translate engine, image proxy…)
+    # before anything can scrape — otherwise a restart silently ignores them.
+    from app.api.settings import apply_persisted_overrides
+
+    apply_persisted_overrides()
     settings = get_settings()
     settings.media_root_path.mkdir(parents=True, exist_ok=True)
     (settings.media_root_path / "local").mkdir(parents=True, exist_ok=True)
