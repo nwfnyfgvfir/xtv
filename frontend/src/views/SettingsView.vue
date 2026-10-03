@@ -222,14 +222,15 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="page">
+  <div class="page settings-page">
     <h1 class="page-title">设置</h1>
     <p class="muted intro">MetaTube 刮削源、图片代理、翻译与系统状态</p>
 
-    <el-card class="card" shadow="never">
-      <template #header>
-        <span class="card-title">库维护</span>
-      </template>
+    <div class="settings-grid">
+      <el-card class="card" shadow="never">
+        <template #header>
+          <span class="card-title">库维护</span>
+        </template>
       <p class="muted line">
         按番号查找跨库 / 同库重复项，并有选择地删除副本（本地删文件；strm 仅删索引）。
       </p>
@@ -260,11 +261,12 @@ onMounted(() => {
       <p class="muted line">版本：{{ appVersion }}</p>
     </el-card>
 
-    <el-card class="card" shadow="never">
+    <el-card class="card card-wide" shadow="never">
       <template #header>
         <span class="card-title">连接与刮削源</span>
       </template>
-      <el-form label-width="150px" label-position="left">
+      <!-- Labels above fields: a multi-column grid can't fit side labels. -->
+      <el-form class="settings-form" label-position="top">
         <el-form-item label="MetaTube URL">
           <el-input v-model="form.metatube_base_url" />
         </el-form-item>
@@ -294,7 +296,7 @@ onMounted(() => {
           </p>
         </el-form-item>
 
-        <el-form-item label="刮削源优先级">
+        <el-form-item label="刮削源优先级" class="span-full">
           <div class="priority-block">
             <el-select
               :model-value="priorityPick"
@@ -345,7 +347,6 @@ onMounted(() => {
         <el-form-item label="兼容单源">
           <el-select
             v-model="form.metatube_provider"
-            class="field-sm"
             clearable
             filterable
             allow-create
@@ -381,7 +382,6 @@ onMounted(() => {
         <el-form-item label="翻译服务">
           <el-select
             v-model="form.translate_provider"
-            class="field-sm"
             style="width: 100%"
             :disabled="!form.auto_translate"
           >
@@ -447,7 +447,7 @@ onMounted(() => {
           </el-form-item>
         </template>
         <el-form-item label="图片代理">
-          <el-select v-model="form.image_proxy_mode" class="field-sm" style="width: 100%">
+          <el-select v-model="form.image_proxy_mode" style="width: 100%">
             <el-option label="本站代理（/api/images/proxy）" value="site" />
             <el-option label="MetaTube 图片代理" value="metatube" />
             <el-option label="外部代理（模板 {url}）" value="external" />
@@ -469,9 +469,9 @@ onMounted(() => {
           </span>
         </el-form-item>
         <el-form-item label="扫描扩展名">
-          <el-input v-model="form.scan_extensions" class="field-md" />
+          <el-input v-model="form.scan_extensions" />
         </el-form-item>
-        <el-form-item>
+        <el-form-item class="span-full">
           <el-button type="primary" :loading="saving" @click="save">保存</el-button>
         </el-form-item>
       </el-form>
@@ -481,6 +481,7 @@ onMounted(() => {
         <code>DEBUG</code>（环境变量，不在此页）。
       </p>
     </el-card>
+    </div>
   </div>
 </template>
 
@@ -489,15 +490,58 @@ onMounted(() => {
   margin: var(--space-2) 0 var(--space-6);
   font-size: var(--text-sm);
 }
+
+/* ------------------------------------------------------------------ layout
+   A settings page on a wide screen should use the width. Two card columns,
+   with the long form spanning both — not one narrow column hugging the left. */
+
+.settings-page {
+  max-width: 1180px;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+@media (min-width: 900px) {
+  .settings-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .settings-grid > .card-wide {
+    grid-column: 1 / -1;
+  }
+}
+
 .card {
   background: var(--panel);
   border: 1px solid var(--border);
-  margin-bottom: var(--space-4);
-  /* Narrower than the reading column: settings fields should never be
-     full-bleed — a 568px-wide input for a short value reads as unfinished. */
-  max-width: 640px;
   border-radius: var(--radius-lg);
 }
+
+/* -------------------------------------------------------------------- form
+   The field grid supplies the width discipline, so individual controls no
+   longer need max-width caps — every field fills its column. */
+
+.settings-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--space-5) var(--space-6);
+  align-items: start;
+}
+.settings-form :deep(.el-form-item) {
+  margin-bottom: 0;
+}
+.settings-form :deep(.el-form-item.span-full) {
+  grid-column: 1 / -1;
+}
+/* Hints belong under their control — inline hints wrap badly inside a grid. */
+.settings-form :deep(.field-hint) {
+  display: block;
+  margin: var(--space-1) 0 0;
+}
+
 .card-title {
   font-weight: 600;
   letter-spacing: var(--tracking-wide);
@@ -539,11 +583,8 @@ onMounted(() => {
   color: var(--danger);
   line-height: var(--leading-snug);
 }
-/* Select, ordering list and hint read as one column — capping the whole block
-   keeps them aligned instead of stretching the select across the form. */
 .priority-block {
   width: 100%;
-  max-width: 320px;
 }
 .priority-list {
   list-style: none;
@@ -609,16 +650,11 @@ onMounted(() => {
 .pri-actions :deep(.el-button.is-text.el-button--danger) {
   color: var(--danger) !important;
 }
-@media (max-width: 640px) {
-  :deep(.el-form-item) {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  :deep(.el-form-item__label) {
-    justify-content: flex-start;
-    height: auto;
-    line-height: var(--leading-snug);
-    margin-bottom: var(--space-2);
+@media (max-width: 700px) {
+  /* One column on phones; labels are already stacked (label-position="top"). */
+  .settings-form {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-4);
   }
 }
 </style>

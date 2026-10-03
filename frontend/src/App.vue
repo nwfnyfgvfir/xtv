@@ -436,8 +436,10 @@ function go(path: string) {
   .brand-sub {
     font-size: var(--text-xs);
   }
+  /* Keep the version visible on phones too — just smaller and quieter. */
   .brand-ver {
-    display: none;
+    font-size: 10px;
+    margin-left: 0;
   }
 
   .bottom-nav {

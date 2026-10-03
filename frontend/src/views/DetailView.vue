@@ -373,7 +373,7 @@ watch(() => props.id, load)
           />
           <el-select
             v-model="scrapeProvider"
-            class="scrape-provider"
+            class="scrape-provider field-sm"
             clearable
             filterable
             allow-create
@@ -663,10 +663,10 @@ h1 {
 }
 .scrape-provider {
   min-width: 140px;
-  /* Provider names are short (JavBus / FANZA / MetaTube) — a wide dropdown
-     just adds empty space. Cap it close to its content. */
+  /* Provider names are short (JavBus / FANZA / MetaTube), so the width cap
+     comes from the shared .field-sm utility — which the global mobile rule
+     releases to full width so this row stays uniform on phones. */
   flex: 0 1 220px;
-  max-width: 220px;
 }
 .tags {
   display: flex;
@@ -787,7 +787,7 @@ h1 {
     gap: var(--space-5);
   }
   .left {
-    max-width: 280px;
+    max-width: 300px;
     margin: 0 auto;
     width: 100%;
   }
@@ -796,35 +796,65 @@ h1 {
     object-fit: contain;
     margin: 0 auto;
   }
-  .scrape-row {
-    flex-direction: column;
-    align-items: stretch;
+  h1 {
+    font-size: var(--text-xl);
   }
-  .scrape-number {
-    width: 100% !important;
-    flex: 1 1 100% !important;
-    max-width: none;
+
+  /*
+    Actions: play owns a full row — it is the one thing you came here to do.
+    The three secondary actions share one equal-width row. Stretching every
+    button to full width turned this page into a stack of bars.
+  */
+  .btns {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-2);
+    margin: var(--space-4) 0;
   }
-  .scrape-row :deep(.scrape-number),
-  .scrape-row :deep(.el-select.scrape-provider),
-  .scrape-row :deep(.el-input) {
+  .btn-play {
+    grid-column: 1 / -1;
     width: 100%;
-    flex: 1 1 100%;
+    min-width: 0;
+    height: 48px;
+  }
+  .btns .btn-fav,
+  .btns .btn-rename,
+  .btns .btn-delete {
+    width: 100%;
+    min-width: 0;
+    padding: 0 var(--space-2);
+  }
+
+  /*
+    Scrape tools: a compact two-column grid instead of five full-width bars.
+    Equal columns so the two action buttons below come out symmetric.
+  */
+  .scrape-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2);
+    align-items: center;
+  }
+  .scrape-row .scrape-number,
+  .scrape-row .scrape-provider {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    flex: none;
   }
   .scrape-row :deep(.el-input__wrapper),
   .scrape-row :deep(.el-select__wrapper) {
     min-height: 44px;
     font-size: 16px;
   }
+  .scrape-row .scrape-fallback {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
   .scrape-row .scrape-btn {
     width: 100%;
     min-height: 44px;
-  }
-  .scrape-fallback {
-    align-self: flex-start;
-  }
-  h1 {
-    font-size: var(--text-xl);
+    padding: 0 var(--space-3);
   }
 }
 </style>

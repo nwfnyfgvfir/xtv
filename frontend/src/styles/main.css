@@ -646,6 +646,17 @@ code {
   max-width: none;
 }
 
+/* On phones a single column wants full-width fields — content-sized caps leave
+   a ragged right edge that reads as broken. Release every cap below 640px. */
+@media (max-width: 640px) {
+  .field-xs,
+  .field-sm,
+  .field-md,
+  .field-lg {
+    max-width: none;
+  }
+}
+
 /* -------------------------------------------------- 5. Element Plus bridge */
 
 /* One component-size scale drives buttons AND form controls, so a button
