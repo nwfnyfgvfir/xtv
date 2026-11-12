@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     scan_extensions: str = "mp4,mkv,avi,wmv,m2ts,ts,mov,strm"
     auto_scrape: bool = True
     auto_translate: bool = True
-    translate_provider: str = "google"  # google | bing | deepl
+    translate_provider: str = "google"  # google | bing | deepl | ai
     # Google gtx only: optional HTTP(S)/SOCKS proxy; toggle off → direct
     translate_google_proxy: bool = False
     translate_google_proxy_url: str = ""  # e.g. http://127.0.0.1:7890
@@ -58,6 +58,10 @@ class Settings(BaseSettings):
     translate_deepl_free: bool = True  # api-free.deepl.com vs api.deepl.com
     translate_deepl_proxy: bool = False
     translate_deepl_proxy_url: str = ""
+    # OpenAI-compatible Chat Completions API; key may be empty for local services.
+    translate_ai_api_url: str = "https://api.openai.com/v1/chat/completions"
+    translate_ai_api_key: str = ""
+    translate_ai_model: str = ""
     image_proxy_mode: str = "site"  # site | metatube | external
     image_external_proxy_url: str = ""  # template with {url}
     image_local_cache: bool = False

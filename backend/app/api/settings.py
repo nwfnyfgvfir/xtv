@@ -37,6 +37,9 @@ OVERRIDE_KEYS = {
     "translate_deepl_free",
     "translate_deepl_proxy",
     "translate_deepl_proxy_url",
+    "translate_ai_api_url",
+    "translate_ai_api_key",
+    "translate_ai_model",
     "image_proxy_mode",
     "image_external_proxy_url",
     "image_local_cache",
@@ -45,7 +48,7 @@ OVERRIDE_KEYS = {
 
 _BOOL_TRUE = ("1", "true", "yes", "on")
 _IMAGE_PROXY_MODES = frozenset({"site", "metatube", "external"})
-_TRANSLATE_PROVIDERS = frozenset({"google", "bing", "deepl"})
+_TRANSLATE_PROVIDERS = frozenset({"google", "bing", "deepl", "ai"})
 
 
 def _db_map(db: Session) -> dict[str, str]:
@@ -139,6 +142,12 @@ def _apply_overrides_to_runtime(db_map: dict[str, str]) -> None:
         s.translate_deepl_proxy = db_map["translate_deepl_proxy"].lower() in _BOOL_TRUE
     if "translate_deepl_proxy_url" in db_map:
         s.translate_deepl_proxy_url = db_map["translate_deepl_proxy_url"] or ""
+    if "translate_ai_api_url" in db_map:
+        s.translate_ai_api_url = db_map["translate_ai_api_url"] or ""
+    if "translate_ai_api_key" in db_map:
+        s.translate_ai_api_key = db_map["translate_ai_api_key"]
+    if "translate_ai_model" in db_map:
+        s.translate_ai_model = db_map["translate_ai_model"] or ""
     if "image_proxy_mode" in db_map:
         mode = (db_map["image_proxy_mode"] or "").strip().lower()
         if mode in _IMAGE_PROXY_MODES:
@@ -282,6 +291,9 @@ async def get_app_settings(
         translate_deepl_free=translate_deepl_free,
         translate_deepl_proxy=translate_deepl_proxy,
         translate_deepl_proxy_url=translate_deepl_proxy_url,
+        translate_ai_api_url=s.translate_ai_api_url,
+        translate_ai_api_key_set=bool(s.translate_ai_api_key.strip()),
+        translate_ai_model=s.translate_ai_model,
         image_proxy_mode=image_proxy_mode,  # type: ignore[arg-type]
         image_external_proxy_url=db_map.get("image_external_proxy_url", s.image_external_proxy_url)
         or "",

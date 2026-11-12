@@ -15,6 +15,7 @@
 
 - 扫描本地视频与 `.strm`
 - 番号解析 + MetaTube 自动刮削（海报 / 标题 / 演员）
+- 标题 / 简介 / 标签自动翻译（Google、必应、DeepL、OpenAI 兼容 AI 接口）
 - 浏览器播放（本地 Range 流 / HTTP 直链 `.strm`）
 - 播放进度记忆
 - 打 Git tag `v*` → GitHub Actions 构建并推送到 **GHCR**（生产只 `pull`，不本地 build）
@@ -147,6 +148,21 @@ curl -sS http://127.0.0.1:8000/api/health
 5. 详情页 **播放**
 
 `.strm` 文件内容一行完整 `https://...`（或 `http://...`）→ 播放器直链。非 HTTP 目标会被拒绝播放。
+
+### AI 翻译（可选）
+
+在 **设置 → 翻译服务** 选择 **AI 翻译（OpenAI 兼容）**，填写 API 地址、模型名称和 API Key 后保存。API 地址支持域名根地址、以 `/v1` 结尾的地址或完整的 `/v1/chat/completions` 地址，缺少的路径会自动补齐。模型名称填写所用服务实际提供的名称；本地免鉴权服务可以不填 Key。已保存的 Key 不会回显，输入框留空会保留原值。
+
+也可以在 `.env` 配置：
+
+```env
+TRANSLATE_PROVIDER=ai
+TRANSLATE_AI_API_URL=https://api.example.com/v1/chat/completions
+TRANSLATE_AI_API_KEY=your-api-key
+TRANSLATE_AI_MODEL=your-model-name
+```
+
+开启“刮削后自动翻译”后生效，翻译失败会回退必应，仍失败则保留原文。修改地址、模型或 Key 后不会复用旧配置的翻译缓存；已入库的元数据需要重新刮削才能重新翻译。请求格式参考 [OpenAI Chat Completions 官方文档](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)。
 
 ## 5. 更新版本
 

@@ -28,6 +28,9 @@ const form = ref({
   translate_deepl_free: true,
   translate_deepl_proxy: false,
   translate_deepl_proxy_url: '',
+  translate_ai_api_url: 'https://api.openai.com/v1/chat/completions',
+  translate_ai_api_key: '',
+  translate_ai_model: '',
   image_proxy_mode: 'site' as ImageProxyMode,
   image_external_proxy_url: '',
   image_local_cache: false,
@@ -43,6 +46,7 @@ const showGoogleProxyUrl = computed(
   () => showGoogleProxy.value && form.value.translate_google_proxy,
 )
 const showDeepL = computed(() => form.value.translate_provider === 'deepl')
+const showAI = computed(() => form.value.translate_provider === 'ai')
 const showDeepLProxyUrl = computed(
   () => showDeepL.value && form.value.translate_deepl_proxy,
 )
@@ -94,6 +98,7 @@ function normalizeMode(mode: string | undefined): ImageProxyMode {
 function normalizeProvider(mode: string | undefined): TranslateProvider {
   if (mode === 'bing') return 'bing'
   if (mode === 'deepl') return 'deepl'
+  if (mode === 'ai') return 'ai'
   return 'google'
 }
 
@@ -108,6 +113,8 @@ function applySettingsToForm(s: Settings) {
   form.value.translate_deepl_api_url = s.translate_deepl_api_url || ''
   form.value.translate_deepl_proxy = Boolean(s.translate_deepl_proxy)
   form.value.translate_deepl_proxy_url = s.translate_deepl_proxy_url || ''
+  form.value.translate_ai_api_url = s.translate_ai_api_url ?? 'https://api.openai.com/v1/chat/completions'
+  form.value.translate_ai_model = s.translate_ai_model || ''
   form.value.image_proxy_mode = normalizeMode(s.image_proxy_mode)
   form.value.image_external_proxy_url = s.image_external_proxy_url || ''
   form.value.image_local_cache = Boolean(s.image_local_cache)
@@ -117,6 +124,7 @@ function applySettingsToForm(s: Settings) {
   form.value.metatube_fallback = s.metatube_fallback !== false
   form.value.metatube_token = ''
   form.value.translate_deepl_api_key = ''
+  form.value.translate_ai_api_key = ''
   priorityPick.value = [...form.value.metatube_provider_priority]
 }
 
@@ -180,6 +188,13 @@ function removePriority(index: number) {
 }
 
 async function save() {
+  if (
+    form.value.auto_translate && showAI.value &&
+    (!form.value.translate_ai_api_url.trim() || !form.value.translate_ai_model.trim())
+  ) {
+    ElMessage.warning('请填写 AI API 地址和模型名称')
+    return
+  }
   saving.value = true
   try {
     const body: Record<string, unknown> = {
@@ -193,6 +208,8 @@ async function save() {
       translate_deepl_api_url: form.value.translate_deepl_api_url,
       translate_deepl_proxy: form.value.translate_deepl_proxy,
       translate_deepl_proxy_url: form.value.translate_deepl_proxy_url,
+      translate_ai_api_url: form.value.translate_ai_api_url.trim(),
+      translate_ai_model: form.value.translate_ai_model.trim(),
       image_proxy_mode: form.value.image_proxy_mode,
       image_external_proxy_url: form.value.image_external_proxy_url,
       image_local_cache: form.value.image_local_cache,
@@ -204,6 +221,9 @@ async function save() {
     if (form.value.metatube_token) body.metatube_token = form.value.metatube_token
     if (form.value.translate_deepl_api_key) {
       body.translate_deepl_api_key = form.value.translate_deepl_api_key
+    }
+    if (form.value.translate_ai_api_key.trim()) {
+      body.translate_ai_api_key = form.value.translate_ai_api_key.trim()
     }
     settings.value = await updateSettings(body)
     applySettingsToForm(settings.value)
@@ -388,6 +408,7 @@ onMounted(() => {
             <el-option label="免费 Google（gtx）" value="google" />
             <el-option label="免费必应（Edge）" value="bing" />
             <el-option label="DeepL（需 API Key）" value="deepl" />
+            <el-option label="AI 翻译（OpenAI 兼容）" value="ai" />
           </el-select>
         </el-form-item>
         <el-form-item v-if="showGoogleProxy" label="Google 走代理">
@@ -443,6 +464,35 @@ onMounted(() => {
             <span class="field-hint muted block">
               支持 <code>http://</code> / <code>https://</code> /
               <code>socks5://</code> / <code>socks5h://</code>
+            </span>
+          </el-form-item>
+        </template>
+        <template v-if="showAI">
+          <el-form-item label="AI API 地址">
+            <el-input
+              v-model="form.translate_ai_api_url"
+              placeholder="https://api.example.com/v1/chat/completions"
+            />
+            <span class="field-hint muted block">
+              支持域名根地址、<code>/v1</code> 或完整的 <code>/v1/chat/completions</code> 地址
+            </span>
+          </el-form-item>
+          <el-form-item label="AI 模型名称">
+            <el-input
+              v-model="form.translate_ai_model"
+              placeholder="填写接口服务支持的模型名称"
+            />
+          </el-form-item>
+          <el-form-item label="AI API Key">
+            <el-input
+              v-model="form.translate_ai_api_key"
+              type="password"
+              show-password
+              placeholder="留空则不修改"
+            />
+            <span class="field-hint muted block">
+              {{ settings?.translate_ai_api_key_set ? '已配置' : '未配置' }} ·
+              本地免鉴权服务可不填；翻译失败时回退必应，仍失败则保留原文
             </span>
           </el-form-item>
         </template>
