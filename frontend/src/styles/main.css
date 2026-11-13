@@ -1,71 +1,48 @@
-/* ============================================================================
-   TV — Design System
-   影院暗夜 · 金调 / cinema dark, gold-accented
-   See .impeccable.md for the design context this file implements.
-
-   Layers:
-     1. Primitive tokens  — raw ramps + scales (theme-independent)
-     2. Semantic tokens   — dark (default) / light mappings
-     3. Base + layout     — reset, page shell, utilities
-     4. Components        — skeleton, route progress
-     5. Element Plus bridge
-     6. Motion preferences
-   ========================================================================= */
-
-/* ---------------------------------------------------------------- 1. primitives */
-
+/* TV — Graphite / mineral. Shared tokens for the media-first interface.
+   Local font stacks keep the application usable on a LAN without external assets. */
 :root {
-  /* Gold ramp — brand hue ≈ 82 (metallic gold, not orange amber). */
-  --gold-200: oklch(94.5% 0.05 86);
-  --gold-300: oklch(89% 0.095 85);
-  --gold-400: oklch(84% 0.12 84);
-  --gold-500: oklch(79.5% 0.13 82);
-  --gold-600: oklch(69.5% 0.13 79);
-  --gold-700: oklch(59% 0.12 76);
-  --gold-750: oklch(53% 0.115 74);
-  --gold-800: oklch(45% 0.1 72);
-
-  /* Warm neutral ramp — every grey carries a trace of the brand hue.
-     Pure grey is dead; 0.006–0.020 chroma is felt but never obvious. */
-  --ink-950: oklch(12.5% 0.01 75);
-  --ink-900: oklch(16% 0.012 75);
-  --ink-850: oklch(19.5% 0.013 75);
-  --ink-800: oklch(23.5% 0.014 75);
-  --ink-750: oklch(28.5% 0.016 75);
-  --ink-700: oklch(34% 0.018 75);
-  --ink-600: oklch(44% 0.02 75);
-  --ink-500: oklch(57% 0.018 78);
-  --ink-400: oklch(71% 0.015 80);
-  --ink-300: oklch(80% 0.012 82);
-  --ink-200: oklch(88% 0.01 84);
-  --ink-100: oklch(94% 0.008 85);
-  --ink-50: oklch(97.5% 0.006 85);
-
-  /* Type scale — fixed rem for app UI (no fluid type in product surfaces). */
-  --text-2xs: 0.6875rem; /* 11 — badges */
-  --text-xs: 0.75rem; /* 12 — meta */
-  --text-sm: 0.8125rem; /* 13 — secondary */
-  --text-base: 0.9375rem; /* 15 — body */
-  --text-md: 1.0625rem; /* 17 — card titles */
-  --text-lg: 1.25rem; /* 20 */
-  --text-xl: 1.5rem; /* 24 — h2 */
-  --text-2xl: 1.875rem; /* 30 — h1 */
-  --text-3xl: 2.375rem; /* 38 */
-  --text-4xl: 3rem; /* 48 — display */
-
+  /* Compatibility aliases for shared components; these now use the mineral palette. */
+  --gold-200: #e1fff0;
+  --gold-300: #b3efd1;
+  --gold-400: #91e3c3;
+  --gold-500: #73d5b0;
+  --gold-600: #54bf99;
+  --gold-700: #318a65;
+  --gold-750: #247955;
+  --gold-800: #185c3f;
+  --ink-950: #101416;
+  --ink-900: #161b1e;
+  --ink-850: #1a2023;
+  --ink-800: #242c30;
+  --ink-750: #2c363a;
+  --ink-700: #3c484c;
+  --ink-600: #61716e;
+  --ink-500: #7c8c87;
+  --ink-400: #a0afab;
+  --ink-300: #c7d1cc;
+  --ink-200: #dde5e1;
+  --ink-100: #edf1ee;
+  --ink-50: #f7f9f7;
+  --text-2xs: 0.6875rem;
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --text-md: 1.0625rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.5rem;
+  --text-2xl: 1.875rem;
+  --text-3xl: 2rem;
+  --text-4xl: 3rem;
   --leading-none: 1;
-  --leading-tight: 1.15;
-  --leading-snug: 1.35;
-  --leading-normal: 1.6; /* light-on-dark reads lighter → more leading */
-  --leading-relaxed: 1.75;
-
-  --tracking-tight: -0.015em;
+  --leading-tight: 1.2;
+  --leading-snug: 1.4;
+  --leading-normal: 1.65;
+  --leading-relaxed: 1.85;
+  --tracking-tight: -0.025em;
   --tracking-normal: 0;
-  --tracking-wide: 0.04em;
-  --tracking-wider: 0.1em;
-  --tracking-widest: 0.16em;
-
-  /* Spacing — 4pt base (8pt is too coarse; 12px is needed constantly). */
+  --tracking-wide: 0.025em;
+  --tracking-wider: 0.08em;
+  --tracking-widest: 0.14em;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -79,154 +56,104 @@
   --space-16: 64px;
   --space-20: 80px;
   --space-24: 96px;
-
   --radius-xs: 4px;
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 22px;
+  --radius-sm: 7px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
   --radius-full: 999px;
-
-  /* Motion — exponential easing only; bounce reads as amateur. */
-  --dur-1: 120ms; /* instant feedback */
-  --dur-2: 200ms; /* state change */
-  --dur-3: 320ms; /* layout change */
-  --dur-4: 480ms; /* entrance */
+  --dur-1: 120ms;
+  --dur-2: 180ms;
+  --dur-3: 260ms;
+  --dur-4: 420ms;
   --ease-out: cubic-bezier(0.25, 1, 0.5, 1);
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
-
-  /* z-index scale — semantic, never arbitrary */
   --z-sticky: 20;
   --z-nav: 30;
   --z-overlay: 40;
   --z-modal: 50;
   --z-toast: 60;
   --z-progress: 100;
-
-  --page-max: 1440px;
-  --gutter: clamp(14px, 2.6vw, 32px);
-
-  /* Font stacks. System fonts are a deliberate choice here — see .impeccable.md.
-     No external web fonts: this app must work offline / on a LAN. */
-  --font-body:
-    system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
-    sans-serif;
-  --font-serif:
-    'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, 'Times New Roman',
-    serif;
-  --font-mono:
-    ui-monospace, 'SF Mono', 'Cascadia Mono', 'Segoe UI Mono', Consolas, 'Liberation Mono',
-    monospace;
-  --font-display: var(--font-body);
+  --page-max: 1500px;
+  --gutter: clamp(18px, 3vw, 40px);
+  --font-body: 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Segoe UI', sans-serif;
+  --font-display: 'Bahnschrift', 'DIN Alternate', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-serif: var(--font-display);
+  --font-mono: 'Cascadia Mono', 'SFMono-Regular', Consolas, monospace;
 }
-
-/* ------------------------------------------------------- 2. semantic tokens — dark */
 
 :root,
 :root[data-theme='dark'] {
   color-scheme: dark;
-
-  --bg: var(--ink-950);
-  --bg-elevated: var(--ink-900);
-  --panel: var(--ink-850);
-  --panel-hover: var(--ink-800);
-  --panel-active: var(--ink-750);
-  --border: var(--ink-700);
-  --border-strong: var(--ink-600);
-  --border-subtle: color-mix(in oklab, var(--ink-700) 55%, transparent);
-
-  --text: var(--ink-100);
-  --text-soft: var(--ink-200);
-  --muted: var(--ink-400);
-  /* 61% keeps tertiary text at >=4.5:1 on both --bg and --panel. */
-  --faint: oklch(61% 0.018 78);
-
-  --accent: var(--gold-500);
-  --accent-hover: var(--gold-400);
-  --accent-press: var(--gold-600);
-  --accent-soft: color-mix(in oklab, var(--gold-500) 15%, transparent);
-  --accent-line: color-mix(in oklab, var(--gold-500) 40%, transparent);
-  --accent-glow: color-mix(in oklab, var(--gold-500) 28%, transparent);
-  --on-accent: oklch(21% 0.035 70);
-
-  --danger: oklch(67% 0.18 25);
-  --danger-soft: color-mix(in oklab, oklch(67% 0.18 25) 16%, transparent);
-  --ok: oklch(76% 0.14 152);
-
-  --skeleton: var(--ink-800);
-  --skeleton-shine: var(--ink-750);
-  --overlay: oklch(11% 0.01 75 / 0.64);
-  --scrim: linear-gradient(
-    180deg,
-    oklch(10% 0.01 75 / 0) 38%,
-    oklch(10% 0.01 75 / 0.5) 68%,
-    oklch(10% 0.01 75 / 0.88) 100%
-  );
-
-  /* Depth in dark mode comes from surface lightness, not shadow. */
-  --shadow-sm: 0 1px 2px oklch(0% 0 0 / 0.32);
-  --shadow-md: 0 6px 18px oklch(0% 0 0 / 0.36);
-  --shadow-lg: 0 18px 44px oklch(0% 0 0 / 0.46);
-
-  /* legacy aliases still referenced by components */
+  --bg: #101416;
+  --bg-elevated: #161b1e;
+  --panel: #1a2023;
+  --panel-hover: #242c30;
+  --panel-active: #2c363a;
+  --border: #303a3f;
+  --border-strong: #465359;
+  --border-subtle: #263034;
+  --text: #eff4f2;
+  --text-soft: #d0dad6;
+  --muted: #a0afab;
+  --faint: #84948e;
+  --accent: #73d5b0;
+  --accent-hover: #91e3c3;
+  --accent-press: #54bf99;
+  --accent-soft: #73d5b014;
+  --accent-line: #73d5b047;
+  --accent-glow: #73d5b020;
+  --on-accent: #12382a;
+  --danger: #ed9299;
+  --danger-soft: #ed929914;
+  --warning: #dfb779;
+  --ok: #73d5b0;
+  --skeleton: #20282c;
+  --skeleton-shine: #2a3438;
+  --overlay: #090e12b8;
+  --scrim: linear-gradient(180deg, transparent 45%, #0b111778 72%, #0b1117dd);
+  --shadow-sm: 0 2px 6px #00000014;
+  --shadow-md: 0 8px 24px #00000026;
+  --shadow-lg: 0 18px 40px #00000038;
   --radius: var(--radius-md);
   --shadow-card: var(--shadow-md);
 }
 
-/* ------------------------------------------------------ 2b. semantic tokens — light */
-
 :root[data-theme='light'] {
   color-scheme: light;
-
-  --bg: var(--ink-100);
-  --bg-elevated: var(--ink-50);
-  --panel: oklch(99.5% 0.004 85);
-  --panel-hover: var(--ink-200);
-  --panel-active: var(--ink-300);
-  --border: var(--ink-300);
-  --border-strong: var(--ink-400);
-  --border-subtle: color-mix(in oklab, var(--ink-300) 60%, transparent);
-
-  --text: oklch(24% 0.02 72);
-  --text-soft: oklch(34% 0.02 73);
-  --muted: oklch(46% 0.022 75);
-  /* 52% keeps tertiary text at >=4.5:1 on the warm paper background. */
-  --faint: oklch(52% 0.02 76);
-
-  --accent: var(--gold-750);
-  --accent-hover: var(--gold-700);
-  --accent-press: var(--gold-800);
-  --accent-soft: color-mix(in oklab, var(--gold-750) 13%, transparent);
-  --accent-line: color-mix(in oklab, var(--gold-750) 42%, transparent);
-  --accent-glow: color-mix(in oklab, var(--gold-750) 20%, transparent);
-  --on-accent: oklch(99% 0.005 85);
-
-  --danger: oklch(52% 0.19 25);
-  --danger-soft: color-mix(in oklab, oklch(52% 0.19 25) 12%, transparent);
-  --ok: oklch(48% 0.13 152);
-
-  --skeleton: var(--ink-200);
-  --skeleton-shine: var(--ink-100);
-  --overlay: oklch(97% 0.006 85 / 0.6);
-  --scrim: linear-gradient(
-    180deg,
-    oklch(12% 0.01 75 / 0) 38%,
-    oklch(12% 0.01 75 / 0.45) 68%,
-    oklch(12% 0.01 75 / 0.86) 100%
-  );
-
-  --shadow-sm: 0 1px 2px oklch(30% 0.03 70 / 0.08);
-  --shadow-md: 0 6px 18px oklch(30% 0.03 70 / 0.1);
-  --shadow-lg: 0 18px 44px oklch(30% 0.03 70 / 0.14);
+  --bg: #f3f6f4;
+  --bg-elevated: #f9fcfa;
+  --panel: #fcfefd;
+  --panel-hover: #eaf0ec;
+  --panel-active: #e0e9e3;
+  --border: #d9e3dd;
+  --border-strong: #b8c9bf;
+  --border-subtle: #e2e9e5;
+  --text: #17281f;
+  --text-soft: #344c40;
+  --muted: #5b7064;
+  --faint: #5e7467;
+  --accent: #247955;
+  --accent-hover: #1a6545;
+  --accent-press: #0e5133;
+  --accent-soft: #2479550d;
+  --accent-line: #24795540;
+  --accent-glow: #24795515;
+  --on-accent: #f6fff9;
+  --danger: #b7444f;
+  --danger-soft: #b7444f0d;
+  --warning: #8c621f;
+  --ok: #247955;
+  --skeleton: #e2eae5;
+  --skeleton-shine: #edf3ef;
+  --overlay: #111e2c70;
+  --shadow-sm: 0 2px 6px #152c2010;
+  --shadow-md: 0 8px 24px #152c2014;
+  --shadow-lg: 0 18px 40px #152c201f;
 }
 
-/* ------------------------------------------- 2c. Element Plus theme bridge
-   Element Plus derives every variant (plain, hover, active, disabled) from
-   these. Without them EP falls back to its stock blue. Must be per-theme. */
-
-:root,
 :root[data-theme='dark'] {
   --el-color-primary: var(--accent);
   --el-color-primary-light-3: color-mix(in oklab, var(--accent) 55%, var(--bg-elevated));
@@ -248,12 +175,12 @@
   --el-color-success-light-7: color-mix(in oklab, var(--ok) 26%, var(--bg-elevated));
   --el-color-success-light-8: color-mix(in oklab, var(--ok) 20%, var(--bg-elevated));
   --el-color-success-light-9: color-mix(in oklab, var(--ok) 14%, var(--bg-elevated));
-  --el-color-warning: var(--gold-600);
-  --el-color-warning-light-3: color-mix(in oklab, var(--gold-600) 55%, var(--bg-elevated));
-  --el-color-warning-light-5: color-mix(in oklab, var(--gold-600) 40%, var(--bg-elevated));
-  --el-color-warning-light-7: color-mix(in oklab, var(--gold-600) 26%, var(--bg-elevated));
-  --el-color-warning-light-8: color-mix(in oklab, var(--gold-600) 20%, var(--bg-elevated));
-  --el-color-warning-light-9: color-mix(in oklab, var(--gold-600) 14%, var(--bg-elevated));
+  --el-color-warning: var(--warning);
+  --el-color-warning-light-3: color-mix(in oklab, var(--warning) 55%, var(--bg-elevated));
+  --el-color-warning-light-5: color-mix(in oklab, var(--warning) 40%, var(--bg-elevated));
+  --el-color-warning-light-7: color-mix(in oklab, var(--warning) 26%, var(--bg-elevated));
+  --el-color-warning-light-8: color-mix(in oklab, var(--warning) 20%, var(--bg-elevated));
+  --el-color-warning-light-9: color-mix(in oklab, var(--warning) 14%, var(--bg-elevated));
   --el-color-info: var(--muted);
   --el-color-info-light-3: color-mix(in oklab, var(--muted) 55%, var(--bg-elevated));
   --el-color-info-light-5: color-mix(in oklab, var(--muted) 40%, var(--bg-elevated));
@@ -317,12 +244,12 @@
   --el-color-success-light-7: color-mix(in oklab, var(--ok) 42%, white);
   --el-color-success-light-8: color-mix(in oklab, var(--ok) 34%, white);
   --el-color-success-light-9: color-mix(in oklab, var(--ok) 18%, white);
-  --el-color-warning: var(--gold-600);
-  --el-color-warning-light-3: color-mix(in oklab, var(--gold-600) 78%, white);
-  --el-color-warning-light-5: color-mix(in oklab, var(--gold-600) 60%, white);
-  --el-color-warning-light-7: color-mix(in oklab, var(--gold-600) 42%, white);
-  --el-color-warning-light-8: color-mix(in oklab, var(--gold-600) 34%, white);
-  --el-color-warning-light-9: color-mix(in oklab, var(--gold-600) 18%, white);
+  --el-color-warning: var(--warning);
+  --el-color-warning-light-3: color-mix(in oklab, var(--warning) 78%, white);
+  --el-color-warning-light-5: color-mix(in oklab, var(--warning) 60%, white);
+  --el-color-warning-light-7: color-mix(in oklab, var(--warning) 42%, white);
+  --el-color-warning-light-8: color-mix(in oklab, var(--warning) 34%, white);
+  --el-color-warning-light-9: color-mix(in oklab, var(--warning) 18%, white);
   --el-color-info: var(--muted);
   --el-color-info-light-3: color-mix(in oklab, var(--muted) 78%, white);
   --el-color-info-light-5: color-mix(in oklab, var(--muted) 60%, white);
@@ -397,20 +324,6 @@ body,
 }
 
 /* A single soft pool of light from the top — the auditorium ceiling. */
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0 0 auto 0;
-  height: 62vh;
-  pointer-events: none;
-  z-index: 0;
-  background: radial-gradient(
-    ellipse 70% 100% at 50% -18%,
-    color-mix(in oklab, var(--accent) 9%, transparent),
-    transparent 62%
-  );
-}
-
 #app {
   position: relative;
   z-index: 1;
@@ -468,7 +381,7 @@ img {
 }
 
 .page {
-  padding: var(--space-8) var(--gutter) var(--space-16);
+  padding: 36px var(--gutter) var(--space-16);
   max-width: var(--page-max);
   margin: 0 auto;
 }
@@ -477,7 +390,7 @@ img {
   margin: 0;
   font-family: var(--font-display);
   font-size: var(--text-3xl);
-  font-weight: 500;
+  font-weight: 600;
   line-height: var(--leading-tight);
   letter-spacing: var(--tracking-tight);
   color: var(--text);
@@ -662,7 +575,7 @@ code {
 /* One component-size scale drives buttons AND form controls, so a button
    sitting next to an input in a toolbar always lines up on the same baseline. */
 :root {
-  --el-component-size: 36px;
+  --el-component-size: 38px;
   --el-component-size-large: 44px;
   --el-component-size-small: 30px;
 }
@@ -703,10 +616,10 @@ code {
   Do NOT "simplify" these back to a single class.
 */
 .el-button.el-button {
-  height: 36px;
-  min-height: 36px;
+  height: 38px;
+  min-height: 38px;
   padding: 0 var(--space-4);
-  border-radius: var(--radius-full);
+  border-radius: var(--radius-sm);
   font-size: var(--text-sm);
   font-weight: 500;
   letter-spacing: var(--tracking-wide);
@@ -761,11 +674,11 @@ code {
 }
 
 .el-button--warning {
-  --el-button-bg-color: var(--gold-600);
-  --el-button-border-color: var(--gold-600);
+  --el-button-bg-color: var(--warning);
+  --el-button-border-color: var(--warning);
   --el-button-text-color: var(--on-accent);
-  --el-button-hover-bg-color: var(--gold-500);
-  --el-button-hover-border-color: var(--gold-500);
+  --el-button-hover-bg-color: var(--warning);
+  --el-button-hover-border-color: var(--warning);
   --el-button-hover-text-color: var(--on-accent);
 }
 
@@ -1082,5 +995,60 @@ code {
   .route-progress .bar {
     width: 100%;
     background: var(--accent);
+  }
+}
+
+/* Shared page furniture. */
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 30px;
+}
+.page-description {
+  margin: 9px 0 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.page-kicker {
+  margin: 0 0 7px;
+  color: var(--faint);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  font-weight: 600;
+}
+.el-button > span {
+  gap: 7px;
+}
+.el-button + .el-button {
+  margin-left: 0;
+}
+.el-form-item__label {
+  font-size: 13px !important;
+  color: var(--text-soft) !important;
+}
+.el-input__wrapper,
+.el-select__wrapper {
+  min-height: 38px;
+}
+.el-dialog {
+  max-width: calc(100vw - 32px);
+}
+@media (max-width: 640px) {
+  .page-header {
+    gap: 12px;
+    margin-bottom: 24px;
+    align-items: flex-start;
+  }
+  .page-title {
+    font-size: 27px;
+  }
+  .page-description {
+    font-size: 12px;
+  }
+  .el-input__wrapper,
+  .el-select__wrapper {
+    min-height: 42px;
   }
 }

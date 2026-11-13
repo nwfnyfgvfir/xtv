@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getHealth, getMovieProviders, getSettings, updateSettings } from '@/api/media'
-import type { Health, ImageProxyMode, Settings, TranslateProvider } from '@/api/types'
+import type { Health, ImageProxyMode, ScrapeSource, Settings, TranslateProvider } from '@/api/types'
 import { getErrorMessage } from '@/utils/errors'
 import { APP_VERSION } from '@/utils/version'
+import AppIcon from '@/components/AppIcon.vue'
 
 const router = useRouter()
 const appVersion = APP_VERSION
@@ -13,6 +14,12 @@ const appVersion = APP_VERSION
 const settings = ref<Settings | null>(null)
 const health = ref<Health | null>(null)
 const form = ref({
+  scrape_source: 'metatube' as ScrapeSource,
+  stash_base_url: '',
+  stash_api_key: '',
+  stash_scraper: '',
+  stash_scraper_priority: [] as string[],
+  stash_fallback: true,
   metatube_base_url: '',
   metatube_token: '',
   metatube_provider: '',
@@ -38,7 +45,58 @@ const form = ref({
 })
 const saving = ref(false)
 const providersRefreshing = ref(false)
+const pageLoading = ref(true)
+const healthChecking = ref(true)
+const initialSnapshot = ref('')
+const lastSavedAt = ref('')
+const activeSection = ref('metadata')
+const sections = [
+  { id: 'libraries', label: '媒体库', icon: 'folder' },
+  { id: 'metadata', label: '刮削来源', icon: 'server' },
+  { id: 'translation', label: '自动翻译', icon: 'translate' },
+  { id: 'images', label: '图片与缓存', icon: 'image' },
+  { id: 'system', label: '系统状态', icon: 'shield' },
+] as const
+const isDirty = computed(
+  () => Boolean(initialSnapshot.value) && JSON.stringify(form.value) !== initialSnapshot.value,
+)
 const priorityPick = ref<string[]>([])
+const isStash = computed(() => form.value.scrape_source === 'stash')
+const activePriority = computed({
+  get: () =>
+    isStash.value ? form.value.stash_scraper_priority : form.value.metatube_provider_priority,
+  set: (value: string[]) => {
+    if (isStash.value) form.value.stash_scraper_priority = value
+    else form.value.metatube_provider_priority = value
+  },
+})
+const activeProvider = computed({
+  get: () => (isStash.value ? form.value.stash_scraper : form.value.metatube_provider),
+  set: (value: string) => {
+    if (isStash.value) form.value.stash_scraper = value
+    else form.value.metatube_provider = value
+  },
+})
+const activeFallback = computed({
+  get: () => (isStash.value ? form.value.stash_fallback : form.value.metatube_fallback),
+  set: (value: boolean) => {
+    if (isStash.value) form.value.stash_fallback = value
+    else form.value.metatube_fallback = value
+  },
+})
+const connectedSource = computed(() =>
+  settings.value?.scrape_source === 'stash' ? 'Stash' : 'MetaTube',
+)
+const sourceHealth = computed(() =>
+  settings.value?.scrape_source === 'stash' ? health.value?.stash : health.value?.metatube,
+)
+
+watch(
+  () => form.value.scrape_source,
+  () => {
+    priorityPick.value = [...activePriority.value]
+  },
+)
 
 const showExternalTpl = computed(() => form.value.image_proxy_mode === 'external')
 const showGoogleProxy = computed(() => form.value.translate_provider === 'google')
@@ -47,12 +105,20 @@ const showGoogleProxyUrl = computed(
 )
 const showDeepL = computed(() => form.value.translate_provider === 'deepl')
 const showAI = computed(() => form.value.translate_provider === 'ai')
-const showDeepLProxyUrl = computed(
-  () => showDeepL.value && form.value.translate_deepl_proxy,
+const showDeepLProxyUrl = computed(() => showDeepL.value && form.value.translate_deepl_proxy)
+const movieProviders = computed(() =>
+  form.value.scrape_source === (settings.value?.scrape_source || 'metatube')
+    ? settings.value?.movie_providers || []
+    : [],
 )
-const movieProviders = computed(() => settings.value?.movie_providers || [])
 const providerCount = computed(() => movieProviders.value.length)
-const hasPriority = computed(() => form.value.metatube_provider_priority.length > 0)
+const hasPriority = computed(() => activePriority.value.length > 0)
+
+function providerLabel(id: string): string {
+  return settings.value?.scrape_source === form.value.scrape_source
+    ? settings.value?.movie_provider_labels?.[id] || id
+    : id
+}
 
 /**
  * MetaTube / Cloudflare can return a multi-KB blob as the error string — and it
@@ -67,26 +133,22 @@ function shortenError(raw: string | null | undefined, fallback = '未知'): stri
     text = obj?.title || obj?.detail || obj?.error?.message || raw
   } catch {
     /* not valid JSON — try to pull a readable field out of the blob */
-    const m = raw.match(
-      /["'](?:title|detail|message)["']\s*:\s*["']([^"']{4,200})["']/,
-    )
+    const m = raw.match(/["'](?:title|detail|message)["']\s*:\s*["']([^"']{4,200})["']/)
     if (m) text = m[1]
   }
   const s = String(text).replace(/\s+/g, ' ').trim()
   return s.length > 180 ? `${s.slice(0, 177)}…` : s
 }
 
-const shortError = computed(() => shortenError(health.value?.metatube?.error))
-const shortProvidersError = computed(() =>
-  shortenError(settings.value?.movie_providers_error, ''),
-)
+const shortError = computed(() => shortenError(sourceHealth.value?.error))
+const shortProvidersError = computed(() => shortenError(settings.value?.movie_providers_error, ''))
 
 const allProviderOptions = computed(() => {
   const set = new Set(movieProviders.value)
-  for (const p of form.value.metatube_provider_priority) {
+  for (const p of activePriority.value) {
     if (p) set.add(p)
   }
-  if (form.value.metatube_provider) set.add(form.value.metatube_provider)
+  if (activeProvider.value) set.add(activeProvider.value)
   return Array.from(set).sort((a, b) => a.localeCompare(b))
 })
 
@@ -103,6 +165,12 @@ function normalizeProvider(mode: string | undefined): TranslateProvider {
 }
 
 function applySettingsToForm(s: Settings) {
+  form.value.scrape_source = s.scrape_source === 'stash' ? 'stash' : 'metatube'
+  form.value.stash_base_url = s.stash_base_url || ''
+  form.value.stash_api_key = ''
+  form.value.stash_scraper = s.stash_scraper || ''
+  form.value.stash_scraper_priority = [...(s.stash_scraper_priority || [])]
+  form.value.stash_fallback = s.stash_fallback !== false
   form.value.metatube_base_url = s.metatube_base_url
   form.value.auto_scrape = s.auto_scrape
   form.value.auto_translate = s.auto_translate !== false
@@ -113,7 +181,8 @@ function applySettingsToForm(s: Settings) {
   form.value.translate_deepl_api_url = s.translate_deepl_api_url || ''
   form.value.translate_deepl_proxy = Boolean(s.translate_deepl_proxy)
   form.value.translate_deepl_proxy_url = s.translate_deepl_proxy_url || ''
-  form.value.translate_ai_api_url = s.translate_ai_api_url ?? 'https://api.openai.com/v1/chat/completions'
+  form.value.translate_ai_api_url =
+    s.translate_ai_api_url ?? 'https://api.openai.com/v1/chat/completions'
   form.value.translate_ai_model = s.translate_ai_model || ''
   form.value.image_proxy_mode = normalizeMode(s.image_proxy_mode)
   form.value.image_external_proxy_url = s.image_external_proxy_url || ''
@@ -125,16 +194,37 @@ function applySettingsToForm(s: Settings) {
   form.value.metatube_token = ''
   form.value.translate_deepl_api_key = ''
   form.value.translate_ai_api_key = ''
-  priorityPick.value = [...form.value.metatube_provider_priority]
+  priorityPick.value = [...activePriority.value]
+  initialSnapshot.value = JSON.stringify(form.value)
+}
+
+async function refreshHealth() {
+  healthChecking.value = true
+  try {
+    health.value = await getHealth()
+  } catch {
+    health.value = null
+  } finally {
+    healthChecking.value = false
+  }
 }
 
 async function load() {
-  settings.value = await getSettings()
-  health.value = await getHealth()
-  applySettingsToForm(settings.value)
+  pageLoading.value = true
+  try {
+    settings.value = await getSettings()
+    applySettingsToForm(settings.value)
+  } finally {
+    pageLoading.value = false
+  }
+  void refreshHealth()
 }
 
 async function refreshProviders() {
+  if (form.value.scrape_source !== settings.value?.scrape_source) {
+    ElMessage.warning('切换刮削后端后，请先保存配置')
+    return
+  }
   providersRefreshing.value = true
   try {
     try {
@@ -143,6 +233,7 @@ async function refreshProviders() {
         settings.value = {
           ...settings.value,
           movie_providers: data.movie_providers,
+          movie_provider_labels: data.movie_provider_labels,
           movie_providers_error: null,
           movie_providers_from_cache: Boolean(data.from_cache),
         }
@@ -160,7 +251,7 @@ async function refreshProviders() {
 }
 
 function onPriorityPickChange(vals: string[]) {
-  const prev = form.value.metatube_provider_priority
+  const prev = activePriority.value
   const next: string[] = []
   for (const p of prev) {
     if (vals.includes(p)) next.push(p)
@@ -168,36 +259,48 @@ function onPriorityPickChange(vals: string[]) {
   for (const p of vals) {
     if (!next.includes(p)) next.push(p)
   }
-  form.value.metatube_provider_priority = next
+  activePriority.value = next
   priorityPick.value = [...next]
 }
 
 function movePriority(index: number, dir: -1 | 1) {
-  const list = [...form.value.metatube_provider_priority]
+  const list = [...activePriority.value]
   const j = index + dir
   if (j < 0 || j >= list.length) return
   ;[list[index], list[j]] = [list[j], list[index]]
-  form.value.metatube_provider_priority = list
+  activePriority.value = list
   priorityPick.value = [...list]
 }
 
 function removePriority(index: number) {
-  const list = form.value.metatube_provider_priority.filter((_, i) => i !== index)
-  form.value.metatube_provider_priority = list
+  const list = activePriority.value.filter((_, i) => i !== index)
+  activePriority.value = list
   priorityPick.value = [...list]
 }
 
 async function save() {
+  if (isStash.value && !form.value.stash_base_url.trim()) {
+    activeSection.value = 'metadata'
+    ElMessage.warning('请填写 Stash 服务地址')
+    return
+  }
   if (
-    form.value.auto_translate && showAI.value &&
+    form.value.auto_translate &&
+    showAI.value &&
     (!form.value.translate_ai_api_url.trim() || !form.value.translate_ai_model.trim())
   ) {
+    activeSection.value = 'translation'
     ElMessage.warning('请填写 AI API 地址和模型名称')
     return
   }
   saving.value = true
   try {
     const body: Record<string, unknown> = {
+      scrape_source: form.value.scrape_source,
+      stash_base_url: form.value.stash_base_url.trim(),
+      stash_scraper: form.value.stash_scraper,
+      stash_scraper_priority: form.value.stash_scraper_priority,
+      stash_fallback: form.value.stash_fallback,
       metatube_base_url: form.value.metatube_base_url,
       auto_scrape: form.value.auto_scrape,
       auto_translate: form.value.auto_translate,
@@ -219,6 +322,7 @@ async function save() {
       metatube_fallback: form.value.metatube_fallback,
     }
     if (form.value.metatube_token) body.metatube_token = form.value.metatube_token
+    if (form.value.stash_api_key.trim()) body.stash_api_key = form.value.stash_api_key.trim()
     if (form.value.translate_deepl_api_key) {
       body.translate_deepl_api_key = form.value.translate_deepl_api_key
     }
@@ -227,8 +331,12 @@ async function save() {
     }
     settings.value = await updateSettings(body)
     applySettingsToForm(settings.value)
-    health.value = await getHealth()
-    ElMessage.success('已保存')
+    lastSavedAt.value = new Date().toLocaleTimeString('zh-CN', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+    void refreshHealth()
+    ElMessage.success('设置已保存')
   } catch (e: unknown) {
     ElMessage.error(getErrorMessage(e, '保存失败'))
   } finally {
@@ -243,431 +351,678 @@ onMounted(() => {
 
 <template>
   <div class="page settings-page">
-    <h1 class="page-title">设置</h1>
-    <p class="muted intro">MetaTube 刮削源、图片代理、翻译与系统状态</p>
-
-    <div class="settings-grid">
-      <el-card class="card" shadow="never">
-        <template #header>
-          <span class="card-title">库维护</span>
-        </template>
-      <p class="muted line">
-        按番号查找跨库 / 同库重复项，并有选择地删除副本（本地删文件；strm 仅删索引）。
-      </p>
-      <el-button @click="router.push({ name: 'duplicates' })">重复影片</el-button>
-    </el-card>
-
-    <el-card class="card" shadow="never">
-      <template #header>
-        <span class="card-title">连通性</span>
-      </template>
-      <p v-if="health?.metatube?.ok" class="ok">
-        MetaTube 已连接：{{ JSON.stringify(health.metatube.data) }}
-      </p>
-      <p v-else class="err" :title="health?.metatube?.error || ''">未连接：{{ shortError }}</p>
-      <p class="muted line">MEDIA_ROOT: {{ settings?.media_root }}</p>
-      <p class="muted line">
-        Token：MetaTube {{ settings?.metatube_token_set ? '已配置' : '未配置' }}
-      </p>
-      <p class="muted line">
-        鉴权：{{ settings?.auth_enabled ? '已启用 (ADMIN_PASSWORD)' : '关闭（开发模式）' }}
-      </p>
-      <p class="muted line">
-        目录监听：{{ health?.watcher?.running ? '运行中' : '未运行' }}
-        <span v-if="health?.watcher?.watched_library_ids?.length">
-          · 监视库 {{ health.watcher.watched_library_ids.length }}
-        </span>
-      </p>
-      <p class="muted line">版本：{{ appVersion }}</p>
-    </el-card>
-
-    <el-card class="card card-wide" shadow="never">
-      <template #header>
-        <span class="card-title">连接与刮削源</span>
-      </template>
-      <!-- Labels above fields: a multi-column grid can't fit side labels. -->
-      <el-form class="settings-form" label-position="top">
-        <el-form-item label="MetaTube URL">
-          <el-input v-model="form.metatube_base_url" />
-        </el-form-item>
-        <el-form-item label="MetaTube Token">
-          <el-input
-            v-model="form.metatube_token"
-            type="password"
-            show-password
-            placeholder="留空则不修改"
-          />
-        </el-form-item>
-
-        <el-form-item label="源列表">
-          <div class="providers-meta">
-            <span class="muted">共 {{ providerCount }} 个源</span>
-            <el-button :loading="providersRefreshing" @click="refreshProviders">
-              刷新源列表
-            </el-button>
-          </div>
-          <p
-            v-if="settings?.movie_providers_error"
-            class="warn-line"
-            :title="settings.movie_providers_error"
-          >
-            实时拉取失败：{{ shortProvidersError }}
-            <span v-if="settings.movie_providers_from_cache">（已使用缓存列表）</span>
-          </p>
-        </el-form-item>
-
-        <el-form-item label="刮削源优先级" class="span-full">
-          <div class="priority-block">
-            <el-select
-              :model-value="priorityPick"
-              multiple
-              filterable
-              allow-create
-              default-first-option
-              clearable
-              placeholder="从全部源中选择并按顺序排列"
-              style="width: 100%"
-              @update:model-value="onPriorityPickChange"
+    <header class="page-header">
+      <div>
+        <p class="page-kicker">按照你的方式运行</p>
+        <h1 class="page-title">设置</h1>
+        <p class="page-description">媒体库、刮削与翻译，一处管理。</p>
+      </div>
+      <el-button type="primary" :loading="saving" :disabled="pageLoading || !settings" @click="save"
+        ><AppIcon name="check" :size="16" />保存设置</el-button
+      >
+    </header>
+    <div v-if="pageLoading" class="settings-loading" role="status">
+      <div />
+      <div />
+      <div />
+      <p>正在读取配置…</p>
+    </div>
+    <div v-else-if="!settings" class="settings-error">
+      <AppIcon name="server" :size="32" />
+      <p>暂时无法读取设置</p>
+      <el-button @click="load">重新加载</el-button>
+    </div>
+    <div v-else class="settings-layout">
+      <nav class="settings-navigation" aria-label="设置分类">
+        <button
+          v-for="section in sections"
+          :key="section.id"
+          type="button"
+          :class="{ active: activeSection === section.id }"
+          :aria-pressed="activeSection === section.id"
+          @click="activeSection = section.id"
+        >
+          <AppIcon :name="section.icon" :size="17" /><span>{{ section.label }}</span>
+        </button>
+      </nav>
+      <div class="settings-content">
+        <section
+          v-show="activeSection === 'metadata'"
+          class="settings-panel"
+          aria-labelledby="metadata-heading"
+        >
+          <header class="panel-heading">
+            <div>
+              <h2 id="metadata-heading">刮削来源</h2>
+              <p>连接元数据服务，选择适合你收藏的刮削器。</p>
+            </div>
+            <span
+              class="connection-badge"
+              :class="{
+                healthy: sourceHealth?.ok,
+                failed: !healthChecking && health && !sourceHealth?.ok,
+              }"
+              ><i />{{
+                healthChecking
+                  ? '正在检查连接'
+                  : sourceHealth?.ok
+                    ? `${connectedSource} 已连接`
+                    : '连接待检查'
+              }}</span
             >
-              <el-option
-                v-for="p in allProviderOptions"
-                :key="p"
-                :label="p"
-                :value="p"
-              />
-            </el-select>
-            <ul v-if="form.metatube_provider_priority.length" class="priority-list">
-              <li v-for="(p, i) in form.metatube_provider_priority" :key="`${p}-${i}`">
-                <span class="pri-idx">{{ i + 1 }}</span>
-                <span class="pri-name">{{ p }}</span>
-                <span class="pri-actions">
-                  <el-button size="small" text :disabled="i === 0" @click="movePriority(i, -1)">
-                    ↑
-                  </el-button>
-                  <el-button
-                    size="small"
-                    text
-                    :disabled="i === form.metatube_provider_priority.length - 1"
-                    @click="movePriority(i, 1)"
-                  >
-                    ↓
-                  </el-button>
-                  <el-button size="small" text type="danger" @click="removePriority(i)">
-                    ×
-                  </el-button>
+          </header>
+          <el-form class="settings-form" label-position="top" @submit.prevent="save">
+            <el-form-item label="刮削后端">
+              <el-select v-model="form.scrape_source" style="width: 100%">
+                <el-option label="MetaTube" value="metatube" />
+                <el-option label="Stash（社区刮削器）" value="stash" />
+              </el-select>
+            </el-form-item>
+            <template v-if="isStash">
+              <el-form-item label="Stash 服务地址">
+                <el-input v-model="form.stash_base_url" placeholder="http://stash:9999" />
+                <span class="field-hint muted block">填写服务根地址或完整的 /graphql 地址</span>
+              </el-form-item>
+              <el-form-item label="Stash API Key">
+                <el-input
+                  v-model="form.stash_api_key"
+                  type="password"
+                  show-password
+                  placeholder="留空则不修改"
+                />
+                <span class="field-hint muted block">
+                  {{ settings?.stash_api_key_set ? '已配置' : '未配置' }} · 在 Stash「设置 → 安全 →
+                  身份验证」中获取；未开启鉴权可留空
                 </span>
-              </li>
-            </ul>
-            <span class="field-hint muted block">
-              刮削时按顺序尝试；全部未命中后由下方 fallback 决定是否再搜其余源。为空时走兼容单源。
-            </span>
+              </el-form-item>
+              <p class="field-hint muted span-full">
+                先在 Stash 安装社区刮削器，保存连接配置后刷新源列表。仅支持 URL
+                的刮削器需在影片详情页填写来源 URL。
+              </p>
+            </template>
+            <template v-else>
+              <el-form-item label="MetaTube URL">
+                <el-input v-model="form.metatube_base_url" />
+              </el-form-item>
+              <el-form-item label="MetaTube Token">
+                <el-input
+                  v-model="form.metatube_token"
+                  type="password"
+                  show-password
+                  placeholder="留空则不修改"
+                />
+              </el-form-item>
+            </template>
+
+            <el-form-item label="源列表">
+              <div class="providers-meta">
+                <span class="muted">共 {{ providerCount }} 个源</span>
+                <el-button :loading="providersRefreshing" @click="refreshProviders">
+                  刷新源列表
+                </el-button>
+              </div>
+              <p
+                v-if="
+                  settings?.scrape_source === form.scrape_source && settings?.movie_providers_error
+                "
+                class="warn-line"
+                :title="settings.movie_providers_error"
+              >
+                实时拉取失败：{{ shortProvidersError }}
+                <span v-if="settings.movie_providers_from_cache">（已使用缓存列表）</span>
+              </p>
+            </el-form-item>
+
+            <el-form-item label="刮削源优先级" class="span-full">
+              <div class="priority-block">
+                <el-select
+                  :model-value="priorityPick"
+                  multiple
+                  filterable
+                  allow-create
+                  default-first-option
+                  clearable
+                  placeholder="从全部源中选择并按顺序排列"
+                  style="width: 100%"
+                  @update:model-value="onPriorityPickChange"
+                >
+                  <el-option
+                    v-for="p in allProviderOptions"
+                    :key="p"
+                    :label="providerLabel(p)"
+                    :value="p"
+                  />
+                </el-select>
+                <ul v-if="activePriority.length" class="priority-list">
+                  <li v-for="(p, i) in activePriority" :key="`${p}-${i}`">
+                    <span class="pri-idx">{{ i + 1 }}</span>
+                    <span class="pri-name">{{ providerLabel(p) }}</span>
+                    <span class="pri-actions">
+                      <el-button size="small" text :disabled="i === 0" @click="movePriority(i, -1)">
+                        ↑
+                      </el-button>
+                      <el-button
+                        size="small"
+                        text
+                        :disabled="i === activePriority.length - 1"
+                        @click="movePriority(i, 1)"
+                      >
+                        ↓
+                      </el-button>
+                      <el-button size="small" text type="danger" @click="removePriority(i)">
+                        ×
+                      </el-button>
+                    </span>
+                  </li>
+                </ul>
+                <span class="field-hint muted block">
+                  刮削时按顺序尝试；全部未命中后由下方 fallback
+                  决定是否再搜其余源。为空时走兼容单源。
+                </span>
+              </div>
+            </el-form-item>
+
+            <el-form-item label="兼容单源">
+              <el-select
+                v-model="activeProvider"
+                clearable
+                filterable
+                allow-create
+                default-first-option
+                :disabled="hasPriority"
+                placeholder="自动（优先级为空时生效）"
+                style="width: 100%"
+              >
+                <el-option label="自动" value="" />
+                <el-option
+                  v-for="p in allProviderOptions"
+                  :key="p"
+                  :label="providerLabel(p)"
+                  :value="p"
+                />
+              </el-select>
+              <span class="field-hint muted block">
+                优先级列表为空时生效；非空时刮削按优先级顺序尝试
+              </span>
+            </el-form-item>
+
+            <el-form-item label="失败时 fallback">
+              <el-switch v-model="activeFallback" />
+              <span class="field-hint muted">优先级全部未命中后是否再搜索其余源</span>
+            </el-form-item>
+          </el-form>
+        </section>
+        <section
+          v-show="activeSection === 'libraries'"
+          class="settings-panel"
+          aria-labelledby="libraries-heading"
+        >
+          <header class="panel-heading">
+            <div>
+              <h2 id="libraries-heading">媒体库</h2>
+              <p>管理扫描与目录变更，保持你的收藏井然有序。</p>
+            </div>
+          </header>
+          <el-form class="settings-form" label-position="top" @submit.prevent="save">
+            <el-form-item label="自动刮削">
+              <el-switch v-model="form.auto_scrape" />
+            </el-form-item>
+            <el-form-item label="扫描扩展名">
+              <el-input v-model="form.scan_extensions" />
+            </el-form-item>
+          </el-form>
+          <div class="directory-info">
+            <AppIcon name="folder" :size="18" />
+            <div>
+              <span>媒体根目录</span><code>{{ settings.media_root }}</code>
+            </div>
           </div>
-        </el-form-item>
-
-        <el-form-item label="兼容单源">
-          <el-select
-            v-model="form.metatube_provider"
-            clearable
-            filterable
-            allow-create
-            default-first-option
-            :disabled="hasPriority"
-            placeholder="自动（优先级为空时生效）"
-            style="width: 100%"
+          <div class="maintenance-link">
+            <div>
+              <h3>整理重复影片</h3>
+              <p>查找跨库和同库重复项，选择需要保留的版本。</p>
+            </div>
+            <el-button @click="router.push({ name: 'duplicates' })"
+              >查看重复项<AppIcon name="chevron" :size="14"
+            /></el-button>
+          </div>
+        </section>
+        <section
+          v-show="activeSection === 'translation'"
+          class="settings-panel"
+          aria-labelledby="translation-heading"
+        >
+          <header class="panel-heading">
+            <div>
+              <h2 id="translation-heading">自动翻译</h2>
+              <p>将标题、简介和标签翻译为简体中文，演员姓名保持原样。</p>
+            </div>
+          </header>
+          <el-form class="settings-form" label-position="top" @submit.prevent="save">
+            <el-form-item label="刮削后自动翻译">
+              <el-switch v-model="form.auto_translate" />
+              <span class="field-hint muted">日文标题/简介/标签 → 简中（不翻译演员名）</span>
+            </el-form-item>
+            <el-form-item label="翻译服务">
+              <el-select
+                v-model="form.translate_provider"
+                style="width: 100%"
+                :disabled="!form.auto_translate"
+              >
+                <el-option label="免费 Google（gtx）" value="google" />
+                <el-option label="免费必应（Edge）" value="bing" />
+                <el-option label="DeepL（需 API Key）" value="deepl" />
+                <el-option label="AI 翻译（OpenAI 兼容）" value="ai" />
+              </el-select>
+            </el-form-item>
+            <el-form-item v-if="showGoogleProxy" label="Google 走代理">
+              <el-switch v-model="form.translate_google_proxy" />
+              <span class="field-hint muted">仅 Google gtx；关闭则直连</span>
+            </el-form-item>
+            <el-form-item v-if="showGoogleProxyUrl" label="Google 代理地址">
+              <el-input
+                v-model="form.translate_google_proxy_url"
+                placeholder="http://127.0.0.1:7890"
+              />
+              <span class="field-hint muted block">
+                支持 <code>http://</code> / <code>https://</code> / <code>socks5://</code> /
+                <code>socks5h://</code>
+              </span>
+            </el-form-item>
+            <template v-if="showDeepL">
+              <el-form-item label="DeepL API Key">
+                <el-input
+                  v-model="form.translate_deepl_api_key"
+                  type="password"
+                  show-password
+                  placeholder="留空则不修改"
+                />
+                <span class="field-hint muted block">
+                  {{ settings?.translate_deepl_api_key_set ? '已配置' : '未配置' }} · 免费 Key 以
+                  <code>:fx</code> 结尾，自动走 api-free 端点
+                </span>
+              </el-form-item>
+              <el-form-item label="DeepL API 地址">
+                <el-input
+                  v-model="form.translate_deepl_api_url"
+                  placeholder="留空自动：api-free.deepl.com 或 api.deepl.com"
+                />
+                <span class="field-hint muted block">
+                  可填完整地址或域名根路径（自动补 <code>/v2/translate</code>）； 已含
+                  <code>/translate</code> 的 DeepLX 地址会原样使用
+                </span>
+              </el-form-item>
+              <el-form-item label="DeepL 免费端点">
+                <el-switch
+                  v-model="form.translate_deepl_free"
+                  :disabled="!!form.translate_deepl_api_url.trim()"
+                />
+                <span class="field-hint muted">Pro Key 请关闭；自定义地址时忽略</span>
+              </el-form-item>
+              <el-form-item label="DeepL 走代理">
+                <el-switch v-model="form.translate_deepl_proxy" />
+                <span class="field-hint muted">关闭则直连 DeepL API</span>
+              </el-form-item>
+              <el-form-item v-if="showDeepLProxyUrl" label="DeepL 代理地址">
+                <el-input
+                  v-model="form.translate_deepl_proxy_url"
+                  placeholder="http://127.0.0.1:7890"
+                />
+                <span class="field-hint muted block">
+                  支持 <code>http://</code> / <code>https://</code> / <code>socks5://</code> /
+                  <code>socks5h://</code>
+                </span>
+              </el-form-item>
+            </template>
+            <template v-if="showAI">
+              <el-form-item label="AI API 地址">
+                <el-input
+                  v-model="form.translate_ai_api_url"
+                  placeholder="https://api.example.com/v1/chat/completions"
+                />
+                <span class="field-hint muted block">
+                  支持域名根地址、<code>/v1</code> 或完整的 <code>/v1/chat/completions</code> 地址
+                </span>
+              </el-form-item>
+              <el-form-item label="AI 模型名称">
+                <el-input
+                  v-model="form.translate_ai_model"
+                  placeholder="填写接口服务支持的模型名称"
+                />
+              </el-form-item>
+              <el-form-item label="AI API Key">
+                <el-input
+                  v-model="form.translate_ai_api_key"
+                  type="password"
+                  show-password
+                  placeholder="留空则不修改"
+                />
+                <span class="field-hint muted block">
+                  {{ settings?.translate_ai_api_key_set ? '已配置' : '未配置' }} ·
+                  本地免鉴权服务可不填；翻译失败时回退必应，仍失败则保留原文
+                </span>
+              </el-form-item>
+            </template>
+          </el-form>
+        </section>
+        <section
+          v-show="activeSection === 'images'"
+          class="settings-panel"
+          aria-labelledby="images-heading"
+        >
+          <header class="panel-heading">
+            <div>
+              <h2 id="images-heading">图片与缓存</h2>
+              <p>选择封面加载方式，按需开启磁盘缓存。</p>
+            </div>
+          </header>
+          <el-form class="settings-form" label-position="top" @submit.prevent="save">
+            <el-form-item label="图片代理">
+              <el-select v-model="form.image_proxy_mode" style="width: 100%">
+                <el-option label="本站代理（/api/images/proxy）" value="site" />
+                <el-option label="MetaTube 图片代理" value="metatube" />
+                <el-option label="外部代理（模板 {url}）" value="external" />
+              </el-select>
+            </el-form-item>
+            <el-form-item v-if="showExternalTpl" label="外部代理模板">
+              <el-input
+                v-model="form.image_external_proxy_url"
+                placeholder="https://wsrv.nl/?url={url}"
+              />
+              <span class="field-hint muted block">
+                须包含 <code>{url}</code>，会替换为 URL-encode 后的原始图片地址
+              </span>
+            </el-form-item>
+            <el-form-item label="图片本地缓存">
+              <el-switch v-model="form.image_local_cache" />
+              <span class="field-hint muted">
+                仅对本站代理生效；写入 data/image-cache，优先读本地
+              </span>
+            </el-form-item>
+          </el-form>
+          <p class="section-note">
+            通过 Stash 刮削并保存的封面与头像由本站直接提供，不依赖 MetaTube 图片接口。
+          </p>
+        </section>
+        <section
+          v-show="activeSection === 'system'"
+          class="settings-panel"
+          aria-labelledby="system-heading"
+        >
+          <header class="panel-heading">
+            <div>
+              <h2 id="system-heading">系统状态</h2>
+              <p>查看连接、目录监听与服务信息。</p>
+            </div>
+            <el-button :loading="healthChecking" @click="refreshHealth"
+              ><AppIcon name="refresh" :size="14" />刷新状态</el-button
+            >
+          </header>
+          <dl class="system-facts">
+            <div>
+              <dt>元数据服务</dt>
+              <dd>
+                <span
+                  class="status-text"
+                  :class="{
+                    ok: sourceHealth?.ok,
+                    err: !healthChecking && health && !sourceHealth?.ok,
+                  }"
+                  >{{ connectedSource }} ·
+                  {{ healthChecking ? '检查中' : sourceHealth?.ok ? '已连接' : '未连接' }}</span
+                >
+              </dd>
+            </div>
+            <div v-if="!healthChecking && !sourceHealth?.ok">
+              <dt>连接信息</dt>
+              <dd class="err">{{ shortError }}</dd>
+            </div>
+            <div>
+              <dt>服务凭证</dt>
+              <dd>
+                {{
+                  (
+                    settings.scrape_source === 'stash'
+                      ? settings.stash_api_key_set
+                      : settings.metatube_token_set
+                  )
+                    ? '已配置'
+                    : '未配置'
+                }}
+              </dd>
+            </div>
+            <div>
+              <dt>登录验证</dt>
+              <dd>{{ settings.auth_enabled ? '已启用' : '未启用' }}</dd>
+            </div>
+            <div>
+              <dt>目录监听</dt>
+              <dd>
+                {{ health?.watcher?.running ? '运行中' : healthChecking ? '检查中' : '未运行'
+                }}<span v-if="health?.watcher?.watched_library_ids?.length">
+                  · {{ health.watcher.watched_library_ids.length }} 个媒体库</span
+                >
+              </dd>
+            </div>
+            <div>
+              <dt>媒体根目录</dt>
+              <dd class="mono">{{ settings.media_root }}</dd>
+            </div>
+            <div>
+              <dt>应用版本</dt>
+              <dd class="mono">{{ appVersion }}</dd>
+            </div>
+          </dl>
+          <details v-if="sourceHealth?.data" class="connection-details">
+            <summary>查看连接详情<AppIcon name="down" :size="14" /></summary>
+            <pre>{{ JSON.stringify(sourceHealth.data, null, 2) }}</pre>
+          </details>
+          <p class="section-note">
+            登录密码通过服务端 <code>ADMIN_PASSWORD</code> 配置。调试日志使用
+            <code>LOG_LEVEL</code> / <code>DEBUG</code> 环境变量。
+          </p>
+        </section>
+        <footer class="save-bar">
+          <span :class="{ dirty: isDirty }"
+            ><i v-if="isDirty" />{{
+              isDirty
+                ? '有尚未保存的修改'
+                : lastSavedAt
+                  ? `上次保存 ${lastSavedAt}`
+                  : '已配置的密钥留空会保留原值'
+            }}</span
+          ><el-button type="primary" :loading="saving" @click="save"
+            ><AppIcon name="check" :size="15" />保存设置</el-button
           >
-            <el-option label="自动" value="" />
-            <el-option
-              v-for="p in allProviderOptions"
-              :key="p"
-              :label="p"
-              :value="p"
-            />
-          </el-select>
-          <span class="field-hint muted block">
-            优先级列表为空时生效；非空时刮削按优先级顺序尝试
-          </span>
-        </el-form-item>
-
-        <el-form-item label="失败时 fallback">
-          <el-switch v-model="form.metatube_fallback" />
-          <span class="field-hint muted">优先级全部未命中后是否再搜索其余源</span>
-        </el-form-item>
-        <el-form-item label="自动刮削">
-          <el-switch v-model="form.auto_scrape" />
-        </el-form-item>
-        <el-form-item label="刮削后自动翻译">
-          <el-switch v-model="form.auto_translate" />
-          <span class="field-hint muted">日文标题/简介/标签 → 简中（不翻译演员名）</span>
-        </el-form-item>
-        <el-form-item label="翻译服务">
-          <el-select
-            v-model="form.translate_provider"
-            style="width: 100%"
-            :disabled="!form.auto_translate"
-          >
-            <el-option label="免费 Google（gtx）" value="google" />
-            <el-option label="免费必应（Edge）" value="bing" />
-            <el-option label="DeepL（需 API Key）" value="deepl" />
-            <el-option label="AI 翻译（OpenAI 兼容）" value="ai" />
-          </el-select>
-        </el-form-item>
-        <el-form-item v-if="showGoogleProxy" label="Google 走代理">
-          <el-switch v-model="form.translate_google_proxy" />
-          <span class="field-hint muted">仅 Google gtx；关闭则直连</span>
-        </el-form-item>
-        <el-form-item v-if="showGoogleProxyUrl" label="Google 代理地址">
-          <el-input
-            v-model="form.translate_google_proxy_url"
-            placeholder="http://127.0.0.1:7890"
-          />
-          <span class="field-hint muted block">
-            支持 <code>http://</code> / <code>https://</code> /
-            <code>socks5://</code> / <code>socks5h://</code>
-          </span>
-        </el-form-item>
-        <template v-if="showDeepL">
-          <el-form-item label="DeepL API Key">
-            <el-input
-              v-model="form.translate_deepl_api_key"
-              type="password"
-              show-password
-              placeholder="留空则不修改"
-            />
-            <span class="field-hint muted block">
-              {{ settings?.translate_deepl_api_key_set ? '已配置' : '未配置' }} ·
-              免费 Key 以 <code>:fx</code> 结尾，自动走 api-free 端点
-            </span>
-          </el-form-item>
-          <el-form-item label="DeepL API 地址">
-            <el-input
-              v-model="form.translate_deepl_api_url"
-              placeholder="留空自动：api-free.deepl.com 或 api.deepl.com"
-            />
-            <span class="field-hint muted block">
-              可填完整地址或域名根路径（自动补 <code>/v2/translate</code>）；
-              已含 <code>/translate</code> 的 DeepLX 地址会原样使用
-            </span>
-          </el-form-item>
-          <el-form-item label="DeepL 免费端点">
-            <el-switch v-model="form.translate_deepl_free" :disabled="!!form.translate_deepl_api_url.trim()" />
-            <span class="field-hint muted">Pro Key 请关闭；自定义地址时忽略</span>
-          </el-form-item>
-          <el-form-item label="DeepL 走代理">
-            <el-switch v-model="form.translate_deepl_proxy" />
-            <span class="field-hint muted">关闭则直连 DeepL API</span>
-          </el-form-item>
-          <el-form-item v-if="showDeepLProxyUrl" label="DeepL 代理地址">
-            <el-input
-              v-model="form.translate_deepl_proxy_url"
-              placeholder="http://127.0.0.1:7890"
-            />
-            <span class="field-hint muted block">
-              支持 <code>http://</code> / <code>https://</code> /
-              <code>socks5://</code> / <code>socks5h://</code>
-            </span>
-          </el-form-item>
-        </template>
-        <template v-if="showAI">
-          <el-form-item label="AI API 地址">
-            <el-input
-              v-model="form.translate_ai_api_url"
-              placeholder="https://api.example.com/v1/chat/completions"
-            />
-            <span class="field-hint muted block">
-              支持域名根地址、<code>/v1</code> 或完整的 <code>/v1/chat/completions</code> 地址
-            </span>
-          </el-form-item>
-          <el-form-item label="AI 模型名称">
-            <el-input
-              v-model="form.translate_ai_model"
-              placeholder="填写接口服务支持的模型名称"
-            />
-          </el-form-item>
-          <el-form-item label="AI API Key">
-            <el-input
-              v-model="form.translate_ai_api_key"
-              type="password"
-              show-password
-              placeholder="留空则不修改"
-            />
-            <span class="field-hint muted block">
-              {{ settings?.translate_ai_api_key_set ? '已配置' : '未配置' }} ·
-              本地免鉴权服务可不填；翻译失败时回退必应，仍失败则保留原文
-            </span>
-          </el-form-item>
-        </template>
-        <el-form-item label="图片代理">
-          <el-select v-model="form.image_proxy_mode" style="width: 100%">
-            <el-option label="本站代理（/api/images/proxy）" value="site" />
-            <el-option label="MetaTube 图片代理" value="metatube" />
-            <el-option label="外部代理（模板 {url}）" value="external" />
-          </el-select>
-        </el-form-item>
-        <el-form-item v-if="showExternalTpl" label="外部代理模板">
-          <el-input
-            v-model="form.image_external_proxy_url"
-            placeholder="https://wsrv.nl/?url={url}"
-          />
-          <span class="field-hint muted block">
-            须包含 <code>{url}</code>，会替换为 URL-encode 后的原始图片地址
-          </span>
-        </el-form-item>
-        <el-form-item label="图片本地缓存">
-          <el-switch v-model="form.image_local_cache" />
-          <span class="field-hint muted">
-            仅对本站代理生效；写入 data/image-cache，优先读本地
-          </span>
-        </el-form-item>
-        <el-form-item label="扫描扩展名">
-          <el-input v-model="form.scan_extensions" />
-        </el-form-item>
-        <el-form-item class="span-full">
-          <el-button type="primary" :loading="saving" @click="save">保存</el-button>
-        </el-form-item>
-      </el-form>
-      <p class="muted tip">
-        目录变更由实时监听增量刷新；需要全量校验时请在媒体库页点「扫描」。登录密码通过环境变量
-        <code>ADMIN_PASSWORD</code> 配置。调试日志用 <code>LOG_LEVEL</code> /
-        <code>DEBUG</code>（环境变量，不在此页）。
-      </p>
-    </el-card>
+        </footer>
+      </div>
     </div>
   </div>
 </template>
-
 <style scoped>
-.intro {
-  margin: var(--space-2) 0 var(--space-6);
-  font-size: var(--text-sm);
-}
-
-/* ------------------------------------------------------------------ layout
-   A settings page on a wide screen should use the width. Two card columns,
-   with the long form spanning both — not one narrow column hugging the left. */
-
-.settings-page {
-  max-width: 1180px;
-}
-
-.settings-grid {
+.settings-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--space-4);
+  grid-template-columns: 174px minmax(0, 1fr);
+  gap: 30px;
   align-items: start;
 }
-@media (min-width: 900px) {
-  .settings-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .settings-grid > .card-wide {
-    grid-column: 1 / -1;
-  }
+.settings-navigation {
+  display: grid;
+  gap: 5px;
+  position: sticky;
+  top: 108px;
 }
-
-.card {
-  background: var(--panel);
+.settings-navigation button {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  min-height: 43px;
+  padding: 0 13px;
+  text-align: left;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.settings-navigation button.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+.settings-navigation button:hover:not(.active) {
+  background: var(--panel-hover);
+  color: var(--text);
+}
+.settings-content {
+  min-width: 0;
+}
+.settings-panel {
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  padding: 28px;
+  border-radius: 12px;
+}
+.panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding-bottom: 25px;
+  margin-bottom: 27px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.panel-heading h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+.panel-heading p {
+  margin: 7px 0 0;
+  color: var(--faint);
+  font-size: 11px;
+  line-height: 1.8;
+}
+.connection-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: 5px;
+  color: var(--faint);
+  font-size: 10px;
+  white-space: nowrap;
 }
-
-/* -------------------------------------------------------------------- form
-   The field grid supplies the width discipline, so individual controls no
-   longer need max-width caps — every field fills its column. */
-
+.connection-badge i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.connection-badge.healthy {
+  color: var(--ok);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+.connection-badge.failed {
+  color: var(--danger);
+}
 .settings-form {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: var(--space-5) var(--space-6);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 24px;
   align-items: start;
 }
 .settings-form :deep(.el-form-item) {
   margin-bottom: 0;
+  min-width: 0;
 }
+.settings-form > .span-full,
 .settings-form :deep(.el-form-item.span-full) {
   grid-column: 1 / -1;
 }
-/* Hints belong under their control — inline hints wrap badly inside a grid. */
+.settings-form :deep(.el-form-item__label) {
+  margin-bottom: 9px;
+  font-size: 12px !important;
+  line-height: 1.5;
+}
+.settings-form :deep(.el-form-item__content) {
+  min-width: 0;
+  align-items: flex-start;
+}
+.settings-form :deep(.el-select),
+.settings-form :deep(.el-input) {
+  width: 100%;
+}
+.settings-form :deep(.el-input__wrapper),
+.settings-form :deep(.el-select__wrapper) {
+  background: var(--bg) !important;
+}
+.field-hint,
 .settings-form :deep(.field-hint) {
   display: block;
-  margin: var(--space-1) 0 0;
+  width: 100%;
+  font-size: 11px;
+  color: var(--faint);
+  line-height: 1.8;
+  margin: 7px 0 0;
 }
-
-.card-title {
-  font-weight: 600;
-  letter-spacing: var(--tracking-wide);
-}
-.ok {
-  color: var(--ok);
-}
-.err {
-  color: var(--danger);
-}
-.line {
-  margin: var(--space-2) 0;
-  font-size: var(--text-sm);
-  font-variant-numeric: tabular-nums;
-}
-.tip {
-  margin: 0;
-  font-size: var(--text-xs);
-  line-height: var(--leading-normal);
-}
-.field-hint {
-  margin-left: var(--space-3);
-  font-size: var(--text-xs);
-}
-.field-hint.block {
-  display: block;
-  margin: var(--space-2) 0 0;
-  margin-left: 0;
+.field-hint code {
+  font-size: 10px;
 }
 .providers-meta {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-3);
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 11px;
+}
+.providers-meta :deep(.el-button) {
+  font-size: 11px;
 }
 .warn-line {
-  margin: var(--space-2) 0 0;
-  font-size: var(--text-xs);
+  margin: 9px 0 0;
+  font-size: 10px;
+  line-height: 1.8;
   color: var(--danger);
-  line-height: var(--leading-snug);
 }
 .priority-block {
   width: 100%;
 }
 .priority-list {
   list-style: none;
-  margin: var(--space-3) 0 0;
+  margin: 13px 0 0;
   padding: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
   overflow: hidden;
 }
 .priority-list li {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
+  gap: 10px;
+  padding: 9px 11px;
   border-bottom: 1px solid var(--border-subtle);
-  background: var(--bg-elevated);
-  color: var(--text);
+  background: var(--bg);
 }
 .priority-list li:last-child {
-  border-bottom: none;
+  border-bottom: 0;
 }
 .pri-idx {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: var(--text-2xs);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  background: var(--accent-soft);
-  color: var(--accent);
+  width: 23px;
+  height: 23px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--faint);
   flex-shrink: 0;
 }
 .pri-name {
@@ -676,35 +1031,267 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--text-sm);
-  font-weight: 500;
-  color: var(--text);
+  font-size: 12px;
+  color: var(--text-soft);
 }
 .pri-actions {
-  display: inline-flex;
-  gap: 0;
-  flex-shrink: 0;
+  display: flex;
+  gap: 2px;
 }
 .pri-actions :deep(.el-button.is-text) {
-  color: var(--muted) !important;
-  min-width: 28px;
-  padding: var(--space-1) 6px;
+  padding: 3px 7px;
+  min-width: 27px;
 }
-.pri-actions :deep(.el-button.is-text:not(.is-disabled):hover) {
-  color: var(--accent) !important;
+.pri-actions :deep(.el-button.is-disabled) {
+  opacity: 0.35;
 }
-.pri-actions :deep(.el-button.is-text.is-disabled) {
-  color: var(--faint) !important;
-  opacity: 0.4;
+.directory-info {
+  display: flex;
+  gap: 12px;
+  padding: 17px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  margin-top: 27px;
+  color: var(--faint);
 }
-.pri-actions :deep(.el-button.is-text.el-button--danger) {
-  color: var(--danger) !important;
+.directory-info span {
+  display: block;
+  font-size: 10px;
+  margin-bottom: 4px;
 }
-@media (max-width: 700px) {
-  /* One column on phones; labels are already stacked (label-position="top"). */
+.directory-info code {
+  display: block;
+  font-size: 11px;
+  color: var(--text-soft);
+  overflow-wrap: anywhere;
+}
+.maintenance-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 26px;
+  margin-top: 26px;
+  border-top: 1px solid var(--border-subtle);
+}
+.maintenance-link h3 {
+  font-size: 13px;
+  margin: 0 0 5px;
+  font-weight: 500;
+}
+.maintenance-link p {
+  font-size: 11px;
+  color: var(--faint);
+  margin: 0;
+}
+.maintenance-link :deep(.el-button) {
+  flex-shrink: 0;
+  font-size: 11px;
+}
+.system-facts {
+  margin: 0;
+}
+.system-facts > div {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 12px;
+  gap: 16px;
+}
+.system-facts > div:first-child {
+  padding-top: 0;
+}
+.system-facts > div:last-child {
+  border-bottom: 0;
+}
+.system-facts dt {
+  color: var(--faint);
+}
+.system-facts dd {
+  margin: 0;
+  color: var(--text-soft);
+  overflow-wrap: anywhere;
+}
+.system-facts dd.ok,
+.ok {
+  color: var(--ok);
+}
+.system-facts dd.err,
+.err {
+  color: var(--danger);
+}
+.mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.connection-details {
+  margin-top: 20px;
+  font-size: 11px;
+}
+.connection-details summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  color: var(--muted);
+}
+.connection-details pre {
+  overflow-x: auto;
+  padding: 15px;
+  background: var(--bg);
+  border-radius: 7px;
+  color: var(--faint);
+  font-size: 10px;
+}
+.section-note {
+  margin: 27px 0 0;
+  padding-top: 21px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--faint);
+  font-size: 11px;
+  line-height: 1.9;
+}
+.save-bar {
+  position: sticky;
+  bottom: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 18px;
+  padding: 13px 18px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  box-shadow: var(--shadow-sm);
+  z-index: 5;
+}
+.save-bar > span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  color: var(--faint);
+}
+.save-bar > span.dirty {
+  color: var(--accent);
+}
+.save-bar i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.settings-loading {
+  display: grid;
+  gap: 17px;
+  padding: 30px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+}
+.settings-loading > div {
+  height: 38px;
+  background: var(--skeleton);
+  border-radius: 6px;
+  width: 70%;
+}
+.settings-loading > div:nth-child(2) {
+  width: 90%;
+}
+.settings-loading p {
+  font-size: 12px;
+  color: var(--faint);
+}
+.settings-error {
+  text-align: center;
+  color: var(--faint);
+  padding: 60px 20px;
+}
+.settings-error p {
+  margin-bottom: 25px;
+  font-size: 13px;
+}
+@media (max-width: 1100px) {
+  .settings-layout {
+    grid-template-columns: 145px minmax(0, 1fr);
+    gap: 20px;
+  }
+  .settings-panel {
+    padding: 23px;
+  }
   .settings-form {
     grid-template-columns: minmax(0, 1fr);
-    gap: var(--space-4);
+  }
+}
+@media (max-width: 860px) {
+  .save-bar {
+    bottom: calc(84px + env(safe-area-inset-bottom));
+  }
+}
+@media (max-width: 700px) {
+  .settings-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 19px;
+  }
+  .settings-navigation {
+    display: flex;
+    gap: 3px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    position: sticky;
+    top: 68px;
+    background: var(--bg);
+    padding: 6px 0;
+    z-index: 8;
+    margin: -4px 0 0;
+  }
+  .settings-navigation button {
+    flex-shrink: 0;
+    min-height: 40px;
+    padding: 0 11px;
+    gap: 7px;
+    font-size: 11px;
+  }
+  .settings-navigation button :deep(svg) {
+    width: 14px;
+    height: 14px;
+  }
+  .settings-panel {
+    padding: 20px 17px;
+  }
+  .panel-heading {
+    margin-bottom: 24px;
+    padding-bottom: 21px;
+    gap: 13px;
+  }
+  .panel-heading h2 {
+    font-size: 16px;
+  }
+  .panel-heading p {
+    font-size: 11px;
+  }
+  .field-hint,
+  .settings-form :deep(.field-hint) {
+    font-size: 11px;
+  }
+  .save-bar {
+    padding: 12px;
+  }
+  .save-bar > span {
+    font-size: 10px;
+  }
+  .save-bar :deep(.el-button) {
+    padding: 0 12px;
+    height: 40px;
+  }
+  .maintenance-link {
+    flex-wrap: wrap;
+  }
+  .system-facts > div {
+    grid-template-columns: 80px minmax(0, 1fr);
+    gap: 12px;
+    font-size: 11px;
   }
 }
 </style>

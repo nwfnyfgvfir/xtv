@@ -262,6 +262,20 @@ async def rescrape_media(
     if not item:
         raise HTTPException(404, "media not found")
     body = body or RescrapeIn()
+    source_url = (body.url or "").strip()
+    if source_url:
+        from urllib.parse import urlsplit
+        from app.config import get_settings
+
+        if get_settings().scrape_source != "stash":
+            raise HTTPException(400, "source URL scraping requires Stash")
+        try:
+            parsed = urlsplit(source_url)
+            valid_url = parsed.scheme in {"http", "https"} and bool(parsed.hostname)
+        except ValueError:
+            valid_url = False
+        if not valid_url:
+            raise HTTPException(400, "invalid source URL")
     if body.number is not None and str(body.number).strip():
         normalized = normalize_number(body.number)
         if not normalized:
@@ -270,7 +284,7 @@ async def rescrape_media(
         db.add(item)
         db.commit()
         db.refresh(item)
-    if not item.number:
+    if not item.number and not source_url:
         raise HTTPException(400, "no number; provide number to scrape")
     ok = await scrape_media_item(
         db,
@@ -278,9 +292,10 @@ async def rescrape_media(
         force=True,
         provider_override=body.provider,
         fallback_override=body.fallback,
+        url_override=source_url or None,
     )
     db.refresh(item)
-    if not ok and not item.scraped_at:
+    if not ok:
         raise HTTPException(502, "scrape failed or no results")
     item = (
         db.query(MediaItem)

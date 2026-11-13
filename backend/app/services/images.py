@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import ipaddress
 import json
@@ -21,6 +23,53 @@ _CACHE_MAX = 256
 _CACHE_TTL = 3600.0
 _DISK_LOCK = Lock()
 _MAX_BODY = 5 * 1024 * 1024
+_SCRAPED_IMAGE_EXTENSIONS = {
+    "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
+    "image/gif": "gif", "image/avif": "avif",
+}
+
+
+def scraped_image_path(name: str) -> Path | None:
+    if not re.fullmatch(r"[0-9a-f]{64}\.(?:jpg|png|webp|gif|avif)", name):
+        return None
+    from app.config import get_settings
+
+    return get_settings().data_dir_path / "scraped-images" / name
+
+
+def store_scraped_image(value: str | None) -> str | None:
+    """Persist Stash's inline raster images without embedding them in API payloads."""
+    if not value:
+        return None
+    if value.startswith(("http://", "https://", "/api/images/scraped/")):
+        return value
+    header, separator, encoded = value.partition(",")
+    if not separator or not header.startswith("data:") or not header.endswith(";base64"):
+        return None
+    extension = _SCRAPED_IMAGE_EXTENSIONS.get(header[5:-7].lower())
+    if not extension or len(encoded) > ((_MAX_BODY + 2) // 3) * 4:
+        return None
+    try:
+        body = base64.b64decode(encoded, validate=True)
+    except (ValueError, binascii.Error):
+        return None
+    if not body or len(body) > _MAX_BODY:
+        return None
+    name = f"{hashlib.sha256(body).hexdigest()}.{extension}"
+    path = scraped_image_path(name)
+    if path is None:
+        return None
+    try:
+        with _DISK_LOCK:
+            if not path.is_file():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                temporary = path.with_suffix(".tmp")
+                temporary.write_bytes(body)
+                temporary.replace(path)
+    except OSError:
+        logger.warning("Could not save a scraped image", exc_info=True)
+        return None
+    return f"/api/images/scraped/{name}"
 
 
 def site_proxy_url(url: str | None) -> str | None:
@@ -77,7 +126,7 @@ def rewrite_image_url(
         )
         return site_proxy_url(url)
 
-    if mode == "metatube" and provider and provider_id:
+    if mode == "metatube" and provider and provider_id and not provider.startswith("stash:"):
         from app.services.metatube import MetaTubeClient
 
         return MetaTubeClient().primary_image_url(

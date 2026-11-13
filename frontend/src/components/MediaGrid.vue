@@ -49,49 +49,41 @@ watch(
 <style scoped>
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(166px, 1fr));
-  gap: var(--space-6) var(--space-4);
+  grid-template-columns: repeat(auto-fill, minmax(164px, 1fr));
+  gap: 28px 20px;
 }
-@media (max-width: 640px) {
-  .grid {
-    grid-template-columns: repeat(3, 1fr);
-    gap: var(--space-4) var(--space-2);
-  }
-}
-@media (max-width: 380px) {
-  .grid {
-    grid-template-columns: repeat(3, 1fr);
-    gap: var(--space-3) 6px;
-  }
-}
-
-/* Empty state: teach, don't just announce emptiness. */
 .empty {
-  margin-top: var(--space-12);
-  padding: var(--space-12) var(--space-4);
-  text-align: center;
-  border-radius: var(--radius-lg);
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  min-height: 300px;
+  padding: 40px 24px;
   border: 1px dashed var(--border);
-  background: color-mix(in oklab, var(--panel) 55%, transparent);
+  border-radius: 12px;
+  text-align: center;
 }
 .empty-mark {
-  display: block;
-  font-family: var(--font-serif);
-  font-size: var(--text-4xl);
-  line-height: 1;
-  letter-spacing: var(--tracking-tight);
-  color: var(--accent);
+  font-family: var(--font-display);
+  font-size: 40px;
+  color: var(--faint);
+  letter-spacing: -0.08em;
   opacity: 0.5;
 }
 .empty-title {
-  margin: var(--space-4) 0 var(--space-1);
-  font-size: var(--text-md);
-  font-weight: 500;
-  color: var(--text);
+  margin: 16px 0 6px;
+  font-size: 16px;
+  color: var(--text-soft);
 }
 .empty-hint {
-  margin: 0 auto;
-  max-width: 42ch;
-  font-size: var(--text-sm);
+  margin: 0;
+  max-width: 36ch;
+  font-size: 12px;
+  line-height: 1.8;
+}
+@media (max-width: 640px) {
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px 14px;
+  }
 }
 </style>

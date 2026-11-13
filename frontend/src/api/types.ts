@@ -126,6 +126,7 @@ export interface Progress {
 }
 
 export type ImageProxyMode = 'site' | 'metatube' | 'external'
+export type ScrapeSource = 'metatube' | 'stash'
 
 export type TranslateProvider = 'google' | 'bing' | 'deepl' | 'ai'
 
@@ -140,6 +141,12 @@ export type MediaSort =
 export type ActorSort = 'media_count_desc' | 'debut_asc' | 'debut_desc'
 
 export interface Settings {
+  scrape_source?: ScrapeSource
+  stash_base_url?: string
+  stash_api_key_set?: boolean
+  stash_scraper?: string
+  stash_scraper_priority?: string[]
+  stash_fallback?: boolean
   metatube_base_url: string
   metatube_token_set: boolean
   metatube_provider?: string
@@ -166,6 +173,7 @@ export interface Settings {
   cors_origins: string
   auth_enabled?: boolean
   movie_providers?: string[]
+  movie_provider_labels?: Record<string, string>
   movie_providers_error?: string | null
   movie_providers_from_cache?: boolean
   extra: Record<string, string>
@@ -186,6 +194,8 @@ export interface ScanJob {
 export interface Health {
   status: string
   metatube?: { ok?: boolean; data?: unknown; error?: string } | null
+  stash?: { ok?: boolean; data?: unknown; error?: string } | null
+  scrape_source?: ScrapeSource
   auth_enabled?: boolean
   watcher?: {
     running?: boolean

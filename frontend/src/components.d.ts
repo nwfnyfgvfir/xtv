@@ -12,11 +12,11 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     ActorCard: typeof import('./components/ActorCard.vue')['default']
+    AppIcon: typeof import('./components/AppIcon.vue')['default']
     AppPagination: typeof import('./components/AppPagination.vue')['default']
     CoverPlaceholder: typeof import('./components/CoverPlaceholder.vue')['default']
     DirectoryPickerDialog: typeof import('./components/DirectoryPickerDialog.vue')['default']
     ElButton: typeof import('element-plus/es')['ElButton']
-    ElCard: typeof import('element-plus/es')['ElCard']
     ElCheckbox: typeof import('element-plus/es')['ElCheckbox']
     ElDialog: typeof import('element-plus/es')['ElDialog']
     ElDropdown: typeof import('element-plus/es')['ElDropdown']

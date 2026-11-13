@@ -78,7 +78,7 @@ export const getMedia = (id: number) => client.get<MediaDetail>(`/media/${id}`).
 
 export const rescrapeMedia = (
   id: number,
-  body?: { provider?: string; fallback?: boolean; number?: string },
+  body?: { provider?: string; fallback?: boolean; number?: string; url?: string },
 ) => client.post<MediaDetail>(`/media/${id}/rescrape`, body || {}).then((r) => r.data)
 
 export const translateMedia = (id: number) =>
@@ -144,6 +144,7 @@ export const getMovieProviders = () =>
   client
     .get<{
       movie_providers?: string[]
+      movie_provider_labels?: Record<string, string>
       count?: number
       data?: unknown
       from_cache?: boolean

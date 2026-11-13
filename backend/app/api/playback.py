@@ -217,6 +217,16 @@ def put_progress(
     )
 
 
+@router.get("/images/scraped/{name}")
+def scraped_image(name: str):
+    from app.services.images import scraped_image_path
+
+    path = scraped_image_path(name)
+    if path is None or not path.is_file():
+        raise HTTPException(404, "scraped image not found")
+    return FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+
 @router.get("/images/proxy")
 async def proxy_image(url: str = Query(..., min_length=8)):
     """Same-origin image proxy with SSRF guards, memory LRU and optional disk cache (no auth — for <img>)."""

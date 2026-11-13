@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from typing import Annotated, Any
@@ -13,15 +14,24 @@ from app.deps import require_auth
 from app.models import AppSetting
 from app.schemas import SettingsOut, SettingsUpdate
 from app.services.metatube import MetaTubeClient, MetaTubeError, parse_movie_provider_names
+from app.services.stash import StashClient
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 _PROVIDERS_CACHE_KEY = "metatube_movie_providers_cache"
+_STASH_CACHE_PREFIX = "stash_scrapers_cache:"
 _MAX_PRIORITY = 50
 _MAX_PROVIDER_NAME_LEN = 64
+_MAX_STASH_SCRAPER_ID_LEN = 256
 
 OVERRIDE_KEYS = {
+    "scrape_source",
+    "stash_base_url",
+    "stash_api_key",
+    "stash_scraper",
+    "stash_scraper_priority",
+    "stash_fallback",
     "metatube_base_url",
     "metatube_token",
     "metatube_provider",
@@ -56,7 +66,7 @@ def _db_map(db: Session) -> dict[str, str]:
     return {r.key: r.value for r in rows}
 
 
-def parse_priority_list(raw: str | list[str] | None) -> list[str]:
+def parse_priority_list(raw: str | list[str] | None, *, max_name_len: int = _MAX_PROVIDER_NAME_LEN) -> list[str]:
     """Parse provider priority from JSON string or list; invalid → []."""
     if raw is None:
         return []
@@ -76,7 +86,7 @@ def parse_priority_list(raw: str | list[str] | None) -> list[str]:
     seen: set[str] = set()
     for item in data:
         name = str(item).strip()
-        if not name or len(name) > _MAX_PROVIDER_NAME_LEN or name in seen:
+        if not name or len(name) > max_name_len or name in seen:
             continue
         seen.add(name)
         out.append(name)
@@ -85,10 +95,10 @@ def parse_priority_list(raw: str | list[str] | None) -> list[str]:
     return out
 
 
-def _sanitize_priority(value: list[Any] | None) -> list[str]:
+def _sanitize_priority(value: list[Any] | None, *, max_name_len: int = _MAX_PROVIDER_NAME_LEN) -> list[str]:
     if not value:
         return []
-    return parse_priority_list(value)
+    return parse_priority_list(value, max_name_len=max_name_len)
 
 
 def apply_persisted_overrides() -> None:
@@ -110,6 +120,13 @@ def apply_persisted_overrides() -> None:
 
 def _apply_overrides_to_runtime(db_map: dict[str, str]) -> None:
     s = get_settings()
+    if db_map.get("scrape_source") in {"metatube", "stash"}:
+        s.scrape_source = db_map["scrape_source"]
+    for key in ("stash_base_url", "stash_api_key", "stash_scraper", "stash_scraper_priority"):
+        if key in db_map:
+            setattr(s, key, db_map[key] or "")
+    if "stash_fallback" in db_map:
+        s.stash_fallback = db_map["stash_fallback"].lower() in _BOOL_TRUE
     if "metatube_base_url" in db_map and db_map["metatube_base_url"]:
         s.metatube_base_url = db_map["metatube_base_url"]
     if "metatube_token" in db_map:
@@ -204,6 +221,39 @@ async def _providers_with_status(db: Session) -> tuple[list[str], str | None, bo
         return [], err, False
 
 
+async def _stash_providers_with_status(db: Session) -> tuple[list[str], dict[str, str], str | None, bool]:
+    s = get_settings()
+    fingerprint = hashlib.sha256(f"{s.stash_base_url}\0{s.stash_api_key}".encode()).hexdigest()
+    cache_key = f"{_STASH_CACHE_PREFIX}{fingerprint}"
+    try:
+        scrapers = await StashClient(s).list_scrapers()
+        labels = {
+            row["id"]: row["name"] + ("（仅 URL）" if not {"NAME", "FRAGMENT"}.intersection(row["types"]) else "")
+            for row in scrapers
+        }
+    except Exception as exc:  # noqa: BLE001
+        error = str(exc)[:300] or "Stash scrapers unavailable"
+        row = db.get(AppSetting, cache_key)
+        labels = {}
+        if row:
+            try:
+                data = json.loads(row.value)
+                if isinstance(data, dict):
+                    labels = {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str)}
+            except ValueError:
+                pass
+        return list(labels), labels, error, bool(labels)
+    try:
+        row = db.get(AppSetting, cache_key) or AppSetting(key=cache_key, value="")
+        row.value = json.dumps(labels, ensure_ascii=False)
+        db.add(row)
+        db.commit()
+    except Exception:  # noqa: BLE001
+        db.rollback()
+        logger.debug("Failed to cache Stash scrapers", exc_info=True)
+    return list(labels), labels, None, False
+
+
 @router.get("", response_model=SettingsOut)
 async def get_app_settings(
     _: Annotated[dict, Depends(require_auth)],
@@ -217,7 +267,7 @@ async def get_app_settings(
     extra = {
         k: v
         for k, v in db_map.items()
-        if k not in OVERRIDE_KEYS and k != _PROVIDERS_CACHE_KEY
+        if k not in OVERRIDE_KEYS and k != _PROVIDERS_CACHE_KEY and not k.startswith(_STASH_CACHE_PREFIX)
     }
     provider = db_map.get("metatube_provider", s.metatube_provider)
     priority = parse_priority_list(
@@ -273,8 +323,19 @@ async def get_app_settings(
         if local_cache_raw is not None
         else bool(s.image_local_cache)
     )
-    movie_providers, providers_error, from_cache = await _providers_with_status(db)
+    labels: dict[str, str] = {}
+    source = "stash" if s.scrape_source == "stash" else "metatube"
+    if source == "stash":
+        movie_providers, labels, providers_error, from_cache = await _stash_providers_with_status(db)
+    else:
+        movie_providers, providers_error, from_cache = await _providers_with_status(db)
     return SettingsOut(
+        scrape_source=source,
+        stash_base_url=s.stash_base_url,
+        stash_api_key_set=bool(s.stash_api_key.strip()),
+        stash_scraper=s.stash_scraper,
+        stash_scraper_priority=parse_priority_list(s.stash_scraper_priority, max_name_len=_MAX_STASH_SCRAPER_ID_LEN),
+        stash_fallback=s.stash_fallback,
         metatube_base_url=db_map.get("metatube_base_url") or s.metatube_base_url,
         metatube_token_set=bool(token),
         metatube_provider=provider or "",
@@ -302,6 +363,7 @@ async def get_app_settings(
         cors_origins=s.cors_origins,
         auth_enabled=s.auth_enabled,
         movie_providers=movie_providers,
+        movie_provider_labels=labels,
         movie_providers_error=providers_error,
         movie_providers_from_cache=from_cache,
         extra=extra,
@@ -319,8 +381,12 @@ async def update_app_settings(
     for key, value in data.items():
         if value is None:
             continue
-        if key == "metatube_provider_priority":
-            store_val = json.dumps(_sanitize_priority(value if isinstance(value, list) else []), ensure_ascii=False)
+        if key in {"metatube_provider_priority", "stash_scraper_priority"}:
+            max_length = _MAX_STASH_SCRAPER_ID_LEN if key == "stash_scraper_priority" else _MAX_PROVIDER_NAME_LEN
+            store_val = json.dumps(
+                _sanitize_priority(value if isinstance(value, list) else [], max_name_len=max_length),
+                ensure_ascii=False,
+            )
         elif isinstance(value, list):
             store_val = json.dumps(value, ensure_ascii=False)
         elif isinstance(value, bool):
@@ -335,7 +401,7 @@ async def update_app_settings(
         db.add(row)
     if extra:
         for k, v in extra.items():
-            if k == _PROVIDERS_CACHE_KEY:
+            if k == _PROVIDERS_CACHE_KEY or k.startswith(_STASH_CACHE_PREFIX):
                 continue
             row = db.get(AppSetting, k)
             if row is None:
@@ -353,6 +419,14 @@ async def list_movie_providers(
     _: Annotated[dict, Depends(require_auth)],
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
+    if get_settings().scrape_source == "stash":
+        names, labels, error, from_cache = await _stash_providers_with_status(db)
+        if error and not from_cache:
+            raise HTTPException(502, error)
+        return {
+            "movie_providers": names, "movie_provider_labels": labels,
+            "count": len(names), "from_cache": from_cache, "error": error,
+        }
     try:
         data = await MetaTubeClient().list_providers()
     except MetaTubeError as exc:

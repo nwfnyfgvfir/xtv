@@ -29,7 +29,7 @@ const layout = computed(() =>
     : 'total, prev, pager, next, jumper',
 )
 
-const pagerCount = computed(() => (isNarrow.value ? 3 : 7))
+const pagerCount = computed(() => (isNarrow.value ? 5 : 7))
 
 function onChange(p: number) {
   if (p === props.page) return

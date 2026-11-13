@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import VideoPlayer from '@/components/VideoPlayer.vue'
 import CoverPlaceholder from '@/components/CoverPlaceholder.vue'
+import AppIcon from '@/components/AppIcon.vue'
 import ExternalPlayersBar from '@/components/ExternalPlayersBar.vue'
 import {
   deleteMedia,
@@ -37,6 +38,9 @@ const providers = ref<string[]>([])
 const scrapeProvider = ref('')
 const scrapeFallback = ref(true)
 const scrapeNumber = ref('')
+const scrapeUrl = ref('')
+const useStash = ref(false)
+const providerLabels = ref<Record<string, string>>({})
 const playerWrap = ref<HTMLElement | null>(null)
 const renameVisible = ref(false)
 const renameInput = ref('')
@@ -59,7 +63,10 @@ const isChineseSub = computed(
   () => item.value?.subtitle_flag === 'C' || tags.value.includes('中文字幕'),
 )
 const canRescrape = computed(() =>
-  Boolean((scrapeNumber.value || item.value?.number || '').trim()),
+  Boolean(
+    (scrapeNumber.value || item.value?.number || '').trim() ||
+    (useStash.value && scrapeUrl.value.trim()),
+  ),
 )
 const isLocal = computed(() => item.value?.source_type === 'local')
 const canDelete = computed(() => Boolean(item.value))
@@ -93,17 +100,20 @@ async function load() {
 async function loadProviders() {
   try {
     const s = await getSettings()
+    useStash.value = s.scrape_source === 'stash'
+    providerLabels.value = s.movie_provider_labels || {}
     const list = [...(s.movie_providers || [])]
-    const pri = s.metatube_provider_priority || []
+    const pri = (useStash.value ? s.stash_scraper_priority : s.metatube_provider_priority) || []
+    const preferred = (useStash.value ? s.stash_scraper : s.metatube_provider) || ''
     for (const p of pri) {
       if (p && !list.includes(p)) list.push(p)
     }
-    if (s.metatube_provider && !list.includes(s.metatube_provider)) {
-      list.push(s.metatube_provider)
+    if (preferred && !list.includes(preferred)) {
+      list.push(preferred)
     }
     providers.value = list
-    scrapeProvider.value = pri[0] || s.metatube_provider || ''
-    scrapeFallback.value = s.metatube_fallback !== false
+    scrapeProvider.value = pri[0] || preferred
+    scrapeFallback.value = (useStash.value ? s.stash_fallback : s.metatube_fallback) !== false
   } catch {
     /* ignore */
   }
@@ -125,8 +135,9 @@ async function onPlay() {
 
 async function onRescrape() {
   const number = (scrapeNumber.value || item.value?.number || '').trim()
-  if (!number) {
-    ElMessage.warning('请先填写番号')
+  const url = useStash.value ? scrapeUrl.value.trim() : ''
+  if (!number && !url) {
+    ElMessage.warning(useStash.value ? '请填写番号或来源 URL' : '请先填写番号')
     return
   }
   scrapeLoading.value = true
@@ -136,6 +147,7 @@ async function onRescrape() {
       provider: scrapeProvider.value,
       fallback: scrapeFallback.value,
       number,
+      url: url || undefined,
     })
     syncScrapeNumber()
     imgFailed.value = false
@@ -253,24 +265,29 @@ watch(() => props.id, load)
 </script>
 
 <template>
-  <div class="page">
+  <div class="page detail-page">
     <div class="top-actions">
       <button type="button" class="back-btn" @click="goBack">
-        <svg class="back-ico" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M15 5.5 8.5 12 15 18.5" />
-        </svg>
-        <span>返回</span>
+        <AppIcon name="back" :size="17" />返回上一页
       </button>
+      <span v-if="item" class="detail-state"
+        ><span :class="{ ready: !!item.scraped_at }" />{{
+          item.scraped_at ? '已刮削' : '待补全信息'
+        }}</span
+      >
     </div>
-    <div v-if="loading && !item" class="muted">加载中…</div>
-    <div v-else-if="item" class="detail">
-      <div class="left">
+    <div v-if="loading && !item" class="detail-loading" role="status">
+      <div class="loading-block" />
+      <p>正在载入影片信息…</p>
+    </div>
+    <template v-else-if="item">
+      <section class="detail" aria-label="影片信息与播放">
         <div class="cover-wrap">
           <img
             v-if="showImage"
             class="cover"
             :src="cover"
-            :alt="item.title || ''"
+            :alt="item.title || item.filename"
             @error="imgFailed = true"
           />
           <CoverPlaceholder
@@ -280,581 +297,831 @@ watch(() => props.id, load)
             :title="item.title"
             :filename="item.filename"
           />
-          <span v-if="isChineseSub" class="sub-badge">中字</span>
+          <span v-if="isChineseSub" class="sub-badge">中文字幕</span>
         </div>
-      </div>
-      <div class="right">
-        <div class="number num">{{ item.number || '未知番号' }}</div>
-        <h1>{{ item.title || item.filename }}</h1>
-        <hr class="title-rule" />
-        <p class="muted meta-line">
-          <span v-if="item.provider">{{ item.provider }}</span>
-          <span v-if="item.release_date"> · {{ item.release_date }}</span>
-          <span v-if="item.studio"> · {{ item.studio }}</span>
-          <span v-if="item.runtime"> · {{ item.runtime }} 分钟</span>
-          <span v-if="isLocal && fileSizeLabel"> · {{ fileSizeLabel }}</span>
-          <span> · {{ item.source_type }}</span>
-        </p>
-        <div class="btns">
-          <button
-            type="button"
-            class="btn-play"
-            :disabled="playLoading"
-            :class="{ loading: playLoading }"
-            @click="onPlay"
-          >
-            <span v-if="playLoading" class="btn-spin" aria-hidden="true" />
-            <svg v-else class="btn-ico" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-              <path fill="currentColor" d="M8 5.14v14l11-7-11-7z" />
-            </svg>
-            <span>{{ playLoading ? '准备中…' : '播放' }}</span>
-          </button>
-          <button
-            type="button"
-            class="btn-fav"
-            :class="{ on: item.favorited, loading: favLoading }"
-            :disabled="favLoading"
-            :aria-pressed="item.favorited"
-            @click="onToggleFav"
-          >
-            <span v-if="favLoading" class="btn-spin dark" aria-hidden="true" />
-            <svg v-else class="btn-ico" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-              <path
-                v-if="item.favorited"
-                fill="currentColor"
-                d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"
-              />
-              <path
-                v-else
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.8"
-                d="M12.1 8.64l-.1.1-.11-.11C10.14 6.6 7.1 6.48 5.4 8.2c-1.7 1.72-1.6 4.46.2 6.06L12 20.5l6.4-6.24c1.8-1.6 1.9-4.34.2-6.06-1.7-1.72-4.74-1.6-6.5.44z"
-              />
-            </svg>
-            <span>{{ item.favorited ? '已收藏' : '收藏' }}</span>
-          </button>
-          <el-button
-            plain
-            size="large"
-            class="btn-rename"
-            :disabled="renameLoading"
-            @click="openRename"
-          >
-            重命名
-          </el-button>
-          <el-button
-            v-if="canDelete"
-            type="danger"
-            plain
-            size="large"
-            class="btn-delete"
-            :loading="deleteLoading"
-            :disabled="deleteLoading"
-            @click="onDelete"
-          >
-            {{ deleteButtonLabel }}
-          </el-button>
-        </div>
-        <ExternalPlayersBar
-          :media-id="item.id"
-          :name="item.filename || item.number || item.title || 'video'"
-          :play="play"
-          @play-resolved="play = $event"
-        />
-        <div class="scrape-row">
-          <el-input
-            v-model="scrapeNumber"
-            class="scrape-number"
-            clearable
-            maxlength="64"
-            placeholder="番号"
-            :disabled="scrapeLoading"
-          />
-          <el-select
-            v-model="scrapeProvider"
-            class="scrape-provider field-sm"
-            clearable
-            filterable
-            allow-create
-            default-first-option
-            placeholder="刮削源（自动）"
-          >
-            <el-option label="自动" value="" />
-            <el-option v-for="p in providers" :key="p" :label="p" :value="p" />
-          </el-select>
-          <el-switch v-model="scrapeFallback" active-text="fallback" class="scrape-fallback" />
-          <el-button
-            class="scrape-btn"
-            :loading="scrapeLoading"
-            :disabled="!canRescrape || translateLoading"
-            @click="onRescrape"
-          >
-            重新刮削
-          </el-button>
-          <el-button
-            class="scrape-btn translate-btn"
-            :loading="translateLoading"
-            :disabled="!canTranslate || scrapeLoading"
-            @click="onTranslate"
-          >
-            翻译
-          </el-button>
-        </div>
-
-        <el-dialog v-model="renameVisible" title="重命名" :width="420" center>
-          <el-input
-            v-model="renameInput"
-            placeholder="新文件名（保留原扩展名）"
-            clearable
-          />
-          <template #footer>
-            <el-button @click="renameVisible = false">取消</el-button>
-            <el-button type="primary" :loading="renameLoading" @click="doRename">
-              确认重命名
-            </el-button>
-          </template>
-        </el-dialog>
-
-        <div v-if="tags.length" class="tags" role="list" aria-label="标签">
-          <span
-            v-for="t in tags"
-            :key="t"
-            class="tag"
-            :class="{ accent: t === '中文字幕' || t === '中字' }"
-            role="listitem"
-          >{{ t }}</span>
-        </div>
-        <p v-if="item.plot" class="plot">{{ item.plot }}</p>
-        <div v-if="item.actors?.length" class="actors">
-          <h3>演员</h3>
-          <div class="actor-list">
-            <button
-              v-for="a in item.actors"
-              :key="a.id"
-              type="button"
-              class="actor"
-              @click="router.push(`/actors/${a.id}`)"
+        <div class="hero-info">
+          <div class="media-kicker">
+            <AppIcon name="film" :size="15" /><span class="number">{{
+              item.number || '未知番号'
+            }}</span
+            ><span class="media-type">{{
+              item.source_type === 'local' ? '本地视频' : 'STRM 直链'
+            }}</span>
+          </div>
+          <h1 class="detail-title">{{ item.title || item.filename }}</h1>
+          <div class="meta-line">
+            <span v-if="item.score != null" class="rating"
+              ><AppIcon name="star" :size="14" />{{ item.score.toFixed(1) }}</span
             >
-              <img v-if="a.image_url" :src="a.image_url" :alt="a.name" />
-              <span v-else class="a-mono" :style="monogramStyle(a.name)">
-                {{ monogramChar({ title: a.name }) }}
-              </span>
-              <span>{{ a.name }}</span>
+            <span v-if="item.release_date">{{ item.release_date }}</span>
+            <span v-if="item.runtime"
+              ><AppIcon name="clock" :size="13" />{{ item.runtime }} 分钟</span
+            >
+            <span v-if="item.studio">{{ item.studio }}</span>
+          </div>
+          <div v-if="tags.length" class="tags" role="list" aria-label="影片标签">
+            <span
+              v-for="tag in tags"
+              :key="tag"
+              class="tag"
+              :class="{ accent: tag === '中文字幕' || tag === '中字' }"
+              role="listitem"
+              >{{ tag }}</span
+            >
+          </div>
+          <div class="primary-actions">
+            <button type="button" class="btn-play" :disabled="playLoading" @click="onPlay">
+              <span v-if="playLoading" class="btn-spin" aria-hidden="true" /><AppIcon
+                v-else
+                name="play"
+                :size="18"
+              /><span>{{ playLoading ? '准备中…' : '立即播放' }}</span>
+            </button>
+            <button
+              type="button"
+              class="btn-fav"
+              :class="{ on: item.favorited }"
+              :disabled="favLoading"
+              :aria-pressed="item.favorited"
+              @click="onToggleFav"
+            >
+              <span v-if="favLoading" class="btn-spin" aria-hidden="true" /><AppIcon
+                v-else
+                name="heart"
+                :size="18"
+              /><span>{{ item.favorited ? '已收藏' : '收藏影片' }}</span>
             </button>
           </div>
+          <ExternalPlayersBar
+            :media-id="item.id"
+            :name="item.filename || item.number || item.title || 'video'"
+            :play="play"
+            @play-resolved="play = $event"
+          />
         </div>
-        <p class="muted path">{{ item.path }}</p>
-      </div>
-    </div>
+      </section>
 
-    <div v-if="playing && play" ref="playerWrap" class="player-wrap">
-      <VideoPlayer
-        :media-id="Number(id)"
-        :src="play.play_url"
-        :subtitles="play.subtitles || []"
-        :autoplay="true"
-      />
-      <p class="muted">播放类型: {{ play.kind }}</p>
+      <section v-if="playing && play" ref="playerWrap" class="player-wrap" aria-label="视频播放器">
+        <div class="section-heading">
+          <h2>正在播放</h2>
+          <span>{{ play.kind === 'local' ? '本地播放' : '直链播放' }}</span>
+        </div>
+        <VideoPlayer
+          :media-id="Number(id)"
+          :src="play.play_url"
+          :subtitles="play.subtitles || []"
+          :autoplay="true"
+        />
+      </section>
+
+      <div class="detail-content">
+        <div class="editorial">
+          <section v-if="item.plot" class="content-section">
+            <h2>剧情简介</h2>
+            <p class="plot">{{ item.plot }}</p>
+          </section>
+          <section v-if="item.actors?.length" class="content-section actors">
+            <div class="section-heading">
+              <h2>出演演员</h2>
+              <span>{{ item.actors.length }} 位</span>
+            </div>
+            <div class="actor-list">
+              <button
+                v-for="actor in item.actors"
+                :key="actor.id"
+                type="button"
+                class="actor"
+                @click="router.push(`/actors/${actor.id}`)"
+              >
+                <img
+                  v-if="actor.image_url"
+                  :src="actor.image_url"
+                  :alt="actor.name"
+                  loading="lazy"
+                />
+                <span v-else class="a-mono" :style="monogramStyle(actor.name)">{{
+                  monogramChar({ title: actor.name })
+                }}</span>
+                <span>{{ actor.name }}</span>
+              </button>
+            </div>
+          </section>
+          <p v-if="!item.plot && !item.actors?.length" class="no-details">
+            暂时没有更多介绍，可在右侧管理区重新刮削影片信息。
+          </p>
+        </div>
+
+        <aside class="file-panel" aria-label="文件信息与管理">
+          <h2>媒体信息</h2>
+          <dl class="file-facts">
+            <div>
+              <dt>刮削来源</dt>
+              <dd>{{ item.provider || '尚未刮削' }}</dd>
+            </div>
+            <div>
+              <dt>文件格式</dt>
+              <dd>{{ item.filename.split('.').pop()?.toUpperCase() || '—' }}</dd>
+            </div>
+            <div v-if="isLocal && fileSizeLabel">
+              <dt>文件大小</dt>
+              <dd>{{ fileSizeLabel }}</dd>
+            </div>
+          </dl>
+          <div class="file-path">
+            <span>文件路径</span>
+            <p>{{ item.path }}</p>
+          </div>
+          <details class="maintenance">
+            <summary>
+              <AppIcon name="settings" :size="17" /><span
+                >管理与刮削<small>更新信息、翻译与文件操作</small></span
+              ><AppIcon name="down" class="disclosure-arrow" :size="16" />
+            </summary>
+            <div class="maintenance-content">
+              <div class="scrape-row">
+                <label v-if="useStash" class="management-field"
+                  >来源 URL<el-input
+                    v-model="scrapeUrl"
+                    clearable
+                    maxlength="2048"
+                    placeholder="可选，由 Stash 自动匹配刮削器"
+                    aria-label="刮削来源 URL"
+                    :disabled="scrapeLoading"
+                /></label>
+                <label class="management-field"
+                  >影片番号<el-input
+                    v-model="scrapeNumber"
+                    clearable
+                    maxlength="64"
+                    placeholder="填写或修改番号"
+                    aria-label="影片番号"
+                    :disabled="scrapeLoading"
+                /></label>
+                <div class="management-field">
+                  <span>刮削器</span
+                  ><el-select
+                    v-model="scrapeProvider"
+                    clearable
+                    filterable
+                    allow-create
+                    default-first-option
+                    placeholder="自动选择"
+                    aria-label="刮削器"
+                    :disabled="useStash && !!scrapeUrl.trim()"
+                    ><el-option label="自动" value="" /><el-option
+                      v-for="provider in providers"
+                      :key="provider"
+                      :label="providerLabels[provider] || provider"
+                      :value="provider"
+                  /></el-select>
+                </div>
+                <el-switch
+                  v-model="scrapeFallback"
+                  :disabled="useStash && !!scrapeUrl.trim()"
+                  active-text="失败时尝试其他源"
+                  aria-label="刮削失败时尝试其他源"
+                />
+                <div class="maintenance-actions">
+                  <el-button
+                    :loading="scrapeLoading"
+                    :disabled="!canRescrape || translateLoading"
+                    @click="onRescrape"
+                    ><AppIcon name="refresh" :size="14" />重新刮削</el-button
+                  ><el-button
+                    :loading="translateLoading"
+                    :disabled="!canTranslate || scrapeLoading"
+                    @click="onTranslate"
+                    ><AppIcon name="translate" :size="14" />翻译</el-button
+                  >
+                </div>
+              </div>
+              <div class="file-actions">
+                <el-button :disabled="renameLoading" @click="openRename">重命名文件</el-button
+                ><el-button
+                  v-if="canDelete"
+                  type="danger"
+                  plain
+                  :loading="deleteLoading"
+                  :disabled="deleteLoading"
+                  @click="onDelete"
+                  >{{ deleteButtonLabel }}</el-button
+                >
+              </div>
+            </div>
+          </details>
+        </aside>
+      </div>
+
+      <el-dialog v-model="renameVisible" title="重命名文件" width="min(440px, 92vw)">
+        <p class="dialog-help">修改文件名，扩展名 {{ renameExt || '（无）' }} 将保持不变。</p>
+        <el-input
+          v-model="renameInput"
+          placeholder="新文件名"
+          aria-label="新文件名"
+          :disabled="renameLoading"
+          clearable
+          @keyup.enter="doRename"
+        />
+        <template #footer
+          ><el-button @click="renameVisible = false">取消</el-button
+          ><el-button type="primary" :loading="renameLoading" @click="doRename"
+            >确认重命名</el-button
+          ></template
+        >
+      </el-dialog>
+    </template>
+    <div v-else class="detail-empty">
+      <AppIcon name="film" :size="36" />
+      <h2>暂时无法加载影片</h2>
+      <p>可以重新尝试，或返回媒体库查看其他影片。</p>
+      <el-button @click="load">重新加载</el-button>
     </div>
   </div>
 </template>
-
 <style scoped>
 .top-actions {
-  margin: 0 0 var(--space-5);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 30px;
 }
 .back-btn {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
-  border: 1px solid var(--border);
-  background: var(--panel);
+  gap: 8px;
+  border: 0;
+  background: none;
   color: var(--muted);
-  border-radius: var(--radius-full);
-  padding: 0 var(--space-4) 0 var(--space-3);
-  font-size: var(--text-sm);
-  font-weight: 500;
-  height: 36px;
+  padding: 4px 0;
+  min-height: 32px;
   cursor: pointer;
-  transition:
-    color var(--dur-2) var(--ease-out),
-    border-color var(--dur-2) var(--ease-out),
-    background-color var(--dur-2) var(--ease-out);
+  font-size: 12px;
 }
 .back-btn:hover {
   color: var(--accent);
-  border-color: var(--accent-line);
-  background: var(--panel-hover);
 }
-.back-ico {
-  width: 16px;
-  height: 16px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+.detail-state {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  color: var(--faint);
+  font-size: 11px;
 }
-
+.detail-state > span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+.detail-state > span.ready {
+  background: var(--accent);
+}
 .detail {
   display: grid;
-  grid-template-columns: minmax(190px, 268px) 1fr;
-  gap: var(--space-8);
+  grid-template-columns: minmax(210px, 280px) minmax(0, 1fr);
+  gap: clamp(28px, 3vw, 50px);
   align-items: start;
+  padding-bottom: 40px;
+  border-bottom: 1px solid var(--border-subtle);
 }
 .cover-wrap {
   position: relative;
+  border-radius: 12px;
+  overflow: hidden;
+  aspect-ratio: 3 / 4;
+  background: var(--bg-elevated);
 }
 .cover {
   width: 100%;
-  border-radius: var(--radius-md);
-  box-shadow:
-    var(--shadow-lg),
-    0 0 0 1px var(--border-subtle);
-  display: block;
-  background: var(--bg-elevated);
+  height: 100%;
+  object-fit: contain;
 }
 .sub-badge {
   position: absolute;
-  top: var(--space-3);
-  right: var(--space-3);
-  font-size: var(--text-2xs);
-  font-weight: 700;
-  letter-spacing: var(--tracking-wide);
-  padding: 3px 8px;
-  border-radius: var(--radius-sm);
-  background: var(--accent);
-  color: var(--on-accent);
+  top: 12px;
+  left: 12px;
+  padding: 4px 9px;
+  background: #0d231dd9;
+  color: #bef6dc;
+  border-radius: 5px;
+  font-size: 11px;
 }
-
-/* The 番号 is the film's code — give it title-card treatment. */
-.number {
+.hero-info {
+  min-width: 0;
+  padding-top: 8px;
+}
+.media-kicker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   color: var(--accent);
-  font-size: var(--text-lg);
+}
+.number {
+  font-family: var(--font-mono);
+  font-size: 13px;
   font-weight: 600;
-  letter-spacing: var(--tracking-wider);
+  letter-spacing: 0.04em;
 }
-h1 {
-  margin: var(--space-2) 0 0;
-  font-size: var(--text-2xl);
-  line-height: var(--leading-tight);
-  letter-spacing: var(--tracking-tight);
-  font-weight: 500;
-  text-wrap: balance;
+.media-type {
+  font-size: 10px;
+  color: var(--faint);
+  border: 1px solid var(--border);
+  padding: 1px 7px;
+  border-radius: 4px;
+  margin-left: 6px;
 }
-.title-rule {
-  height: 1px;
-  border: 0;
-  margin: var(--space-4) 0;
-  background: linear-gradient(90deg, var(--accent-line), var(--border-subtle) 28%, transparent);
+.detail-title {
+  margin: 17px 0 19px;
+  font-size: clamp(22px, 2.1vw, 31px);
+  font-weight: 600;
+  line-height: 1.55;
+  letter-spacing: -0.025em;
+  text-wrap: pretty;
+  overflow-wrap: anywhere;
 }
 .meta-line {
-  margin: 0;
-  font-size: var(--text-sm);
-  font-variant-numeric: tabular-nums;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  color: var(--muted);
+  font-size: 12px;
 }
-.btns {
+.meta-line > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.rating {
+  color: var(--warning);
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+.rating :deep(svg) {
+  fill: currentColor;
+}
+.tags {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-3);
-  margin: var(--space-5) 0 var(--space-4);
+  gap: 7px;
+  margin: 23px 0 0;
+}
+.tag {
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-size: 10px;
+  padding: 3px 9px;
+}
+.tag.accent {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent-line);
+}
+.primary-actions {
+  display: flex;
   align-items: center;
+  gap: 11px;
+  margin: 28px 0 24px;
 }
 .btn-play,
 .btn-fav {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: var(--space-2);
-  height: 44px;
-  padding: 0 var(--space-6);
-  border-radius: var(--radius-full);
-  font-size: 0.875rem; /* 14px — matches .el-button--large */
-  font-weight: 600;
-  letter-spacing: var(--tracking-wide);
-  cursor: pointer;
+  gap: 10px;
+  min-height: 46px;
+  padding: 0 26px;
+  border-radius: 7px;
   border: 1px solid transparent;
-  transition:
-    transform var(--dur-2) var(--ease-out),
-    box-shadow var(--dur-2) var(--ease-out),
-    border-color var(--dur-2) var(--ease-out),
-    background-color var(--dur-2) var(--ease-out),
-    color var(--dur-2) var(--ease-out);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
 }
-/* Gold is scarce: the play button is the one saturated element on this page. */
 .btn-play {
   background: var(--accent);
   color: var(--on-accent);
-  box-shadow: var(--shadow-sm);
-  min-width: 128px;
+}
+.btn-play :deep(svg) {
+  fill: currentColor;
+  stroke-width: 1;
 }
 .btn-play:hover:not(:disabled) {
   background: var(--accent-hover);
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-md);
 }
-.btn-play:active:not(:disabled) {
-  background: var(--accent-press);
-  transform: translateY(0);
-}
-.btn-play:disabled {
-  opacity: 0.7;
-  cursor: wait;
-}
-
 .btn-fav {
-  background: var(--panel);
-  color: var(--text);
-  border-color: var(--border);
-  min-width: 120px;
+  background: transparent;
+  color: var(--text-soft);
+  border-color: var(--border-strong);
 }
-.btn-fav:hover:not(:disabled) {
-  border-color: var(--accent-line);
-  color: var(--accent);
-  background: var(--panel-hover);
-}
+.btn-fav:hover,
 .btn-fav.on {
   color: var(--accent);
   border-color: var(--accent-line);
   background: var(--accent-soft);
 }
+.btn-fav.on :deep(svg) {
+  fill: currentColor;
+}
+.btn-play:disabled,
 .btn-fav:disabled {
-  opacity: 0.7;
+  opacity: 0.6;
   cursor: wait;
-}
-/* Rename / delete now inherit the shared .el-button--large sizing. */
-.btn-rename,
-.btn-delete {
-  min-width: 104px;
-}
-.btn-ico {
-  display: block;
-  flex-shrink: 0;
 }
 .btn-spin {
   width: 16px;
   height: 16px;
-  border: 2px solid color-mix(in oklab, var(--on-accent) 30%, transparent);
-  border-top-color: var(--on-accent);
+  border: 2px solid currentColor;
+  border-right-color: transparent;
   border-radius: 50%;
-  animation: btn-rotate 0.7s linear infinite;
-  flex-shrink: 0;
+  animation: spin 0.75s linear infinite;
 }
-.btn-spin.dark {
-  border-color: color-mix(in oklab, var(--accent) 30%, transparent);
-  border-top-color: var(--accent);
-}
-@keyframes btn-rotate {
+@keyframes spin {
   to {
     transform: rotate(360deg);
   }
 }
-.scrape-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  align-items: center;
-  margin-bottom: var(--space-4);
+.hero-info :deep(.external-players) {
+  padding: 16px 0 0;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  background: transparent;
+  border-radius: 0;
+  margin: 0;
 }
-.scrape-number {
-  width: 148px;
-  flex: 0 0 148px;
+.hero-info :deep(.ep-toolbar) {
+  gap: 8px;
 }
-.scrape-provider {
-  min-width: 140px;
-  /* Provider names are short (JavBus / FANZA / MetaTube), so the width cap
-     comes from the shared .field-sm utility — which the global mobile rule
-     releases to full width so this row stays uniform on phones. */
-  flex: 0 1 220px;
+.hero-info :deep(.ep-label) {
+  font-size: 11px;
+  letter-spacing: 0;
+  margin-right: auto;
 }
-.tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  margin: var(--space-1) 0 var(--space-5);
+.hero-info :deep(.ep-action),
+.hero-info :deep(.ep-toggle) {
+  border: 0;
+  background: transparent;
+  padding: 0 5px;
+  font-size: 10px;
 }
-.tag {
-  display: inline-flex;
-  align-items: center;
-  max-width: 100%;
-  padding: 4px 11px;
-  border-radius: var(--radius-full);
-  font-size: var(--text-xs);
-  font-weight: 500;
-  line-height: var(--leading-snug);
-  color: var(--text-soft);
-  background: var(--panel-hover);
-  border: 1px solid var(--border);
-  transition:
-    color var(--dur-2) var(--ease-out),
-    border-color var(--dur-2) var(--ease-out),
-    background-color var(--dur-2) var(--ease-out);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.hero-info :deep(.ep-icon-btn) {
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
 }
-.tag:hover {
-  color: var(--accent);
-  border-color: var(--accent-line);
-  background: var(--accent-soft);
+.hero-info :deep(.ep-icon-btn img) {
+  width: 25px;
+  height: 25px;
 }
-.tag.accent {
-  color: var(--accent);
-  background: var(--accent-soft);
-  border-color: var(--accent-line);
+.detail-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 46px;
+  padding-top: 34px;
+  align-items: start;
+}
+.content-section + .content-section {
+  margin-top: 35px;
+}
+.content-section h2,
+.file-panel h2,
+.player-wrap h2 {
+  font-size: 15px;
   font-weight: 600;
+  margin: 0 0 17px;
 }
 .plot {
-  white-space: pre-wrap;
-  line-height: var(--leading-relaxed);
-  color: var(--text-soft);
-  margin: 0;
-  max-width: 74ch;
-  text-wrap: pretty;
-}
-.actors h3 {
-  margin: var(--space-6) 0 var(--space-3);
-  font-size: var(--text-2xs);
-  letter-spacing: var(--tracking-widest);
-  text-transform: uppercase;
+  font-size: 13px;
   color: var(--muted);
-  font-weight: 600;
+  line-height: 2;
+  white-space: pre-line;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.section-heading > span {
+  font-size: 11px;
+  color: var(--faint);
 }
 .actor-list {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2);
+  gap: 25px;
 }
 .actor {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: var(--space-2);
-  background: var(--panel);
-  border: 1px solid var(--border);
-  padding: 4px var(--space-3) 4px 4px;
-  border-radius: var(--radius-full);
-  font-size: var(--text-sm);
-  color: var(--text);
+  flex-direction: column;
+  gap: 10px;
+  width: 70px;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--muted);
+  font-size: 11px;
   cursor: pointer;
-  min-height: 40px;
-  transition:
-    color var(--dur-2) var(--ease-out),
-    border-color var(--dur-2) var(--ease-out),
-    background-color var(--dur-2) var(--ease-out);
-}
-.actor:hover {
-  border-color: var(--accent-line);
-  color: var(--accent);
-  background: var(--panel-hover);
 }
 .actor img,
 .a-mono {
-  width: 28px;
-  height: 28px;
+  width: 61px;
+  height: 61px;
   border-radius: 50%;
   object-fit: cover;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-elevated);
-  font-size: var(--text-xs);
-  color: var(--accent);
-  font-family: var(--font-serif);
+  background: var(--panel-hover);
 }
-.path {
-  margin-top: var(--space-5);
-  font-size: var(--text-xs);
+.a-mono {
+  display: grid;
+  place-items: center;
+  color: var(--text-soft);
+  font-family: var(--font-display);
+  font-size: 23px;
+}
+.actor:hover {
+  color: var(--accent);
+}
+.actor > span:last-child {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-panel {
+  padding: 22px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  border-radius: 11px;
+  min-width: 0;
+}
+.file-panel h2 {
+  font-size: 13px;
+  margin-bottom: 20px;
+}
+.file-facts {
+  display: grid;
+  gap: 13px;
+  margin: 0;
+  font-size: 11px;
+}
+.file-facts > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 15px;
+}
+.file-facts dt,
+.file-path > span {
   color: var(--faint);
+  flex-shrink: 0;
+}
+.file-facts dd {
+  margin: 0;
+  color: var(--text-soft);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.file-path {
+  margin-top: 18px;
+  font-size: 11px;
+}
+.file-path p {
+  font-size: 10px;
   font-family: var(--font-mono);
-  word-break: break-all;
+  line-height: 1.8;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  margin: 5px 0 0;
+}
+.maintenance {
+  border-top: 1px solid var(--border);
+  margin-top: 21px;
+  padding-top: 18px;
+}
+.maintenance summary {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  list-style: none;
+  cursor: pointer;
+  color: var(--text-soft);
+  font-size: 12px;
+}
+.maintenance summary::-webkit-details-marker {
+  display: none;
+}
+.maintenance summary small {
+  display: block;
+  font-size: 10px;
+  color: var(--faint);
+  margin-top: 3px;
+}
+.disclosure-arrow {
+  margin-left: auto;
+  color: var(--faint);
+  transition: transform var(--dur-2);
+}
+.maintenance[open] .disclosure-arrow {
+  transform: rotate(180deg);
+}
+.maintenance-content {
+  padding-top: 22px;
+}
+.scrape-row {
+  display: grid;
+  gap: 14px;
+}
+.management-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+.scrape-row :deep(.el-select),
+.scrape-row :deep(.el-input) {
+  width: 100%;
+}
+.scrape-row :deep(.el-switch__label) {
+  font-size: 11px;
+}
+.maintenance-actions,
+.file-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.maintenance-actions > .el-button,
+.file-actions > .el-button {
+  flex: 1;
+  padding-left: 10px;
+  padding-right: 10px;
+  font-size: 11px;
+}
+.file-actions {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 16px;
+  margin-top: 20px;
 }
 .player-wrap {
-  margin-top: var(--space-10);
-  margin-bottom: var(--space-4);
-  padding-top: var(--space-5);
-  border-top: 1px solid var(--border-subtle);
-  max-width: 100%;
+  margin: 32px 0 8px;
+  padding: 22px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  scroll-margin-top: 100px;
 }
-.player-wrap :deep(.artplayer-app),
-.player-wrap :deep(video) {
-  max-width: 100%;
+.dialog-help {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0 0 18px;
 }
-
-@media (max-width: 720px) {
+.no-details {
+  color: var(--faint);
+  font-size: 12px;
+  margin: 0;
+  padding: 12px 0;
+}
+.detail-loading {
+  color: var(--faint);
+  font-size: 13px;
+  min-height: 360px;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+}
+.loading-block {
+  width: 60px;
+  height: 80px;
+  border-radius: 6px;
+  background: var(--skeleton);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.4;
+  }
+}
+.detail-empty {
+  min-height: 350px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  color: var(--faint);
+}
+.detail-empty h2 {
+  color: var(--text-soft);
+  font-size: 17px;
+  margin-bottom: 0;
+}
+.detail-empty p {
+  font-size: 12px;
+  margin-bottom: 25px;
+}
+@media (max-width: 1180px) {
   .detail {
-    grid-template-columns: 1fr;
-    gap: var(--space-5);
+    grid-template-columns: 225px minmax(0, 1fr);
+    gap: 28px;
   }
-  .left {
-    max-width: 300px;
-    margin: 0 auto;
-    width: 100%;
+  .detail-content {
+    gap: 28px;
+    grid-template-columns: minmax(0, 1fr) 280px;
   }
-  .cover {
-    max-height: 55vh;
-    object-fit: contain;
-    margin: 0 auto;
+}
+@media (max-width: 1000px) {
+  .detail-content {
+    grid-template-columns: minmax(0, 1fr);
   }
-  h1 {
-    font-size: var(--text-xl);
-  }
-
-  /*
-    Actions: play owns a full row — it is the one thing you came here to do.
-    The three secondary actions share one equal-width row. Stretching every
-    button to full width turned this page into a stack of bars.
-  */
-  .btns {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: var(--space-2);
-    margin: var(--space-4) 0;
-  }
-  .btn-play {
-    grid-column: 1 / -1;
-    width: 100%;
-    min-width: 0;
-    height: 48px;
-  }
-  .btns .btn-fav,
-  .btns .btn-rename,
-  .btns .btn-delete {
-    width: 100%;
-    min-width: 0;
-    padding: 0 var(--space-2);
-  }
-
-  /*
-    Scrape tools: a compact two-column grid instead of five full-width bars.
-    Equal columns so the two action buttons below come out symmetric.
-  */
-  .scrape-row {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--space-2);
-    align-items: center;
-  }
-  .scrape-row .scrape-number,
-  .scrape-row .scrape-provider {
-    width: 100%;
-    min-width: 0;
+  .file-panel {
     max-width: none;
-    flex: none;
   }
-  .scrape-row :deep(.el-input__wrapper),
-  .scrape-row :deep(.el-select__wrapper) {
-    min-height: 44px;
-    font-size: 16px;
+  .file-facts {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 15px;
   }
-  .scrape-row .scrape-fallback {
-    grid-column: 1 / -1;
-    justify-self: start;
+  .file-facts > div {
+    display: grid;
+    gap: 5px;
   }
-  .scrape-row .scrape-btn {
-    width: 100%;
-    min-height: 44px;
-    padding: 0 var(--space-3);
+  .file-facts dd {
+    text-align: left;
+  }
+  .scrape-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .file-actions > .el-button {
+    flex: 0 1 auto;
+  }
+}
+@media (max-width: 640px) {
+  .top-actions {
+    margin-bottom: 23px;
+  }
+  .detail {
+    grid-template-columns: minmax(0, 1fr);
+    padding-bottom: 28px;
+    gap: 23px;
+  }
+  .cover-wrap {
+    width: min(72%, 260px);
+    margin: 0 auto;
+  }
+  .hero-info {
+    padding-top: 0;
+  }
+  .detail-title {
+    font-size: 22px;
+    margin: 14px 0;
+  }
+  .meta-line {
+    font-size: 11px;
+    gap: 9px 14px;
+  }
+  .tags {
+    margin-top: 18px;
+  }
+  .primary-actions {
+    margin: 24px 0;
+  }
+  .btn-play,
+  .btn-fav {
+    flex: 1;
+    padding: 0 14px;
+    min-height: 48px;
+  }
+  .detail-content {
+    padding-top: 26px;
+    gap: 27px;
+  }
+  .file-panel {
+    padding: 19px;
+  }
+  .file-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .scrape-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .management-field {
+    font-size: 12px;
+  }
+  .maintenance-actions > .el-button,
+  .file-actions > .el-button {
+    min-height: 43px;
+    flex: 1;
+    font-size: 12px;
+  }
+  .actor-list {
+    gap: 20px;
+  }
+  .player-wrap {
+    padding: 12px;
+    scroll-margin-top: 82px;
   }
 }
 </style>

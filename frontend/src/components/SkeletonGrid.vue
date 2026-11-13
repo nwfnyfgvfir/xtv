@@ -20,25 +20,24 @@ withDefaults(
 </template>
 
 <style scoped>
-/* Media cards have no card chrome — the skeleton must match that. */
 .skeleton-card {
   background: transparent;
 }
 .skeleton-poster {
-  border-radius: var(--radius-md);
-  box-shadow: 0 0 0 1px var(--border-subtle);
+  border-radius: 10px;
 }
 .skeleton-line {
-  margin-left: 2px;
-  margin-right: 2px;
+  margin: 12px 1px 0;
 }
-.skeleton-line:first-of-type {
-  margin-top: var(--space-3);
+.skeleton-line.short {
+  margin-top: 8px;
 }
 .skeleton-grid {
-  gap: var(--space-6) var(--space-4);
+  gap: 28px 20px;
 }
-
+.skeleton-grid.media {
+  grid-template-columns: repeat(auto-fill, minmax(164px, 1fr));
+}
 .skeleton-grid.actor {
   grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
 }
@@ -46,17 +45,12 @@ withDefaults(
   aspect-ratio: 1;
 }
 @media (max-width: 640px) {
-  .skeleton-grid {
-    gap: var(--space-4) var(--space-2);
+  .skeleton-grid.media {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px 14px;
   }
   .skeleton-grid.actor {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-@media (max-width: 380px) {
-  .skeleton-grid.actor {
-    grid-template-columns: repeat(3, 1fr);
-    gap: var(--space-3) 6px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 </style>

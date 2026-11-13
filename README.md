@@ -7,7 +7,7 @@
 | 本应用（API + SPA） | 本机 / 本 VPS · GHCR 镜像 |
 | **MetaTube** | 远程已有服务，**不在本仓库部署** |
 
-元数据走远程 MetaTube；播放支持本地 Range 流与 HTTP(S) `.strm` 直链。
+元数据可选远程 MetaTube 或 Stash 社区刮削器；播放支持本地 Range 流与 HTTP(S) `.strm` 直链。Stash 与 MetaTube 均为独立服务，本项目不捆绑部署。
 
 ---
 
@@ -15,6 +15,7 @@
 
 - 扫描本地视频与 `.strm`
 - 番号解析 + MetaTube 自动刮削（海报 / 标题 / 演员）
+- 可切换 Stash 刮削后端，复用其已安装的社区刮削器，支持番号与来源 URL 刮削
 - 标题 / 简介 / 标签自动翻译（Google、必应、DeepL、OpenAI 兼容 AI 接口）
 - 浏览器播放（本地 Range 流 / HTTP 直链 `.strm`）
 - 播放进度记忆
@@ -29,7 +30,7 @@
               │
               ├─ SQLite  /data
               ├─ 媒体    /media  (local 视频 / strm 文本)
-              └─ HTTP ──► 远程 MetaTube（刮削）
+              └─ HTTP ──► MetaTube / Stash（刮削，设置页选择）
 ```
 
 ---
@@ -148,6 +149,32 @@ curl -sS http://127.0.0.1:8000/api/health
 5. 详情页 **播放**
 
 `.strm` 文件内容一行完整 `https://...`（或 `http://...`）→ 播放器直链。非 HTTP 目标会被拒绝播放。
+
+### Stash 社区刮削器（可选）
+
+1. 在已有或另行部署的 Stash 中完成初始化，进入 **设置 → 元数据提供者 → 可用刮削器**，安装需要的社区刮削器。
+2. 在本项目 **设置 → 刮削后端** 选择 **Stash（社区刮削器）**，填写服务地址和 API Key，保存后刷新源列表。地址支持根地址或完整的 `/graphql` 地址，且须能从本项目后端访问；容器里的 `127.0.0.1` 指向容器自身。
+3. API Key 从 Stash **设置 → 安全 → 身份验证** 获取。Stash 未开启鉴权时可以留空；已保存的 Key 不回显，输入框留空保留原值。
+4. 从源列表选择刮削器，设置优先级及“失败时 fallback”。这个开关决定是否继续尝试 **Stash 的其他刮削器**。MetaTube 与 Stash 的优先级和凭证各自保存，切换后端不会覆盖另一边的配置。
+5. 扫描时使用番号搜索；影片详情页也可手动选择刮削器重新刮削。对于标记 **仅 URL** 的源，在详情页填写来源页面 URL；填写后由 Stash 自动匹配 URL 刮削器，不使用下拉框的单源或 fallback 设置。没有番号的影片也可以通过来源 URL 刮削。
+
+环境变量示例（设置页保存的值优先）：
+
+```env
+SCRAPE_SOURCE=stash
+STASH_BASE_URL=http://stash:9999
+STASH_API_KEY=your-stash-api-key
+STASH_SCRAPER_PRIORITY=["JavBus","DMM"]
+STASH_FALLBACK=false
+```
+
+刮削器 ID 以实际安装后返回的列表为准。建议只安装、选择需要的刮削器，并按需关闭 fallback，减少逐个尝试带来的等待。
+
+接入通过 Stash 的只读 GraphQL 刮削查询完成，无需把本项目媒体再次导入 Stash。名称搜索返回的详情链接会继续读取完整元数据；标题、简介、演员、标签、发行日期和时长进入现有入库与翻译流程。Stash 返回的 Base64 封面和头像保存到 `data/scraped-images`，不会嵌入媒体列表响应，也不依赖 MetaTube 图片接口。
+
+支持名称搜索，以及使用标题 / 番号的元数据片段搜索。**仅依赖 Stash 本地文件名或指纹的片段刮削器不能直接处理本项目文件**，可改用其名称搜索或来源 URL。具体站点是否可用仍取决于 Stash 中的刮削器版本、登录配置与网络环境。
+
+接口与运行方式依据 [Stash API 文档](https://docs.stashapp.cc/api/)、[Stash GraphQL 刮削定义](https://github.com/stashapp/stash/blob/develop/graphql/schema/types/scraper.graphql)及 [CommunityScrapers](https://github.com/stashapp/CommunityScrapers)交叉核对。
 
 ### AI 翻译（可选）
 

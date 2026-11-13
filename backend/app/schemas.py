@@ -114,6 +114,7 @@ class RescrapeIn(BaseModel):
     provider: str | None = None
     fallback: bool | None = None
     number: str | None = None  # optional override / fill-in 番号
+    url: str | None = Field(default=None, max_length=2048)
 
 
 class PaginatedMedia(BaseModel):
@@ -193,6 +194,12 @@ class ProgressOut(BaseModel):
 
 
 class SettingsOut(BaseModel):
+    scrape_source: Literal["metatube", "stash"] = "metatube"
+    stash_base_url: str = ""
+    stash_api_key_set: bool = False
+    stash_scraper: str = ""
+    stash_scraper_priority: list[str] = []
+    stash_fallback: bool = True
     metatube_base_url: str
     metatube_token_set: bool
     metatube_provider: str = ""
@@ -219,12 +226,19 @@ class SettingsOut(BaseModel):
     cors_origins: str
     auth_enabled: bool = False
     movie_providers: list[str] = []
+    movie_provider_labels: dict[str, str] = {}
     movie_providers_error: str | None = None
     movie_providers_from_cache: bool = False
     extra: dict[str, str] = {}
 
 
 class SettingsUpdate(BaseModel):
+    scrape_source: Literal["metatube", "stash"] | None = None
+    stash_base_url: str | None = None
+    stash_api_key: str | None = None
+    stash_scraper: str | None = None
+    stash_scraper_priority: list[str] | None = None
+    stash_fallback: bool | None = None
     metatube_base_url: str | None = None
     metatube_token: str | None = None
     metatube_provider: str | None = None
@@ -270,6 +284,8 @@ class HealthOut(BaseModel):
     status: str
     version: str = "dev"
     metatube: dict[str, Any] | None = None
+    stash: dict[str, Any] | None = None
+    scrape_source: Literal["metatube", "stash"] = "metatube"
     auth_enabled: bool = False
     watcher: dict[str, Any] | None = None
 
