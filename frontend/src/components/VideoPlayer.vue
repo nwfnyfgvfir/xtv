@@ -465,7 +465,25 @@ function create() {
           },
         }
       : {}),
-    ...(subtitleSettings.length ? { settings: subtitleSettings } : {}),
+    settings: [
+      ...subtitleSettings,
+      {
+        html: '网页全屏',
+        onClick() {
+          if (!player) return
+          player.setting.show = false
+          player.fullscreenWeb = !player.fullscreenWeb
+        },
+      },
+      {
+        html: '画中画',
+        onClick() {
+          if (!player) return
+          player.setting.show = false
+          player.pip = !player.pip
+        },
+      },
+    ],
     controls: [
       {
         name: 'screen-lock',
@@ -575,6 +593,9 @@ function create() {
     ],
   })
 
+  // Web fullscreen moves this element to <body>, outside the Vue wrapper.
+  player.template.$player.classList.add('tv-video-player')
+
   player.on('lock', (state: boolean) => {
     syncUnlockFab(state)
     syncGestureLayer(state)
@@ -627,7 +648,7 @@ watch(
 </script>
 
 <template>
-  <div class="player-wrap">
+  <div class="video-player">
     <div ref="containerRef" class="player" />
     <p class="hint muted">
       滑动快进/快退 · 双击左 -10s · 双击右 +10s · 双击中切换 · 单击显示/隐藏控制栏 · 「锁」锁屏 · 锁屏后点「开锁」
@@ -636,8 +657,9 @@ watch(
 </template>
 
 <style scoped>
-.player-wrap {
+.video-player {
   width: 100%;
+  min-width: 0;
 }
 .player {
   width: 100%;
@@ -664,17 +686,58 @@ watch(
   .hint {
     font-size: var(--text-2xs);
   }
-  /* Slim Artplayer bar so 锁 + setting + fullscreen stay on-screen. */
-  .player :deep(.art-video-player) {
-    --art-control-height: 36px;
-    --art-control-icon-size: 32px;
+}
+/* Keep the same touch layout when Artplayer moves web fullscreen into <body>. */
+@media (max-width: 860px) {
+  :global(.tv-video-player.art-video-player.art-mobile),
+  :global(.tv-video-player.art-video-player:not(.art-mobile)) {
+    --art-control-height: 44px;
+    --art-control-icon-size: 28px;
     --art-padding: 6px;
   }
+  :global(.tv-video-player.art-video-player .art-controls .art-controls-left) {
+    flex: 1;
+    min-width: 0;
+  }
+  :global(.tv-video-player.art-video-player .art-controls .art-controls-right) {
+    flex: 0 0 auto;
+  }
+  :global(.tv-video-player.art-video-player .art-controls .art-control) {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  :global(.tv-video-player.art-video-player .art-controls .art-control-time) {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 0 4px;
+    overflow: hidden;
+    justify-content: flex-start;
+    font-size: 11px;
+  }
 }
-/* Very narrow phones: drop volume control (system volume still works). */
-@media (max-width: 400px) {
-  .player :deep(.art-control-volume) {
+/* Secondary actions remain available in settings instead of crowding the bar. */
+@media (max-width: 640px) {
+  :global(.tv-video-player.art-video-player .art-controls .art-control-pip),
+  :global(.tv-video-player.art-video-player .art-controls .art-control-fullscreenWeb) {
     display: none;
+  }
+  :global(.tv-video-player.art-video-player.art-fullscreen-web .art-controls .art-control-fullscreenWeb) {
+    display: flex;
+  }
+  :global(.tv-video-player.art-video-player.art-fullscreen-web .art-controls .art-control-fullscreen) {
+    display: none;
+  }
+}
+/* Narrow phones use the system volume buttons. */
+@media (max-width: 400px) {
+  :global(.tv-video-player.art-video-player .art-controls .art-control-volume) {
+    display: none;
+  }
+}
+@media (max-width: 360px) {
+  :global(.tv-video-player.art-video-player .art-controls .art-control-time) {
+    white-space: normal;
+    line-height: 1.25;
   }
 }
 </style>

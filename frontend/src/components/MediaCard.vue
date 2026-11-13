@@ -139,13 +139,18 @@ async function toggleFav(e: Event) {
   pointer-events: none;
 }
 .poster > img {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
+  /* Scraped poster thumbnails often include a thin baked-in white border. */
+  transform: scale(1.04);
+  transform-origin: center;
   transition: transform var(--dur-3) var(--ease-out);
 }
 .card-link:hover .poster > img {
-  transform: scale(1.035);
+  transform: scale(1.07);
 }
 .card-link:focus-visible {
   outline-offset: 5px;
