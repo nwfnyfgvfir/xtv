@@ -13,6 +13,7 @@ _HEYZO = re.compile(r"(?i)\bHEYZO[-_ ]?(\d{3,5})\b")
 _STANDARD = re.compile(
     r"(?i)\b([A-Z]{2,15})[-_ ]?(\d{2,5})(?:[-_ ]?(C|CD\d+|PART\d+))?\b"
 )
+_DATE_STYLE = re.compile(r"(?<!\d)(\d{6})[_.\- ](\d{2,3})(?!\d)")
 _DISC = re.compile(r"(?i)(?:^|[-_\s.])(cd\d+|part\d+)(?:$|[-_\s.])")
 _SUB_C = re.compile(r"(?i)(?:^|[-_\s.])C(?:$|[-_\s.])|中字|中文字幕")
 
@@ -74,6 +75,10 @@ def extract_number(filename: str) -> ParsedName:
                 disc = disc or extra.lower()
         return ParsedName(number=number, disc=disc, subtitle_flag=subtitle_flag, raw_stem=raw_stem)
 
+    m = _DATE_STYLE.search(cleaned)
+    if m:
+        return ParsedName(number=f"{m.group(1)}-{m.group(2)}", disc=disc, subtitle_flag=subtitle_flag, raw_stem=raw_stem)
+
     return ParsedName(number=None, disc=disc, subtitle_flag=subtitle_flag, raw_stem=raw_stem)
 
 
@@ -85,6 +90,8 @@ def normalize_number(raw: str | None) -> str | None:
     # Prefer structured parse (works for free-typed codes like "ssis 001")
     candidate = s if "." in s else f"{s}.mp4"
     parsed = extract_number(candidate)
+    if not parsed.number and "." in s:
+        parsed = extract_number(s + ".mp4")
     if parsed.number:
         return parsed.number[:64]
     s = re.sub(r"[\s_]+", "-", s.upper())

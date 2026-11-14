@@ -117,6 +117,7 @@ const movieProviders = computed(() =>
 )
 const providerCount = computed(() => movieProviders.value.length)
 const hasPriority = computed(() => activePriority.value.length > 0)
+const usesAutomaticSource = computed(() => !hasPriority.value && !activeProvider.value)
 
 function providerLabel(id: string): string {
   return settings.value?.scrape_source === form.value.scrape_source
@@ -565,8 +566,8 @@ onMounted(() => {
                   </li>
                 </ul>
                 <span class="field-hint muted block">
-                  刮削时按顺序尝试；全部未命中后由下方 fallback
-                  决定是否再搜其余源。为空时走兼容单源。
+                  按列表顺序尝试，命中后停止；全部未命中后由 fallback
+                  决定是否尝试其余源。为空时使用下方单源，单源也为空时自动遍历适用源。
                 </span>
               </div>
             </el-form-item>
@@ -596,8 +597,12 @@ onMounted(() => {
             </el-form-item>
 
             <el-form-item label="失败时 fallback">
-              <el-switch v-model="activeFallback" />
-              <span class="field-hint muted">优先级全部未命中后是否再搜索其余源</span>
+              <el-switch v-model="activeFallback" :disabled="usesAutomaticSource" />
+              <span class="field-hint muted">{{
+                usesAutomaticSource
+                  ? '自动模式会遍历适用源；此开关仅在指定优先级或单源时生效'
+                  : '优先级或指定源全部未命中后，是否尝试其余源'
+              }}</span>
             </el-form-item>
           </el-form>
         </section>

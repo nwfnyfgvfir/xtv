@@ -103,6 +103,7 @@ class StashClient:
         self._scrapers: list[dict[str, Any]] | None = None
         self._movies: dict[tuple[str, str], dict[str, Any]] = {}
         self._actors: dict[tuple[str, str], dict[str, Any]] = {}
+        self._attempted: dict[str, set[str]] = {}
 
     async def _query(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
         if not self.endpoint:
@@ -243,8 +244,13 @@ class StashClient:
         selected = [s for s in scrapers if s["id"] == provider or s["name"] == provider] if provider else []
         if provider and not selected and not fallback:
             raise StashError(f"Stash scraper is not installed: {provider}")
-        candidates = selected + [s for s in scrapers if s not in selected] if fallback or not provider else selected
+        attempted = self._attempted.setdefault(q, set())
+        candidates = selected + [s for s in scrapers if s not in selected and s["id"] not in attempted] if fallback or not provider else selected
         for scraper in candidates:
+            if not {"NAME", "FRAGMENT"}.intersection(scraper["types"]):
+                continue
+            attempted.add(scraper["id"])
+            logger.info("Stash try scraper=%s query=%s", scraper["id"], q)
             try:
                 results = await self._scrape(scraper, q)
                 if results:

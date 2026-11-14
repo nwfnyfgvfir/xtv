@@ -36,7 +36,8 @@ const scrapeLoading = ref(false)
 const translateLoading = ref(false)
 const deleteLoading = ref(false)
 const providers = ref<string[]>([])
-const scrapeProvider = ref('')
+const FOLLOW_GLOBAL_SOURCE = '__follow_global_source__'
+const scrapeProvider = ref(FOLLOW_GLOBAL_SOURCE)
 const scrapeFallback = ref(true)
 const scrapeNumber = ref('')
 const scrapeUrl = ref('')
@@ -45,6 +46,14 @@ const useStash = computed(() => scrapeSource.value === 'stash')
 const supportsSourceUrl = computed(() => scrapeSource.value !== 'metatube')
 const sourceUrlPlaceholder = computed(() =>
   useStash.value ? '可选，由 Stash 自动匹配刮削器' : '可选，按所选刮削器或来源地址匹配',
+)
+const followsGlobalSource = computed(() => scrapeProvider.value === FOLLOW_GLOBAL_SOURCE)
+const sourceModeHint = computed(() =>
+  followsGlobalSource.value
+    ? '使用设置页的完整优先级和回退策略；未指定源时自动遍历适用源。'
+    : scrapeProvider.value === ''
+      ? '自动遍历适用源，命中后停止；仅 URL 的源需填写来源地址。'
+      : '使用所选刮削器；失败后是否尝试其他源由下方开关决定。',
 )
 const providerLabels = ref<Record<string, string>>({})
 const playerWrap = ref<HTMLElement | null>(null)
@@ -119,7 +128,7 @@ async function loadProviders() {
       list.push(preferred)
     }
     providers.value = list
-    scrapeProvider.value = pri[0] || preferred
+    scrapeProvider.value = FOLLOW_GLOBAL_SOURCE
     scrapeFallback.value = s[fields.fallback] !== false
   } catch {
     /* ignore */
@@ -150,9 +159,13 @@ async function onRescrape() {
   scrapeLoading.value = true
   try {
     item.value = await rescrapeMedia(Number(props.id), {
-      // Always send provider (including "") so「自动」does not inherit global preferred source.
-      provider: scrapeProvider.value,
-      fallback: scrapeFallback.value,
+      // Omission follows global priorities; explicit "" requests full automatic mode.
+      provider: followsGlobalSource.value ? undefined : scrapeProvider.value,
+      fallback: followsGlobalSource.value
+        ? undefined
+        : scrapeProvider.value === ''
+          ? true
+          : scrapeFallback.value,
       number,
       url: url || undefined,
     })
@@ -475,16 +488,20 @@ watch(() => props.id, load)
                     placeholder="自动选择"
                     aria-label="刮削器"
                     :disabled="useStash && !!scrapeUrl.trim()"
-                    ><el-option label="自动" value="" /><el-option
+                    ><el-option label="跟随全局配置" :value="FOLLOW_GLOBAL_SOURCE" />
+                    <el-option label="自动（全部适用源）" value="" /><el-option
                       v-for="provider in providers"
                       :key="provider"
                       :label="providerLabels[provider] || provider"
                       :value="provider"
                   /></el-select>
+                  <span class="field-hint muted">{{ sourceModeHint }}</span>
                 </div>
                 <el-switch
                   v-model="scrapeFallback"
-                  :disabled="useStash && !!scrapeUrl.trim()"
+                  :disabled="
+                    followsGlobalSource || scrapeProvider === '' || (useStash && !!scrapeUrl.trim())
+                  "
                   active-text="失败时尝试其他源"
                   aria-label="刮削失败时尝试其他源"
                 />

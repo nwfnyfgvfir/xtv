@@ -2,9 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.db import SessionLocal, init_db
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+
+from app.db import Base, SessionLocal, init_db
 from app.models import Library, MediaItem
 from app.services.jobs import ScanJob
+from app.services import scanner
 from app.services.scanner import scan_library_sync
 
 
@@ -61,3 +66,33 @@ def test_scan_prunes_missing_and_adds_new(tmp_path: Path, monkeypatch) -> None:
         db.commit()
         db.close()
         get_settings.cache_clear()
+
+
+@pytest.mark.parametrize("success", [False, True])
+def test_ingest_reparses_existing_date_filename_and_counts_only_successful_scrapes(tmp_path, monkeypatch, success):
+    path = tmp_path / "010124_001.mp4"
+    path.write_bytes(b"fixture")
+    calls = []
+
+    async def scrape_result(db, item, force):
+        calls.append((item.number, force))
+        return success
+
+    monkeypatch.setattr(scanner, "scrape_media_item", scrape_result)
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    try:
+        with Session(engine) as db:
+            lib = Library(name="date filename", path=str(tmp_path), type="local")
+            db.add(lib)
+            db.flush()
+            existing = MediaItem(library_id=lib.id, path=str(path.resolve()), filename=path.name, source_type="local")
+            db.add(existing)
+            db.flush()
+            job = ScanJob(job_id="date-rescan")
+            item = scanner._ingest_file(db, lib, path, job, auto_scrape=True)
+            assert item.id == existing.id and item.number == "010124-001"
+            assert calls == [("010124-001", False)]
+            assert job.created == 0 and job.scraped == int(success)
+    finally:
+        engine.dispose()

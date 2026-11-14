@@ -394,3 +394,21 @@ def test_stash_images_bypass_metatube_proxy(stash_settings):
 ])
 def test_scraped_images_reject_invalid_or_non_raster_data(stash_settings, value):
     assert images.store_scraped_image(value) is None
+
+
+def test_stash_auto_fallback_skips_url_only_and_already_attempted_source(stash_settings, stash_http):
+    requests, replies = stash_http
+    replies.extend([
+        graphql(listScrapers=[scraper("A"), scraper("OnlyURL", ["URL"]), scraper("B")]),
+        graphql(scrapeSingleScene=[]),
+        graphql(scrapeSingleScene=[{"code": "ABP-001", "title": "Full title"}]),
+    ])
+    client = stash.StashClient()
+
+    async def run():
+        assert await client.search_movie("ABP-001", "A", False) == []
+        return await client.search_movie("ABP-001")
+
+    rows = asyncio.run(run())
+    assert rows[0]["provider"] == "stash:B"
+    assert [json.loads(req.content)["variables"]["source"]["scraper_id"] for req in requests[1:]] == ["A", "B"]

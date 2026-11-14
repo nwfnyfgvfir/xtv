@@ -403,8 +403,8 @@ def _ingest_file(db: Session, lib: Library, path: Path, job: ScanJob, auto_scrap
         db.flush()
 
     if auto_scrape and item.number and not item.scraped_at:
-        asyncio.run(scrape_media_item(db, item, force=False))
-        job.scraped += 1
+        if asyncio.run(scrape_media_item(db, item, force=False)):
+            job.scraped += 1
 
     return item
 

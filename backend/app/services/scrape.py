@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -21,16 +22,26 @@ logger = logging.getLogger(__name__)
 def _pick_best(results: list[dict[str, Any]], number: str) -> dict[str, Any] | None:
     if not results:
         return None
-    n = number.upper().replace("_", "-")
+    if not number:
+        return results[0]
+    def key(value: Any) -> str:
+        return re.sub(r"[^A-Z0-9]", "", (normalize_number(str(value or "")) or "").upper())
+    n = key(number)
     for r in results:
-        rn = str(r.get("number") or "").upper().replace("_", "-")
+        rn = key(r.get("number") or r.get("code"))
         if rn == n:
             return r
-    for r in results:
-        rid = str(r.get("id") or "").upper().replace("_", "-")
-        if rid == n or n in rid:
+    # A conflicting explicit code must not be rescued by its ID or list position.
+    unknown = [r for r in results if not key(r.get("number") or r.get("code"))]
+    for r in unknown:
+        if key(r.get("_matched_number")) == n:
             return r
-    return results[0]
+    for r in unknown:
+        rid = str(r.get("id") or "").upper().replace("_", "-")
+        if key(rid) == n:
+            return r
+    # Preserve legacy MetaTube responses that expose only an opaque provider ID.
+    return unknown[0] if unknown else None
 
 
 def _priority_list_from_settings(settings: Settings | Any) -> list[str]:
@@ -68,6 +79,7 @@ async def _search_with_chain(
     chain: list[str],
     use_fallback: bool,
     force_auto: bool,
+    filename: str | None = None,
 ) -> list[dict[str, Any]]:
     """
     Search the selected metadata backend using an ordered provider chain.
@@ -77,16 +89,23 @@ async def _search_with_chain(
     If no hit and (not chain or use_fallback): final search provider="" fallback=True
     (or use_fallback when chain empty and not force_auto).
     """
+    async def search(provider: str, fallback: bool) -> list[dict[str, Any]]:
+        if isinstance(client, StashScrapersClient):
+            return await client.search_movie(number, provider=provider, fallback=fallback, filename=filename)
+        return await client.search_movie(number, provider=provider, fallback=fallback)
+
     if force_auto:
         logger.info("scrape try %s provider=auto fallback=%s", number, use_fallback)
-        return await client.search_movie(number, provider="", fallback=use_fallback)
+        return await search("", use_fallback)
 
     results: list[dict[str, Any]] = []
     for p in chain:
         logger.info("scrape try %s provider=%s", number, p)
         try:
-            results = await client.search_movie(number, provider=p, fallback=False)
+            results = await search(p, False)
         except (MetaTubeError, StashError, StashScrapersError) as exc:
+            if isinstance(exc, StashScrapersError) and StashScrapersClient._fatal(exc):
+                raise
             # A provider that errors (rate limit, 5xx, network) must not abort
             # the rest of the chain — otherwise a priority list silently
             # degrades into "try only the first provider".
@@ -98,11 +117,11 @@ async def _search_with_chain(
 
     if not chain:
         logger.info("scrape try %s provider=auto fallback=%s", number, use_fallback)
-        return await client.search_movie(number, provider="", fallback=use_fallback)
+        return await search("", use_fallback)
 
     if use_fallback:
         logger.info("scrape try %s provider=auto fallback=true (after chain)", number)
-        return await client.search_movie(number, provider="", fallback=True)
+        return await search("", True)
 
     return results
 
@@ -213,8 +232,8 @@ async def scrape_media_item(
             for selected in chain or [""]:
                 try:
                     results = await client.scrape_url(url_override, provider=selected, fallback=False)
-                except StashScrapersError:
-                    if not use_fallback and len(chain) <= 1:
+                except StashScrapersError as exc:
+                    if client._fatal(exc) or not use_fallback and len(chain) <= 1:
                         raise
                 if results:
                     break
@@ -229,6 +248,7 @@ async def scrape_media_item(
                 chain=chain,
                 use_fallback=use_fallback,
                 force_auto=force_auto,
+                filename=item.filename,
             )
         best = _pick_best(results, item.number or "")
         if not best:

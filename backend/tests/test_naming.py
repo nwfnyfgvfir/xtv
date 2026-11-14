@@ -63,3 +63,10 @@ def test_normalize_number_fallback_and_truncate():
     assert normalize_number("weird--code") == "WEIRD-CODE"
     long = "A" * 80
     assert normalize_number(long) == "A" * 64
+
+
+def test_numeric_date_catalog_filenames():
+    assert extract_number("010124_001.mp4").number == "010124-001"
+    assert extract_number("010124-01-C.mkv").number == "010124-01"
+    assert extract_number("010124.001.mp4").number == "010124-001"
+    assert normalize_number("010124.001") == "010124-001"

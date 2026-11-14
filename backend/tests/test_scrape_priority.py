@@ -179,3 +179,17 @@ def test_chain_returns_empty_when_every_provider_fails():
     )
     assert results == []
     assert _pick_best(results, "SSIS-001") is None
+
+
+def test_conflicting_explicit_number_does_not_stop_priority_chain():
+    client = FakeClient({
+        ("A", False): [{"number": "SSIS-002", "id": "SSIS-001", "provider": "A"}],
+        ("B", False): [{"number": "SSIS-001", "id": "1", "provider": "B"}],
+    })
+    rows = asyncio.run(_search_with_chain(client, "SSIS-001", chain=["A", "B"], use_fallback=False, force_auto=False))
+    assert _pick_best(rows, "SSIS-001")["provider"] == "B"
+
+
+def test_fc2_ppv_alias_remains_an_exact_number_match():
+    row = {"number": "FC2-PPV-123456", "id": "opaque", "provider": "A"}
+    assert _pick_best([row], "FC2-123456") is row

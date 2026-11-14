@@ -182,7 +182,7 @@ def test_fragment_only_scraper_receives_catalog_filename(rest_settings, rest_htt
     assert rows[0]["number"] == "ABP-001"
     body = json.loads(requests[1].content)
     assert body["operation"] == "fragment"
-    assert body["fragment"]["filename"] == "ABP-001" and body["rules_version"] == "v1"
+    assert body["fragment"]["filename"] == "ABP-001.mp4" and body["rules_version"] == "v1"
 
 
 def test_url_only_scraper_does_not_search_and_can_fill_missing_number(rest_settings, rest_http, database, api):
@@ -332,3 +332,121 @@ def test_url_pattern_in_query_does_not_match_another_host(rest_settings, rest_ht
     replies.append(catalog(entry(names=("url",))))
     assert asyncio.run(rest.StashScrapersClient().scrape_url("https://unrelated.example/?next=https://source.example/ABP-001")) == []
     assert len(requests) == 1
+
+
+def test_fragment_metadata_without_returned_code_is_not_discarded(rest_settings, rest_http):
+    _, replies = rest_http
+    replies.extend([catalog(entry(names=("fragment",))), response(result(code="", title="A real title", urls=[]))])
+    rows = asyncio.run(rest.StashScrapersClient().search_movie("ABP-001", "Folder/Source", False))
+    assert len(rows) == 1 and rows[0]["title"] == "A real title"
+    assert rows[0]["number"] == ""
+
+
+def test_name_error_still_tries_fragment_in_the_same_scraper(rest_settings, rest_http):
+    requests, replies = rest_http
+    replies.extend([catalog(entry(names=("name", "fragment"))), error(502, "parse_error"), response(result())])
+    rows = asyncio.run(rest.StashScrapersClient().search_movie("ABP-001", "Folder/Source", False))
+    assert rows[0]["number"] == "ABP-001"
+    assert [request.url.path for request in requests] == ["/api/scrapers", "/api/search", "/api/detail"]
+
+
+def test_query_fragment_error_still_tries_url_details(rest_settings, rest_http):
+    requests, replies = rest_http
+    replies.extend([catalog(), response(result()), error(422, "unsupported"), response(result(title="Full URL detail"))])
+    rows = asyncio.run(rest.StashScrapersClient().search_movie("ABP-001", "Folder/Source", False))
+    assert rows[0]["title"] == "Full URL detail"
+    assert json.loads(requests[-1].content)["url"] == "https://source.example/ABP-001"
+
+
+def test_fragment_receives_real_filename_from_media_item(rest_settings, rest_http, database):
+    requests, replies = rest_http
+    db, _ = database
+    item = seed(db, "010124-001")
+    item.filename = "1pondo-010124_001-C.mp4"
+    replies.extend([catalog(entry(names=("fragment",))), response(result(code="", title="Date catalog title", urls=[]))])
+    assert asyncio.run(scrape.scrape_media_item(db, item, force=True)) is True
+    assert json.loads(requests[1].content)["fragment"]["filename"] == item.filename
+
+
+def test_auto_fallback_does_not_retry_already_attempted_priority_source(rest_settings, rest_http):
+    requests, replies = rest_http
+    replies.extend([catalog(entry("A", ("fragment",)), entry("B", ("fragment",))),
+                    error(404, "not_found"), response(result())])
+    client = rest.StashScrapersClient()
+    async def run():
+        assert await client.search_movie("ABP-001", "A", False) == []
+        rows = await client.search_movie("ABP-001", "", True)
+        return rows
+    rows = asyncio.run(run())
+    assert rows[0]["provider"] == "stashscrapers:B"
+    assert [json.loads(req.content)["scraper_id"] for req in requests[1:]] == ["A", "B"]
+
+
+def test_code_only_result_does_not_prevent_a_later_source_from_running(rest_settings, rest_http):
+    requests, replies = rest_http
+    replies.extend([catalog(entry("A", ("fragment",)), entry("B", ("fragment",))),
+                    response({"code": "ABP-001", "raw": {}, "urls": [], "images": []}),
+                    response(result(title="Useful metadata"))])
+    rows = asyncio.run(rest.StashScrapersClient().search_movie("ABP-001"))
+    assert rows[0]["provider"] == "stashscrapers:B"
+
+
+def test_manual_number_override_does_not_reuse_a_conflicting_filename(rest_settings, rest_http):
+    requests, replies = rest_http
+    replies.extend([catalog(entry(names=("fragment",))), response(result())])
+    asyncio.run(rest.StashScrapersClient().search_movie("ABP-001", "Folder/Source", False, filename="ABP-002.mp4"))
+    assert json.loads(requests[1].content)["fragment"]["filename"] == "ABP-001.mp4"
+
+
+def test_no_priority_or_single_source_tries_eligible_sources_in_catalog_order(rest_settings, rest_http, database):
+    requests, replies = rest_http
+    rest_settings.stashscrapers_scraper = ""
+    rest_settings.stashscrapers_fallback = False
+    missing = entry("Missing", ("fragment",))
+    missing["operations"][0]["state"] = "missing_dependency"
+    replies.extend([catalog(entry("OnlyURL", ("url",)), entry("Off", enabled=False), missing,
+                            entry("First", ("fragment",)), entry("Second", ("fragment",)), entry("Later", ("fragment",))),
+                    response(), response(result())])
+    db, _ = database
+    item = seed(db)
+    assert asyncio.run(scrape.scrape_media_item(db, item, force=True)) is True
+    assert item.provider == "stashscrapers:Second"
+    assert [json.loads(req.content)["scraper_id"] for req in requests[1:]] == ["First", "Second"]
+
+
+@pytest.mark.parametrize("fallback", [False, True])
+def test_single_source_without_priority_obeys_fallback(rest_settings, rest_http, database, fallback):
+    requests, replies = rest_http
+    rest_settings.stashscrapers_scraper = "First"
+    rest_settings.stashscrapers_fallback = fallback
+    replies.extend([catalog(entry("First", ("fragment",)), entry("Second", ("fragment",))), response()])
+    if fallback:
+        replies.append(response(result()))
+    db, _ = database
+    item = seed(db)
+    assert asyncio.run(scrape.scrape_media_item(db, item, force=True)) is fallback
+    expected = ["First", "Second"] if fallback else ["First"]
+    assert [json.loads(req.content)["scraper_id"] for req in requests[1:]] == expected
+    assert bool(item.scraped_at) is fallback
+
+
+@pytest.mark.parametrize("url", [None, "https://source.example/ABP-001"])
+def test_service_auth_failure_stops_the_entire_priority_chain(rest_settings, rest_http, database, url):
+    requests, replies = rest_http
+    rest_settings.stashscrapers_scraper_priority = '["First","Second"]'
+    rest_settings.stashscrapers_fallback = True
+    replies.extend([catalog(entry("First", ("fragment", "url")), entry("Second", ("fragment", "url"))),
+                    error(401, "unauthorized")])
+    db, _ = database
+    item = seed(db)
+    assert asyncio.run(scrape.scrape_media_item(db, item, force=True, url_override=url)) is False
+    assert len(requests) == 2 and item.scraped_at is None
+
+
+def test_fc2_ppv_alias_matches_normalized_media_number(rest_settings, rest_http, database):
+    _, replies = rest_http
+    replies.extend([catalog(entry(names=("fragment",))), response(result(code="FC2-PPV-123456"))])
+    db, _ = database
+    item = seed(db, "FC2-123456")
+    assert asyncio.run(scrape.scrape_media_item(db, item, force=True)) is True
+    assert item.number == "FC2-123456" and item.provider == "stashscrapers:Folder/Source"

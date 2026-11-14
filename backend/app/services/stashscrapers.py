@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -9,12 +10,16 @@ import httpx
 
 from app.config import Settings, get_settings
 from app.services.images import store_scraped_image
+from app.services.naming import extract_number, normalize_number
+
+logger = logging.getLogger(__name__)
 
 
 class StashScrapersError(Exception):
-    def __init__(self, message: str, code: str = ""):
+    def __init__(self, message: str, code: str = "", status_code: int = 0):
         super().__init__(message)
         self.code = code
+        self.status_code = status_code
 
 
 def service_url(raw: str) -> str:
@@ -60,7 +65,7 @@ def _matches_url(url: str, pattern: Any) -> bool:
 
 def _matches(scene: dict[str, Any], query: str) -> bool:
     expected = re.sub(r"[^a-z0-9]", "", query.lower())
-    code = re.sub(r"[^a-z0-9]", "", str(scene.get("code") or "").lower())
+    code = re.sub(r"[^a-z0-9]", "", (normalize_number(str(scene.get("code") or "")) or "").lower())
     if not expected:
         return False
     if code:
@@ -80,6 +85,7 @@ class StashScrapersClient:
         self._catalog: list[dict[str, Any]] | None = None
         self._movies: dict[tuple[str, str], dict[str, Any]] = {}
         self._actors: dict[tuple[str, str], dict[str, Any]] = {}
+        self._attempted: dict[tuple[str, bool], set[str]] = {}
 
     async def _request(self, method: str, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
         if not self.base:
@@ -105,7 +111,7 @@ class StashScrapersClient:
             if self.token:
                 message = message.replace(self.token, "[redacted]")
                 code = code.replace(self.token, "[redacted]")
-            raise StashScrapersError(f"StashScrapers HTTP {response.status_code} [{code or 'error'}]: {message[:240]}", code)
+            raise StashScrapersError(f"StashScrapers HTTP {response.status_code} [{code or 'error'}]: {message[:240]}", code, response.status_code)
         return data
 
     async def _entries(self) -> list[dict[str, Any]]:
@@ -141,10 +147,13 @@ class StashScrapersClient:
         return data
 
     async def _results(self, path: str, body: dict[str, Any]) -> tuple[list[dict[str, Any]], str]:
+        operation = "name" if path == "search" else "url" if body.get("url") else body.get("operation", "fragment")
+        logger.info("StashScrapers try scraper=%s operation=%s", body.get("scraper_id"), operation)
         try:
             data = await self._request("POST", path, body)
         except StashScrapersError as exc:
             if exc.code == "not_found":
+                logger.info("StashScrapers no result scraper=%s operation=%s", body.get("scraper_id"), operation)
                 return [], ""
             raise
         if not isinstance(data.get("results"), list):
@@ -154,6 +163,7 @@ class StashScrapersClient:
             raise StashScrapersError("StashScrapers did not identify its active rules version")
         if body.get("rules_version") and version != body["rules_version"]:
             raise StashScrapersError("StashScrapers changed rules during scraping", "version_conflict")
+        logger.info("StashScrapers received scraper=%s operation=%s results=%d", body.get("scraper_id"), operation, len(data["results"]))
         return [row for row in data["results"] if isinstance(row, dict)], version
 
     def _normalize(self, result: dict[str, Any], scraper_id: str, query: str) -> dict[str, Any]:
@@ -189,35 +199,89 @@ class StashScrapersClient:
         self._movies[provider, movie_id] = scene
         return scene
 
-    async def _number(self, entry: dict[str, Any], query: str) -> list[dict[str, Any]]:
+    @staticmethod
+    def _has_metadata(row: dict[str, Any]) -> bool:
+        return any(row.get(key) for key in ("title", "details", "images", "performers", "date", "duration"))
+
+    @staticmethod
+    def _fatal(exc: StashScrapersError) -> bool:
+        return exc.code in {"version_conflict", "unauthorized"} or exc.status_code in {401, 403, 503}
+
+    async def _number(self, entry: dict[str, Any], query: str, filename: str | None = None) -> list[dict[str, Any]]:
         operations = {op.get("operation") for op in self._operations(entry)}
         scraper_id = entry["id"]
+        last_error: StashScrapersError | None = None
+
+        def accept(row: dict[str, Any]) -> list[dict[str, Any]]:
+            # A targeted fragment may legitimately omit Code (e.g. 1Pondo).
+            # Keep the source's Code empty; do not fabricate a returned number.
+            if row.get("code") and not _matches(row, query) or not self._has_metadata(row):
+                logger.info("StashScrapers rejected scraper=%s reason=number_mismatch_or_empty_metadata", scraper_id)
+                return []
+            scene = self._normalize(row, scraper_id, query)
+            scene["_matched_number"] = query
+            return [scene]
+
+        def failed(exc: StashScrapersError, operation: str) -> None:
+            nonlocal last_error
+            if self._fatal(exc):
+                raise exc
+            last_error = exc
+            logger.warning("StashScrapers action failed scraper=%s operation=%s: %s", scraper_id, operation, exc)
+
         if "name" in operations:
-            results, version = await self._results("search", {"scraper_id": scraper_id, "object": "scene", "query": query})
+            try:
+                results, version = await self._results("search", {"scraper_id": scraper_id, "object": "scene", "query": query})
+            except StashScrapersError as exc:
+                failed(exc, "name")
+                results, version = [], ""
             for result in results:
                 if not _matches(result, query):
+                    logger.info("StashScrapers rejected search candidate scraper=%s reason=number_mismatch", scraper_id)
                     continue
-                body: dict[str, Any] = {"scraper_id": scraper_id, "object": "scene", "rules_version": version}
+                common: dict[str, Any] = {"scraper_id": scraper_id, "object": "scene", "rules_version": version}
+                detail_requests = []
                 if "query_fragment" in operations and isinstance(result.get("raw"), dict) and result["raw"]:
-                    body.update(operation="query_fragment", fragment=result["raw"])
-                elif "url" in operations and _urls(result.get("urls")):
-                    body["url"] = _urls(result["urls"])[0]
-                else:
-                    return [self._normalize(result, scraper_id, query)]
-                details, _ = await self._results("detail", body)
-                for detail in details:
-                    if not detail.get("code") or _matches(detail, query):
-                        return [self._normalize(detail, scraper_id, query)]
+                    detail_requests.append({**common, "operation": "query_fragment", "fragment": result["raw"]})
+                if "url" in operations:
+                    detail_requests.extend({**common, "url": url} for url in _urls(result.get("urls"))
+                                          if any(op.get("operation") == "url" and any(_matches_url(url, pattern) for pattern in op.get("urls", [])) for op in self._operations(entry)))
+                if not detail_requests:
+                    accepted = accept(result)
+                    if accepted:
+                        return accepted
+                for body in detail_requests:
+                    try:
+                        details, _ = await self._results("detail", body)
+                    except StashScrapersError as exc:
+                        failed(exc, str(body.get("operation") or "url"))
+                        continue
+                    for detail in details:
+                        accepted = accept(detail)
+                        if accepted:
+                            return accepted
         if "fragment" in operations:
-            results, _ = await self._results("detail", {
-                "scraper_id": scraper_id, "object": "scene", "operation": "fragment",
-                "fragment": {"filename": query, "title": query, "code": query},
-                "rules_version": entry.get("version") or "",
-            })
-            return [self._normalize(row, scraper_id, query) for row in results if _matches(row, query)]
+            parsed_filename = extract_number(filename).number if filename else None
+            filename_hint = filename if parsed_filename and _matches({"code": parsed_filename}, query) else query + ".mp4"
+            try:
+                results, _ = await self._results("detail", {
+                    "scraper_id": scraper_id, "object": "scene", "operation": "fragment",
+                    "fragment": {"filename": filename_hint, "title": query, "code": query},
+                    "rules_version": entry.get("version") or "",
+                })
+            except StashScrapersError as exc:
+                failed(exc, "fragment")
+                results = []
+            for row in results:
+                accepted = accept(row)
+                if accepted:
+                    return accepted
+        if last_error:
+            raise last_error
         return []
 
-    async def _run(self, query: str, provider: str, fallback: bool, *, by_url: bool = False) -> list[dict[str, Any]]:
+    async def _run(self, query: str, provider: str, fallback: bool, *, by_url: bool = False, filename: str | None = None) -> list[dict[str, Any]]:
+        attempt_key = (query, by_url)
         for attempt in range(2):
             try:
                 entries = await self._entries()
@@ -233,21 +297,26 @@ class StashScrapersClient:
                 selected = [row for row in usable if provider in {row["id"], row.get("name")}] if provider else []
                 if provider and not selected and not fallback:
                     raise StashScrapersError("The selected StashScrapers scraper is unavailable for this operation")
-                candidates = selected + [row for row in usable if row not in selected] if fallback or not provider else selected
+                attempted = self._attempted.setdefault(attempt_key, set())
+                candidates = selected + [row for row in usable if row not in selected and row["id"] not in attempted] if fallback or not provider else selected
+                logger.info("StashScrapers plan mode=%s selected=%s eligible=%d scheduled=%d skipped=%d", "url" if by_url else "number", provider or "auto", len(usable), len(candidates), len(entries) - len(usable))
                 last_error: StashScrapersError | None = None
                 for entry in candidates:
+                    attempted.add(entry["id"])
                     try:
                         if by_url:
                             results, _ = await self._results("detail", {"scraper_id": entry["id"], "object": "scene", "url": query, "rules_version": entry.get("version") or ""})
-                            scenes = [self._normalize(row, entry["id"], query) for row in results]
+                            scenes = [self._normalize(row, entry["id"], query) for row in results if self._has_metadata(row)]
                         else:
-                            scenes = await self._number(entry, query)
+                            scenes = await self._number(entry, query, filename)
                         if scenes:
+                            logger.info("StashScrapers matched scraper=%s; stop remaining scrapers", entry["id"])
                             return scenes
                     except StashScrapersError as exc:
-                        if exc.code == "version_conflict" or not fallback and provider:
+                        if self._fatal(exc) or not fallback and provider:
                             raise
                         last_error = exc
+                        logger.warning("StashScrapers scraper failed scraper=%s; trying next: %s", entry["id"], exc)
                 if last_error:
                     raise last_error
                 return []
@@ -255,10 +324,11 @@ class StashScrapersClient:
                 if exc.code != "version_conflict" or attempt:
                     raise
                 self._catalog = None
+                self._attempted.pop(attempt_key, None)
         return []
 
-    async def search_movie(self, q: str, provider: str = "", fallback: bool = True) -> list[dict[str, Any]]:
-        return await self._run(q, provider, fallback)
+    async def search_movie(self, q: str, provider: str = "", fallback: bool = True, *, filename: str | None = None) -> list[dict[str, Any]]:
+        return await self._run(q, provider, fallback, filename=filename)
 
     async def scrape_url(self, url: str, provider: str = "", fallback: bool = True) -> list[dict[str, Any]]:
         if not _urls(url):
