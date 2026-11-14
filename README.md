@@ -7,7 +7,7 @@
 | 本应用（API + SPA） | 本机 / 本 VPS · GHCR 镜像 |
 | **MetaTube** | 远程已有服务，**不在本仓库部署** |
 
-元数据可选远程 MetaTube 或 Stash 社区刮削器；播放支持本地 Range 流与 HTTP(S) `.strm` 直链。Stash 与 MetaTube 均为独立服务，本项目不捆绑部署。
+元数据可选 MetaTube、Stash 或独立的拾录 / StashScrapers 刮削服务；播放支持本地 Range 流与 HTTP(S) `.strm` 直链。三个刮削后端均通过 HTTP 连接，本项目不捆绑部署。
 
 ---
 
@@ -16,6 +16,7 @@
 - 扫描本地视频与 `.strm`
 - 番号解析 + MetaTube 自动刮削（海报 / 标题 / 演员）
 - 可切换 Stash 刮削后端，复用其已安装的社区刮削器，支持番号与来源 URL 刮削
+- 支持拾录 / StashScrapers 的独立 REST 接口，直接复用社区规则，无需运行完整 Stash
 - 标题 / 简介 / 标签自动翻译（Google、必应、DeepL、OpenAI 兼容 AI 接口）
 - 浏览器播放（本地 Range 流 / HTTP 直链 `.strm`）
 - 播放进度记忆
@@ -30,7 +31,7 @@
               │
               ├─ SQLite  /data
               ├─ 媒体    /media  (local 视频 / strm 文本)
-              └─ HTTP ──► MetaTube / Stash（刮削，设置页选择）
+              └─ HTTP ──► MetaTube / Stash / StashScrapers（设置页选择）
 ```
 
 ---
@@ -175,6 +176,31 @@ STASH_FALLBACK=false
 支持名称搜索，以及使用标题 / 番号的元数据片段搜索。**仅依赖 Stash 本地文件名或指纹的片段刮削器不能直接处理本项目文件**，可改用其名称搜索或来源 URL。具体站点是否可用仍取决于 Stash 中的刮削器版本、登录配置与网络环境。
 
 接口与运行方式依据 [Stash API 文档](https://docs.stashapp.cc/api/)、[Stash GraphQL 刮削定义](https://github.com/stashapp/stash/blob/develop/graphql/schema/types/scraper.graphql)及 [CommunityScrapers](https://github.com/stashapp/CommunityScrapers)交叉核对。
+
+### 拾录 / StashScrapers（独立刮削服务）
+
+接入 [stashscrapers](https://github.com/nwfnyfgvfir/stashscrapers) 的 REST API，无需部署完整 Stash。本项目只调用服务，不读取另一项目的本地代码或数据目录。
+
+1. 先启动拾录服务，安装社区规则并启用需要的刮削器。Python、CDP、站点 Cookie 等依赖在拾录中配置，社区规则每日更新也由拾录管理。
+2. 本项目进入 **设置 → 刮削来源**，将刮削后端切换为 **拾录 / StashScrapers（独立刮削服务）**。
+3. 填写服务根地址，例如 `http://stashscrapers:8080`，也支持以 `/api` 结尾的地址。地址必须能从本项目后端访问；Docker 容器中的 `127.0.0.1` 指向容器自身。
+4. 如拾录设置了 `STASHSCRAPERS_TOKEN`，在本项目填写相同的 **Bearer Token**；未开启鉴权时可留空。保存后凭证不回显，输入框留空保留已保存的值。
+5. 保存后刷新源列表。只显示已启用且具有可用影片动作的刮削器，保留其带目录的原始 ID。可配置优先级、单源和失败后尝试其他源，三种后端的配置各自保留。
+6. 支持名称查询和番号片段查询；只有精确匹配番号的候选才会入库。仅 URL 的源需要在详情页填写来源 URL，URL 刮削仍遵循所选刮削器、优先级和 fallback。没有番号的影片可从 URL 返回的代码补齐番号。
+
+环境变量示例（设置页保存的值优先）：
+
+```env
+SCRAPE_SOURCE=stashscrapers
+STASHSCRAPERS_BASE_URL=http://stashscrapers:8080
+STASHSCRAPERS_TOKEN=your-service-token
+STASHSCRAPERS_SCRAPER_PRIORITY=["JavBus","1pondo"]
+STASHSCRAPERS_FALLBACK=false
+```
+
+API 使用 `GET /api/health`、`GET /api/scrapers`、`POST /api/search` 和 `POST /api/detail`。搜索后的详情请求回传原始 fragment 与 `rules_version`；若规则自动更新触发版本冲突，重新读取目录并重查一次，持续冲突时保留原媒体信息。连接检查同时检查资源是否就绪，以及 Token 能否读取目录，服务进程启动不等于规则已可用。
+
+接口根据该项目的 [API 文档](https://github.com/nwfnyfgvfir/stashscrapers/blob/main/docs/API.md)与实际服务代码适配。具体网站是否可用取决于规则、运行依赖、站点鉴权和网络条件。
 
 ### AI 翻译（可选）
 

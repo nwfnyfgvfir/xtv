@@ -15,17 +15,25 @@ from app.models import AppSetting
 from app.schemas import SettingsOut, SettingsUpdate
 from app.services.metatube import MetaTubeClient, MetaTubeError, parse_movie_provider_names
 from app.services.stash import StashClient
+from app.services.stashscrapers import StashScrapersClient
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 _PROVIDERS_CACHE_KEY = "metatube_movie_providers_cache"
 _STASH_CACHE_PREFIX = "stash_scrapers_cache:"
+_STASHSCRAPERS_CACHE_PREFIX = "stashscrapers_catalog_cache:"
+_SCRAPER_CACHE_PREFIXES = (_STASH_CACHE_PREFIX, _STASHSCRAPERS_CACHE_PREFIX)
 _MAX_PRIORITY = 50
 _MAX_PROVIDER_NAME_LEN = 64
 _MAX_STASH_SCRAPER_ID_LEN = 256
 
 OVERRIDE_KEYS = {
+    "stashscrapers_base_url",
+    "stashscrapers_token",
+    "stashscrapers_scraper",
+    "stashscrapers_scraper_priority",
+    "stashscrapers_fallback",
     "scrape_source",
     "stash_base_url",
     "stash_api_key",
@@ -120,8 +128,13 @@ def apply_persisted_overrides() -> None:
 
 def _apply_overrides_to_runtime(db_map: dict[str, str]) -> None:
     s = get_settings()
-    if db_map.get("scrape_source") in {"metatube", "stash"}:
+    if db_map.get("scrape_source") in {"metatube", "stash", "stashscrapers"}:
         s.scrape_source = db_map["scrape_source"]
+    for key in ("stashscrapers_base_url", "stashscrapers_token", "stashscrapers_scraper", "stashscrapers_scraper_priority"):
+        if key in db_map:
+            setattr(s, key, db_map[key] or "")
+    if "stashscrapers_fallback" in db_map:
+        s.stashscrapers_fallback = db_map["stashscrapers_fallback"].lower() in _BOOL_TRUE
     for key in ("stash_base_url", "stash_api_key", "stash_scraper", "stash_scraper_priority"):
         if key in db_map:
             setattr(s, key, db_map[key] or "")
@@ -221,18 +234,20 @@ async def _providers_with_status(db: Session) -> tuple[list[str], str | None, bo
         return [], err, False
 
 
-async def _stash_providers_with_status(db: Session) -> tuple[list[str], dict[str, str], str | None, bool]:
+async def _community_providers_with_status(db: Session, *, standalone: bool = False) -> tuple[list[str], dict[str, str], str | None, bool]:
     s = get_settings()
-    fingerprint = hashlib.sha256(f"{s.stash_base_url}\0{s.stash_api_key}".encode()).hexdigest()
-    cache_key = f"{_STASH_CACHE_PREFIX}{fingerprint}"
+    base, token = (s.stashscrapers_base_url, s.stashscrapers_token) if standalone else (s.stash_base_url, s.stash_api_key)
+    fingerprint = hashlib.sha256(f"{base}\0{token}".encode()).hexdigest()
+    cache_key = f"{_STASHSCRAPERS_CACHE_PREFIX if standalone else _STASH_CACHE_PREFIX}{fingerprint}"
     try:
-        scrapers = await StashClient(s).list_scrapers()
+        client = StashScrapersClient(s) if standalone else StashClient(s)
+        scrapers = await client.list_scrapers()
         labels = {
             row["id"]: row["name"] + ("（仅 URL）" if not {"NAME", "FRAGMENT"}.intersection(row["types"]) else "")
             for row in scrapers
         }
     except Exception as exc:  # noqa: BLE001
-        error = str(exc)[:300] or "Stash scrapers unavailable"
+        error = str(exc)[:300] or "Community scrapers unavailable"
         row = db.get(AppSetting, cache_key)
         labels = {}
         if row:
@@ -250,8 +265,16 @@ async def _stash_providers_with_status(db: Session) -> tuple[list[str], dict[str
         db.commit()
     except Exception:  # noqa: BLE001
         db.rollback()
-        logger.debug("Failed to cache Stash scrapers", exc_info=True)
+        logger.debug("Failed to cache community scrapers", exc_info=True)
     return list(labels), labels, None, False
+
+
+async def _stash_providers_with_status(db: Session) -> tuple[list[str], dict[str, str], str | None, bool]:
+    return await _community_providers_with_status(db)
+
+
+async def _stashscrapers_providers_with_status(db: Session) -> tuple[list[str], dict[str, str], str | None, bool]:
+    return await _community_providers_with_status(db, standalone=True)
 
 
 @router.get("", response_model=SettingsOut)
@@ -267,7 +290,7 @@ async def get_app_settings(
     extra = {
         k: v
         for k, v in db_map.items()
-        if k not in OVERRIDE_KEYS and k != _PROVIDERS_CACHE_KEY and not k.startswith(_STASH_CACHE_PREFIX)
+        if k not in OVERRIDE_KEYS and k != _PROVIDERS_CACHE_KEY and not k.startswith(_SCRAPER_CACHE_PREFIXES)
     }
     provider = db_map.get("metatube_provider", s.metatube_provider)
     priority = parse_priority_list(
@@ -324,13 +347,20 @@ async def get_app_settings(
         else bool(s.image_local_cache)
     )
     labels: dict[str, str] = {}
-    source = "stash" if s.scrape_source == "stash" else "metatube"
+    source = s.scrape_source if s.scrape_source in {"stash", "stashscrapers"} else "metatube"
     if source == "stash":
         movie_providers, labels, providers_error, from_cache = await _stash_providers_with_status(db)
+    elif source == "stashscrapers":
+        movie_providers, labels, providers_error, from_cache = await _stashscrapers_providers_with_status(db)
     else:
         movie_providers, providers_error, from_cache = await _providers_with_status(db)
     return SettingsOut(
         scrape_source=source,
+        stashscrapers_base_url=s.stashscrapers_base_url,
+        stashscrapers_token_set=bool(s.stashscrapers_token.strip()),
+        stashscrapers_scraper=s.stashscrapers_scraper,
+        stashscrapers_scraper_priority=parse_priority_list(s.stashscrapers_scraper_priority, max_name_len=_MAX_STASH_SCRAPER_ID_LEN),
+        stashscrapers_fallback=s.stashscrapers_fallback,
         stash_base_url=s.stash_base_url,
         stash_api_key_set=bool(s.stash_api_key.strip()),
         stash_scraper=s.stash_scraper,
@@ -381,8 +411,8 @@ async def update_app_settings(
     for key, value in data.items():
         if value is None:
             continue
-        if key in {"metatube_provider_priority", "stash_scraper_priority"}:
-            max_length = _MAX_STASH_SCRAPER_ID_LEN if key == "stash_scraper_priority" else _MAX_PROVIDER_NAME_LEN
+        if key in {"metatube_provider_priority", "stash_scraper_priority", "stashscrapers_scraper_priority"}:
+            max_length = _MAX_PROVIDER_NAME_LEN if key == "metatube_provider_priority" else _MAX_STASH_SCRAPER_ID_LEN
             store_val = json.dumps(
                 _sanitize_priority(value if isinstance(value, list) else [], max_name_len=max_length),
                 ensure_ascii=False,
@@ -401,7 +431,7 @@ async def update_app_settings(
         db.add(row)
     if extra:
         for k, v in extra.items():
-            if k == _PROVIDERS_CACHE_KEY or k.startswith(_STASH_CACHE_PREFIX):
+            if k == _PROVIDERS_CACHE_KEY or k.startswith(_SCRAPER_CACHE_PREFIXES):
                 continue
             row = db.get(AppSetting, k)
             if row is None:
@@ -419,8 +449,11 @@ async def list_movie_providers(
     _: Annotated[dict, Depends(require_auth)],
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    if get_settings().scrape_source == "stash":
-        names, labels, error, from_cache = await _stash_providers_with_status(db)
+    source = get_settings().scrape_source
+    if source in {"stash", "stashscrapers"}:
+        names, labels, error, from_cache = await (
+            _stashscrapers_providers_with_status(db) if source == "stashscrapers" else _stash_providers_with_status(db)
+        )
         if error and not from_cache:
             raise HTTPException(502, error)
         return {

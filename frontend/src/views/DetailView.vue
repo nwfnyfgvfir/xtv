@@ -17,7 +17,8 @@ import {
   translateMedia,
   unfavoriteMedia,
 } from '@/api/media'
-import type { MediaDetail, PlayInfo } from '@/api/types'
+import type { MediaDetail, PlayInfo, ScrapeSource } from '@/api/types'
+import { normalizeScrapeSource, scrapeSources } from '@/utils/scrapeSources'
 import { getErrorMessage } from '@/utils/errors'
 import { formatFileSize } from '@/utils/format'
 import { monogramChar, monogramStyle } from '@/utils/monogram'
@@ -39,7 +40,12 @@ const scrapeProvider = ref('')
 const scrapeFallback = ref(true)
 const scrapeNumber = ref('')
 const scrapeUrl = ref('')
-const useStash = ref(false)
+const scrapeSource = ref<ScrapeSource>('metatube')
+const useStash = computed(() => scrapeSource.value === 'stash')
+const supportsSourceUrl = computed(() => scrapeSource.value !== 'metatube')
+const sourceUrlPlaceholder = computed(() =>
+  useStash.value ? '可选，由 Stash 自动匹配刮削器' : '可选，按所选刮削器或来源地址匹配',
+)
 const providerLabels = ref<Record<string, string>>({})
 const playerWrap = ref<HTMLElement | null>(null)
 const renameVisible = ref(false)
@@ -65,7 +71,7 @@ const isChineseSub = computed(
 const canRescrape = computed(() =>
   Boolean(
     (scrapeNumber.value || item.value?.number || '').trim() ||
-    (useStash.value && scrapeUrl.value.trim()),
+    (supportsSourceUrl.value && scrapeUrl.value.trim()),
   ),
 )
 const isLocal = computed(() => item.value?.source_type === 'local')
@@ -100,11 +106,12 @@ async function load() {
 async function loadProviders() {
   try {
     const s = await getSettings()
-    useStash.value = s.scrape_source === 'stash'
+    scrapeSource.value = normalizeScrapeSource(s.scrape_source)
+    const fields = scrapeSources[scrapeSource.value]
     providerLabels.value = s.movie_provider_labels || {}
     const list = [...(s.movie_providers || [])]
-    const pri = (useStash.value ? s.stash_scraper_priority : s.metatube_provider_priority) || []
-    const preferred = (useStash.value ? s.stash_scraper : s.metatube_provider) || ''
+    const pri = s[fields.priority] || []
+    const preferred = s[fields.provider] || ''
     for (const p of pri) {
       if (p && !list.includes(p)) list.push(p)
     }
@@ -113,7 +120,7 @@ async function loadProviders() {
     }
     providers.value = list
     scrapeProvider.value = pri[0] || preferred
-    scrapeFallback.value = (useStash.value ? s.stash_fallback : s.metatube_fallback) !== false
+    scrapeFallback.value = s[fields.fallback] !== false
   } catch {
     /* ignore */
   }
@@ -135,9 +142,9 @@ async function onPlay() {
 
 async function onRescrape() {
   const number = (scrapeNumber.value || item.value?.number || '').trim()
-  const url = useStash.value ? scrapeUrl.value.trim() : ''
+  const url = supportsSourceUrl.value ? scrapeUrl.value.trim() : ''
   if (!number && !url) {
-    ElMessage.warning(useStash.value ? '请填写番号或来源 URL' : '请先填写番号')
+    ElMessage.warning(supportsSourceUrl.value ? '请填写番号或来源 URL' : '请先填写番号')
     return
   }
   scrapeLoading.value = true
@@ -439,12 +446,12 @@ watch(() => props.id, load)
             </summary>
             <div class="maintenance-content">
               <div class="scrape-row">
-                <label v-if="useStash" class="management-field"
+                <label v-if="supportsSourceUrl" class="management-field"
                   >来源 URL<el-input
                     v-model="scrapeUrl"
                     clearable
                     maxlength="2048"
-                    placeholder="可选，由 Stash 自动匹配刮削器"
+                    :placeholder="sourceUrlPlaceholder"
                     aria-label="刮削来源 URL"
                     :disabled="scrapeLoading"
                 /></label>

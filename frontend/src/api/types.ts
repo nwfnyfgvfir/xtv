@@ -126,7 +126,7 @@ export interface Progress {
 }
 
 export type ImageProxyMode = 'site' | 'metatube' | 'external'
-export type ScrapeSource = 'metatube' | 'stash'
+export type ScrapeSource = 'metatube' | 'stash' | 'stashscrapers'
 
 export type TranslateProvider = 'google' | 'bing' | 'deepl' | 'ai'
 
@@ -142,6 +142,11 @@ export type ActorSort = 'media_count_desc' | 'debut_asc' | 'debut_desc'
 
 export interface Settings {
   scrape_source?: ScrapeSource
+  stashscrapers_base_url?: string
+  stashscrapers_token_set?: boolean
+  stashscrapers_scraper?: string
+  stashscrapers_scraper_priority?: string[]
+  stashscrapers_fallback?: boolean
   stash_base_url?: string
   stash_api_key_set?: boolean
   stash_scraper?: string
@@ -195,6 +200,7 @@ export interface Health {
   status: string
   metatube?: { ok?: boolean; data?: unknown; error?: string } | null
   stash?: { ok?: boolean; data?: unknown; error?: string } | null
+  stashscrapers?: { ok?: boolean; data?: unknown; error?: string } | null
   scrape_source?: ScrapeSource
   auth_enabled?: boolean
   watcher?: {

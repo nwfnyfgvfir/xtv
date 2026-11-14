@@ -126,7 +126,7 @@ def rewrite_image_url(
         )
         return site_proxy_url(url)
 
-    if mode == "metatube" and provider and provider_id and not provider.startswith("stash:"):
+    if mode == "metatube" and provider and provider_id and not provider.startswith(("stash:", "stashscrapers:")):
         from app.services.metatube import MetaTubeClient
 
         return MetaTubeClient().primary_image_url(

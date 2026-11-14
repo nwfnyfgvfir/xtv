@@ -267,8 +267,8 @@ async def rescrape_media(
         from urllib.parse import urlsplit
         from app.config import get_settings
 
-        if get_settings().scrape_source != "stash":
-            raise HTTPException(400, "source URL scraping requires Stash")
+        if get_settings().scrape_source not in {"stash", "stashscrapers"}:
+            raise HTTPException(400, "source URL scraping requires Stash or StashScrapers")
         try:
             parsed = urlsplit(source_url)
             valid_url = parsed.scheme in {"http", "https"} and bool(parsed.hostname)

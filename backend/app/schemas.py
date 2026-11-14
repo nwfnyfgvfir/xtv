@@ -194,7 +194,12 @@ class ProgressOut(BaseModel):
 
 
 class SettingsOut(BaseModel):
-    scrape_source: Literal["metatube", "stash"] = "metatube"
+    scrape_source: Literal["metatube", "stash", "stashscrapers"] = "metatube"
+    stashscrapers_base_url: str = ""
+    stashscrapers_token_set: bool = False
+    stashscrapers_scraper: str = ""
+    stashscrapers_scraper_priority: list[str] = []
+    stashscrapers_fallback: bool = True
     stash_base_url: str = ""
     stash_api_key_set: bool = False
     stash_scraper: str = ""
@@ -233,7 +238,12 @@ class SettingsOut(BaseModel):
 
 
 class SettingsUpdate(BaseModel):
-    scrape_source: Literal["metatube", "stash"] | None = None
+    scrape_source: Literal["metatube", "stash", "stashscrapers"] | None = None
+    stashscrapers_base_url: str | None = None
+    stashscrapers_token: str | None = None
+    stashscrapers_scraper: str | None = None
+    stashscrapers_scraper_priority: list[str] | None = None
+    stashscrapers_fallback: bool | None = None
     stash_base_url: str | None = None
     stash_api_key: str | None = None
     stash_scraper: str | None = None
@@ -285,7 +295,8 @@ class HealthOut(BaseModel):
     version: str = "dev"
     metatube: dict[str, Any] | None = None
     stash: dict[str, Any] | None = None
-    scrape_source: Literal["metatube", "stash"] = "metatube"
+    stashscrapers: dict[str, Any] | None = None
+    scrape_source: Literal["metatube", "stash", "stashscrapers"] = "metatube"
     auth_enabled: bool = False
     watcher: dict[str, Any] | None = None
 

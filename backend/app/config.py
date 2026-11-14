@@ -42,12 +42,17 @@ class Settings(BaseSettings):
     metatube_provider: str = ""  # empty = auto
     metatube_provider_priority: str = ""  # JSON array string e.g. '["JavBus","FANZA"]'
     metatube_fallback: bool = True
-    scrape_source: str = "metatube"  # metatube | stash
+    scrape_source: str = "metatube"  # metatube | stash | stashscrapers
     stash_base_url: str = ""
     stash_api_key: str = ""
     stash_scraper: str = ""  # empty = auto
     stash_scraper_priority: str = ""  # JSON array of scraper IDs
     stash_fallback: bool = True
+    stashscrapers_base_url: str = ""
+    stashscrapers_token: str = ""
+    stashscrapers_scraper: str = ""
+    stashscrapers_scraper_priority: str = ""
+    stashscrapers_fallback: bool = True
     cors_origins: str = "http://127.0.0.1:5173,http://localhost:5173"
     host: str = "0.0.0.0"
     port: int = 8000

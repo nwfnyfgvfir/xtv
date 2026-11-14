@@ -7,6 +7,7 @@ import type { Health, ImageProxyMode, ScrapeSource, Settings, TranslateProvider 
 import { getErrorMessage } from '@/utils/errors'
 import { APP_VERSION } from '@/utils/version'
 import AppIcon from '@/components/AppIcon.vue'
+import { normalizeScrapeSource, scrapeSources } from '@/utils/scrapeSources'
 
 const router = useRouter()
 const appVersion = APP_VERSION
@@ -15,6 +16,11 @@ const settings = ref<Settings | null>(null)
 const health = ref<Health | null>(null)
 const form = ref({
   scrape_source: 'metatube' as ScrapeSource,
+  stashscrapers_base_url: '',
+  stashscrapers_token: '',
+  stashscrapers_scraper: '',
+  stashscrapers_scraper_priority: [] as string[],
+  stashscrapers_fallback: true,
   stash_base_url: '',
   stash_api_key: '',
   stash_scraper: '',
@@ -62,33 +68,31 @@ const isDirty = computed(
 )
 const priorityPick = ref<string[]>([])
 const isStash = computed(() => form.value.scrape_source === 'stash')
+const isStashScrapers = computed(() => form.value.scrape_source === 'stashscrapers')
+const activeSourceFields = computed(() => scrapeSources[form.value.scrape_source])
 const activePriority = computed({
-  get: () =>
-    isStash.value ? form.value.stash_scraper_priority : form.value.metatube_provider_priority,
+  get: () => form.value[activeSourceFields.value.priority],
   set: (value: string[]) => {
-    if (isStash.value) form.value.stash_scraper_priority = value
-    else form.value.metatube_provider_priority = value
+    form.value[activeSourceFields.value.priority] = value
   },
 })
 const activeProvider = computed({
-  get: () => (isStash.value ? form.value.stash_scraper : form.value.metatube_provider),
+  get: () => form.value[activeSourceFields.value.provider],
   set: (value: string) => {
-    if (isStash.value) form.value.stash_scraper = value
-    else form.value.metatube_provider = value
+    form.value[activeSourceFields.value.provider] = value
   },
 })
 const activeFallback = computed({
-  get: () => (isStash.value ? form.value.stash_fallback : form.value.metatube_fallback),
+  get: () => form.value[activeSourceFields.value.fallback],
   set: (value: boolean) => {
-    if (isStash.value) form.value.stash_fallback = value
-    else form.value.metatube_fallback = value
+    form.value[activeSourceFields.value.fallback] = value
   },
 })
-const connectedSource = computed(() =>
-  settings.value?.scrape_source === 'stash' ? 'Stash' : 'MetaTube',
-)
-const sourceHealth = computed(() =>
-  settings.value?.scrape_source === 'stash' ? health.value?.stash : health.value?.metatube,
+const savedSource = computed(() => normalizeScrapeSource(settings.value?.scrape_source))
+const connectedSource = computed(() => scrapeSources[savedSource.value].label)
+const sourceHealth = computed(() => health.value?.[savedSource.value])
+const sourceCredentialSet = computed(
+  () => settings.value?.[scrapeSources[savedSource.value].credentialSet],
 )
 
 watch(
@@ -165,7 +169,12 @@ function normalizeProvider(mode: string | undefined): TranslateProvider {
 }
 
 function applySettingsToForm(s: Settings) {
-  form.value.scrape_source = s.scrape_source === 'stash' ? 'stash' : 'metatube'
+  form.value.scrape_source = normalizeScrapeSource(s.scrape_source)
+  form.value.stashscrapers_base_url = s.stashscrapers_base_url || ''
+  form.value.stashscrapers_token = ''
+  form.value.stashscrapers_scraper = s.stashscrapers_scraper || ''
+  form.value.stashscrapers_scraper_priority = [...(s.stashscrapers_scraper_priority || [])]
+  form.value.stashscrapers_fallback = s.stashscrapers_fallback !== false
   form.value.stash_base_url = s.stash_base_url || ''
   form.value.stash_api_key = ''
   form.value.stash_scraper = s.stash_scraper || ''
@@ -279,6 +288,11 @@ function removePriority(index: number) {
 }
 
 async function save() {
+  if (isStashScrapers.value && !form.value.stashscrapers_base_url.trim()) {
+    activeSection.value = 'metadata'
+    ElMessage.warning('请填写 StashScrapers 服务地址')
+    return
+  }
   if (isStash.value && !form.value.stash_base_url.trim()) {
     activeSection.value = 'metadata'
     ElMessage.warning('请填写 Stash 服务地址')
@@ -297,6 +311,10 @@ async function save() {
   try {
     const body: Record<string, unknown> = {
       scrape_source: form.value.scrape_source,
+      stashscrapers_base_url: form.value.stashscrapers_base_url.trim(),
+      stashscrapers_scraper: form.value.stashscrapers_scraper,
+      stashscrapers_scraper_priority: form.value.stashscrapers_scraper_priority,
+      stashscrapers_fallback: form.value.stashscrapers_fallback,
       stash_base_url: form.value.stash_base_url.trim(),
       stash_scraper: form.value.stash_scraper,
       stash_scraper_priority: form.value.stash_scraper_priority,
@@ -322,6 +340,8 @@ async function save() {
       metatube_fallback: form.value.metatube_fallback,
     }
     if (form.value.metatube_token) body.metatube_token = form.value.metatube_token
+    if (form.value.stashscrapers_token.trim())
+      body.stashscrapers_token = form.value.stashscrapers_token.trim()
     if (form.value.stash_api_key.trim()) body.stash_api_key = form.value.stash_api_key.trim()
     if (form.value.translate_deepl_api_key) {
       body.translate_deepl_api_key = form.value.translate_deepl_api_key
@@ -416,9 +436,38 @@ onMounted(() => {
               <el-select v-model="form.scrape_source" style="width: 100%">
                 <el-option label="MetaTube" value="metatube" />
                 <el-option label="Stash（社区刮削器）" value="stash" />
+                <el-option label="拾录 / StashScrapers（独立刮削服务）" value="stashscrapers" />
               </el-select>
             </el-form-item>
-            <template v-if="isStash">
+            <template v-if="isStashScrapers">
+              <el-form-item label="StashScrapers 服务地址">
+                <el-input
+                  v-model="form.stashscrapers_base_url"
+                  placeholder="http://stashscrapers:8080"
+                />
+                <span class="field-hint muted block"
+                  >填写拾录服务的根地址，也支持以 /api 结尾的地址</span
+                >
+              </el-form-item>
+              <el-form-item label="StashScrapers Bearer Token">
+                <el-input
+                  v-model="form.stashscrapers_token"
+                  type="password"
+                  show-password
+                  placeholder="留空则不修改"
+                />
+                <span class="field-hint muted block"
+                  >{{ settings?.stashscrapers_token_set ? '已配置' : '未配置' }} · 填写服务的
+                  STASHSCRAPERS_TOKEN；未开启鉴权可留空</span
+                >
+              </el-form-item>
+              <p class="field-hint muted span-full">
+                使用独立的拾录服务，无需运行完整
+                Stash。先在拾录中安装规则并启用所需刮削器，再保存连接配置、刷新源列表。仅列出已启用且具有可用影片动作的源；仅
+                URL 的源需在详情页填写来源 URL。规则每日更新由拾录服务管理。
+              </p>
+            </template>
+            <template v-else-if="isStash">
               <el-form-item label="Stash 服务地址">
                 <el-input v-model="form.stash_base_url" placeholder="http://stash:9999" />
                 <span class="field-hint muted block">填写服务根地址或完整的 /graphql 地址</span>
@@ -780,15 +829,7 @@ onMounted(() => {
             <div>
               <dt>服务凭证</dt>
               <dd>
-                {{
-                  (
-                    settings.scrape_source === 'stash'
-                      ? settings.stash_api_key_set
-                      : settings.metatube_token_set
-                  )
-                    ? '已配置'
-                    : '未配置'
-                }}
+                {{ sourceCredentialSet ? '已配置' : '未配置' }}
               </dd>
             </div>
             <div>
