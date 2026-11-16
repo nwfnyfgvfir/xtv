@@ -290,6 +290,36 @@ class ScanJobOut(BaseModel):
     message: str | None = None
 
 
+class TaskOut(ScanJobOut):
+    kind: str
+    media_id: int | None = None
+    media_label: str | None = None
+    library_name: str = ""
+    parent_id: str | None = None
+    phase: str = "queued"
+    current: str | None = None
+    total: int = 0
+    processed: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    skipped: int = 0
+    cancel_requested: bool = False
+    retryable: bool = False
+    resumable: bool = False
+    created_at: datetime
+    updated_at: datetime
+    finished_at: datetime | None = None
+
+
+class TaskItemOut(BaseModel):
+    id: int
+    phase: str
+    label: str
+    media_id: int | None = None
+    status: str
+    error: str | None = None
+
+
 class HealthOut(BaseModel):
     status: str
     version: str = "dev"

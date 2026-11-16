@@ -8,16 +8,17 @@ import DirectoryPickerDialog from '@/components/DirectoryPickerDialog.vue'
 import MediaGrid from '@/components/MediaGrid.vue'
 import AppIcon from '@/components/AppIcon.vue'
 import SkeletonGrid from '@/components/SkeletonGrid.vue'
+import TaskProgress from '@/components/TaskProgress.vue'
+import { isActiveTask, useTasks } from '@/composables/useTasks'
 import {
   createLibrary,
-  getScanJob,
   listLibraries,
   listMedia,
   rescrapePendingLibrary,
   scanLibrary,
   deleteLibrary,
 } from '@/api/media'
-import type { Library, MediaListItem, MediaSort, ScanJob } from '@/api/types'
+import type { Library, MediaListItem, MediaSort } from '@/api/types'
 import { usePagedRoute } from '@/composables/usePagedRoute'
 import { getErrorMessage } from '@/utils/errors'
 import { loadMediaSort, MEDIA_SORT_OPTIONS, saveMediaSort } from '@/utils/mediaSort'
@@ -34,8 +35,18 @@ const sort = ref<MediaSort>(loadMediaSort())
 const filter = ref<MediaFilter>(parseFilter(queryString(route.query, 'filter')))
 const PAGE_SIZE = DEFAULT_PAGE_SIZE
 const loading = ref(false)
-const scanningId = ref<number | null>(null)
-const scanProgress = ref<ScanJob | null>(null)
+const { tasks, acceptTask, panelOpen } = useTasks()
+const submittingLibraryId = ref<number | null>(null)
+const libraryTask = computed(() =>
+  tasks.value.find(
+    (task) => task.library_id === currentLibraryId.value && task.kind !== 'rescrape',
+  ),
+)
+const scanningId = computed(
+  () =>
+    submittingLibraryId.value ||
+    (libraryTask.value && isActiveTask(libraryTask.value) ? libraryTask.value.library_id : null),
+)
 const currentLibraryId = ref<number | null>(null)
 const SOFT_REFRESH_MS = 20000
 let softRefreshTimer: number | undefined
@@ -257,62 +268,45 @@ async function onCreate() {
 
 async function onScan(lib: Library) {
   if (scanningId.value) return
-  scanningId.value = lib.id
-  scanProgress.value = null
+  submittingLibraryId.value = lib.id
   try {
     const job = await scanLibrary(lib.id)
-    ElMessage.info(`扫描已开始: ${job.job_id}`)
-    await pollJob(job.job_id, '扫描')
-    await loadLibraries()
-    if (currentLibraryId.value === lib.id) await loadMedia()
+    acceptTask(job)
+    ElMessage.info('扫描任务已加入后台队列')
   } catch (e: unknown) {
     ElMessage.error(getErrorMessage(e, '扫描失败'))
   } finally {
-    scanningId.value = null
-    scanProgress.value = null
+    submittingLibraryId.value = null
   }
 }
 
 async function onRescrapePending(lib: Library) {
   if (scanningId.value) return
-  scanningId.value = lib.id
-  scanProgress.value = null
+  submittingLibraryId.value = lib.id
   try {
     const job = await rescrapePendingLibrary(lib.id)
-    ElMessage.info(`补刮已开始: ${job.job_id}`)
-    await pollJob(job.job_id, '补刮')
-    await loadLibraries()
-    if (currentLibraryId.value === lib.id) await loadMedia()
+    acceptTask(job)
+    ElMessage.info('补刮任务已加入后台队列')
   } catch (e: unknown) {
     ElMessage.error(getErrorMessage(e, '补刮失败'))
   } finally {
-    scanningId.value = null
-    scanProgress.value = null
+    submittingLibraryId.value = null
   }
 }
 
-async function pollJob(jobId: string, kind = '扫描') {
-  const max = 600 // up to ~10 min with 1s interval
-  for (let i = 0; i < max; i++) {
-    try {
-      const job = await getScanJob(jobId)
-      scanProgress.value = job
-      if (job.status === 'done') {
-        ElMessage.success(job.message || `${kind}完成`)
-        return
-      }
-      if (job.status === 'error') {
-        throw new Error(job.message || `${kind}出错`)
-      }
-    } catch (e: unknown) {
-      const status = (e as { response?: { status?: number } })?.response?.status
-      if (status === 404) throw new Error(`${kind}任务丢失（服务可能已重启）`)
-      if (e instanceof Error && (e.message.includes(kind) || e.message.includes('任务'))) throw e
+watch(
+  () =>
+    tasks.value
+      .filter((task) => task.library_id === currentLibraryId.value && !isActiveTask(task))
+      .map((task) => `${task.job_id}:${task.status}:${task.processed}`)
+      .join('|'),
+  () => {
+    if (loadedOnce) {
+      void loadLibraries()
+      void loadMedia({ force: true })
     }
-    await new Promise((r) => setTimeout(r, 1000))
-  }
-  throw new Error(`${kind}超时，请稍后刷新查看结果`)
-}
+  },
+)
 
 async function onDelete(lib: Library) {
   try {
@@ -521,15 +515,14 @@ onBeforeUnmount(stopSoftRefresh)
       /></el-select>
     </div>
 
-    <div v-if="scanProgress && scanningId" class="scan-banner" role="status">
-      <div class="scan-text">
-        <AppIcon name="refresh" :size="16" />任务进行中<span class="scan-stats"
-          >已扫描 {{ scanProgress.scanned }} · 新增 {{ scanProgress.created }} · 已刮削
-          {{ scanProgress.scraped }}</span
-        >
-      </div>
-      <div class="scan-msg muted">{{ scanProgress.message || scanProgress.status }}</div>
-      <div class="scan-bar"><i /></div>
+    <div
+      v-if="
+        libraryTask && (isActiveTask(libraryTask) || libraryTask.resumable || libraryTask.failed)
+      "
+      class="library-task"
+    >
+      <TaskProgress :task="libraryTask" />
+      <el-button text @click="panelOpen = true">查看全部后台任务</el-button>
     </div>
 
     <SkeletonGrid v-if="loading && !items.length" />
@@ -589,6 +582,9 @@ onBeforeUnmount(stopSoftRefresh)
   </div>
 </template>
 <style scoped>
+.library-task {
+  margin-bottom: 22px;
+}
 .description-dot {
   margin: 0 10px;
   color: var(--faint);
@@ -731,52 +727,6 @@ onBeforeUnmount(stopSoftRefresh)
   font-size: 12px;
   text-align: right;
 }
-.scan-banner {
-  padding: 16px 18px;
-  background: var(--accent-soft);
-  border: 1px solid var(--accent-line);
-  border-radius: 9px;
-  margin: 0 0 24px;
-}
-.scan-text {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  color: var(--accent);
-  font-size: 12px;
-}
-.scan-stats {
-  color: var(--text-soft);
-  margin-left: auto;
-  font-variant-numeric: tabular-nums;
-}
-.scan-msg {
-  font-size: 11px;
-  margin-top: 6px;
-}
-.scan-bar {
-  margin-top: 12px;
-  height: 2px;
-  background: var(--border);
-  border-radius: 9px;
-  overflow: hidden;
-}
-.scan-bar i {
-  display: block;
-  height: 100%;
-  width: 35%;
-  background: var(--accent);
-  animation: scanmove 1.1s var(--ease-in-out) infinite;
-}
-@keyframes scanmove {
-  from {
-    transform: translateX(-100%);
-  }
-  to {
-    transform: translateX(320%);
-  }
-}
 .danger-text {
   color: var(--danger);
 }
@@ -861,10 +811,6 @@ onBeforeUnmount(stopSoftRefresh)
     padding-left: 12px;
     padding-right: 12px;
     height: 44px;
-  }
-  .scan-stats {
-    margin-left: 0;
-    width: 100%;
   }
 }
 </style>

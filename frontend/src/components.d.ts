@@ -19,6 +19,7 @@ declare module 'vue' {
     ElButton: typeof import('element-plus/es')['ElButton']
     ElCheckbox: typeof import('element-plus/es')['ElCheckbox']
     ElDialog: typeof import('element-plus/es')['ElDialog']
+    ElDrawer: typeof import('element-plus/es')['ElDrawer']
     ElDropdown: typeof import('element-plus/es')['ElDropdown']
     ElDropdownItem: typeof import('element-plus/es')['ElDropdownItem']
     ElDropdownMenu: typeof import('element-plus/es')['ElDropdownMenu']
@@ -36,6 +37,8 @@ declare module 'vue' {
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     SkeletonGrid: typeof import('./components/SkeletonGrid.vue')['default']
+    TaskPanel: typeof import('./components/TaskPanel.vue')['default']
+    TaskProgress: typeof import('./components/TaskProgress.vue')['default']
     VideoPlayer: typeof import('./components/VideoPlayer.vue')['default']
   }
 }

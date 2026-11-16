@@ -10,11 +10,9 @@ from watchdog.observers.polling import PollingObserver
 from app.config import get_settings
 from app.db import SessionLocal
 from app.models import Library
-from app.services.jobs import job_store
+from app.services.task_store import active_for_library, enqueue, TaskConflict
 from app.services.scanner import (
-    refresh_paths,
     resolve_library_path,
-    run_scan_job,
 )
 
 logger = logging.getLogger(__name__)
@@ -89,6 +87,10 @@ def _run_debounced_refresh(library_id: int) -> None:
     try:
         if not paths:
             return
+        with SessionLocal() as db:
+            if active_for_library(db, library_id):
+                schedule_library_scan(library_id, list(paths))
+                return
         # Path storm or many directory events → full scan (safe prune).
         dir_like = 0
         for p in paths:
@@ -98,36 +100,17 @@ def _run_debounced_refresh(library_id: int) -> None:
             except Exception:  # noqa: BLE001
                 pass
         if len(paths) > _PATH_STORM_THRESHOLD or dir_like > 5:
-            job = job_store.create(library_id)
-            logger.info(
-                "Watcher full scan library=%s job=%s paths=%s",
-                library_id,
-                job.job_id,
-                len(paths),
-            )
-            run_scan_job(job.job_id, library_id)
-            logger.info(
-                "Watcher full scan finished library=%s status=%s message=%s",
-                library_id,
-                job.status,
-                job.message,
-            )
+            inputs = {}
         else:
-            logger.info(
-                "Watcher path refresh library=%s paths=%s sample=%s",
-                library_id,
-                len(paths),
-                list(paths)[:5],
-            )
-            summary = refresh_paths(library_id, paths)
-            logger.info(
-                "Watcher path refresh done library=%s created=%s removed=%s scanned=%s ok=%s",
-                library_id,
-                summary.get("created"),
-                summary.get("removed"),
-                summary.get("scanned"),
-                summary.get("ok"),
-            )
+            inputs = {"paths": sorted(paths)}
+        with SessionLocal() as db:
+            lib = db.get(Library, library_id)
+            if lib:
+                try:
+                    job = enqueue(db, "scan", lib, inputs=inputs)
+                    logger.info("Watcher queued persistent scan library=%s job=%s", library_id, job.job_id)
+                except TaskConflict:
+                    schedule_library_scan(library_id, list(paths))
     except Exception:  # noqa: BLE001
         logger.exception("Watcher refresh failed library=%s", library_id)
     finally:

@@ -31,3 +31,8 @@ Thumbs.db
 .claude/settings.local.json
 *.db
 *.sqlite3
+*.db-wal
+*.db-shm
+*.sqlite3-wal
+*.sqlite3-shm
+*.tasks.lock

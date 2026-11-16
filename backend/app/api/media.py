@@ -9,7 +9,9 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.db import get_db
 from app.deps import require_auth
-from app.models import Favorite, MediaItem
+from app.models import Favorite, Library, MediaItem
+from app.api.tasks import conflict
+from app.services import task_store
 from app.schemas import (
     BatchDeleteFailure,
     BatchDeleteIn,
@@ -21,6 +23,7 @@ from app.schemas import (
     PaginatedMedia,
     RenameIn,
     RescrapeIn,
+    TaskOut,
 )
 from app.services.duplicates import list_duplicate_groups
 from app.services.images import rewrite_image_url
@@ -246,7 +249,41 @@ def get_media(
     return _with_proxied_images(item, detail=True)  # type: ignore[return-value]
 
 
-@router.post("/{media_id}/rescrape", response_model=MediaDetail)
+@router.post("/{media_id}/rescrape-task", response_model=TaskOut, status_code=202)
+def enqueue_rescrape(media_id: int, _: Annotated[dict, Depends(require_auth)],
+                     body: RescrapeIn | None = None, db: Session = Depends(get_db)) -> TaskOut:
+    from urllib.parse import urlsplit
+    from app.config import get_settings
+
+    item = db.get(MediaItem, media_id)
+    if item is None:
+        raise HTTPException(404, "media not found")
+    body = body or RescrapeIn()
+    inputs = body.model_dump(exclude_none=True)
+    url = (body.url or "").strip()
+    number = normalize_number(body.number) if body.number and body.number.strip() else item.number
+    if url:
+        if get_settings().scrape_source not in {"stash", "stashscrapers"}:
+            raise HTTPException(400, "source URL scraping requires Stash or StashScrapers")
+        try:
+            parts = urlsplit(url)
+            if parts.scheme not in {"http", "https"} or not parts.hostname:
+                raise ValueError()
+        except ValueError:
+            raise HTTPException(400, "invalid source URL") from None
+        inputs["url"] = url
+    if not number and not url:
+        raise HTTPException(400, "no number; provide number to scrape")
+    if body.number and body.number.strip():
+        inputs["number"] = number
+    try:
+        return task_store.task_out(db, task_store.enqueue(db, "rescrape", db.get(Library, item.library_id),
+            media_id=media_id, inputs=inputs))
+    except task_store.TaskConflict as exc:
+        raise conflict(exc) from exc
+
+
+@router.post("/{media_id}/rescrape", response_model=MediaDetail, deprecated=True)
 async def rescrape_media(
     media_id: int,
     _: Annotated[dict, Depends(require_auth)],
@@ -261,6 +298,8 @@ async def rescrape_media(
     )
     if not item:
         raise HTTPException(404, "media not found")
+    if task_store.active_for_library(db, item.library_id):
+        raise HTTPException(409, "该媒体库已有后台任务，请先取消或等待完成")
     body = body or RescrapeIn()
     source_url = (body.url or "").strip()
     if source_url:

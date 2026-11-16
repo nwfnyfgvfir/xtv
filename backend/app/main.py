@@ -14,6 +14,7 @@ from app.config import get_settings
 from app.db import init_db
 from app.logging_setup import configure_logging
 from app.services.watcher import start_watcher, stop_watcher
+from app.services.task_runner import runner as task_runner
 
 configure_logging()
 logger = logging.getLogger(__name__)
@@ -42,11 +43,13 @@ async def lifespan(_app: FastAPI):
             logger.exception("Failed to create image cache dir")
     if not settings.auth_enabled:
         logger.warning("ADMIN_PASSWORD empty — API auth is DISABLED (dev mode)")
+    task_runner.start()
     try:
         start_watcher()
     except Exception:  # noqa: BLE001
         logger.exception("Failed to start filesystem watcher")
     yield
+    task_runner.stop()
     try:
         stop_watcher()
     except Exception:  # noqa: BLE001

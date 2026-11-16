@@ -5,6 +5,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import VideoPlayer from '@/components/VideoPlayer.vue'
 import CoverPlaceholder from '@/components/CoverPlaceholder.vue'
 import AppIcon from '@/components/AppIcon.vue'
+import TaskProgress from '@/components/TaskProgress.vue'
+import { isActiveTask, useTasks } from '@/composables/useTasks'
 import ExternalPlayersBar from '@/components/ExternalPlayersBar.vue'
 import {
   deleteMedia,
@@ -32,7 +34,14 @@ const playing = ref(false)
 const imgFailed = ref(false)
 const favLoading = ref(false)
 const playLoading = ref(false)
-const scrapeLoading = ref(false)
+const { tasks, acceptTask } = useTasks()
+const scrapeSubmitting = ref(false)
+const currentTask = computed(() =>
+  tasks.value.find((task) => task.media_id === Number(props.id) && task.kind === 'rescrape'),
+)
+const scrapeLoading = computed(
+  () => scrapeSubmitting.value || Boolean(currentTask.value && isActiveTask(currentTask.value)),
+)
 const translateLoading = ref(false)
 const deleteLoading = ref(false)
 const providers = ref<string[]>([])
@@ -156,9 +165,9 @@ async function onRescrape() {
     ElMessage.warning(supportsSourceUrl.value ? '请填写番号或来源 URL' : '请先填写番号')
     return
   }
-  scrapeLoading.value = true
+  scrapeSubmitting.value = true
   try {
-    item.value = await rescrapeMedia(Number(props.id), {
+    const task = await rescrapeMedia(Number(props.id), {
       // Omission follows global priorities; explicit "" requests full automatic mode.
       provider: followsGlobalSource.value ? undefined : scrapeProvider.value,
       fallback: followsGlobalSource.value
@@ -169,15 +178,36 @@ async function onRescrape() {
       number,
       url: url || undefined,
     })
-    syncScrapeNumber()
-    imgFailed.value = false
-    ElMessage.success('刮削完成')
+    acceptTask(task)
+    ElMessage.info('重刮任务已加入后台队列，可以离开页面')
   } catch (e: unknown) {
     ElMessage.error(getErrorMessage(e, '刮削失败'))
   } finally {
-    scrapeLoading.value = false
+    scrapeSubmitting.value = false
   }
 }
+
+watch(
+  () =>
+    currentTask.value
+      ? `${currentTask.value.job_id}:${currentTask.value.status}:${currentTask.value.scraped}`
+      : '',
+  async () => {
+    const task = currentTask.value
+    if (!task || isActiveTask(task) || !task.scraped) return
+    const id = props.id
+    try {
+      const updated = await getMedia(Number(id))
+      if (props.id === id) {
+        item.value = updated
+        syncScrapeNumber()
+        imgFailed.value = false
+      }
+    } catch {
+      /* Normal page loading still reports errors. */
+    }
+  },
+)
 
 async function onToggleFav() {
   if (!item.value) return
@@ -487,7 +517,7 @@ watch(() => props.id, load)
                     default-first-option
                     placeholder="自动选择"
                     aria-label="刮削器"
-                    :disabled="useStash && !!scrapeUrl.trim()"
+                    :disabled="scrapeLoading || (useStash && !!scrapeUrl.trim())"
                     ><el-option label="跟随全局配置" :value="FOLLOW_GLOBAL_SOURCE" />
                     <el-option label="自动（全部适用源）" value="" /><el-option
                       v-for="provider in providers"
@@ -505,6 +535,7 @@ watch(() => props.id, load)
                   active-text="失败时尝试其他源"
                   aria-label="刮削失败时尝试其他源"
                 />
+                <TaskProgress v-if="currentTask" :task="currentTask" />
                 <div class="maintenance-actions">
                   <el-button
                     :loading="scrapeLoading"

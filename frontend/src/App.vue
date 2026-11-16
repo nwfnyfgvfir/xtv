@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '@/components/AppIcon.vue'
+import TaskPanel from '@/components/TaskPanel.vue'
+import { refreshTasks, startTaskPolling, stopTaskPolling, useTasks } from '@/composables/useTasks'
 import { setupAuthInterceptor, useAuth } from '@/composables/useAuth'
 import { useTheme } from '@/composables/useTheme'
 import { APP_VERSION } from '@/utils/version'
@@ -9,7 +11,8 @@ import { APP_VERSION } from '@/utils/version'
 const route = useRoute()
 const router = useRouter()
 const { theme, toggle } = useTheme()
-const { authEnabled, isAuthenticated, logout } = useAuth()
+const { authEnabled, isAuthenticated, logout, ready } = useAuth()
+const { activeTasks, panelOpen } = useTasks()
 const navigating = ref(false)
 const searchQuery = ref(typeof route.query.q === 'string' ? route.query.q : '')
 const KEEP_ALIVE_NAMES = ['LibraryView', 'SearchView', 'ActorsView', 'FavoritesView']
@@ -34,6 +37,24 @@ const pageLabel = computed(() => {
   return navigation.find((item) => item.key === active.value)?.label || '媒体库'
 })
 const showChrome = computed(() => route.name !== 'login')
+watch(
+  [ready, isAuthenticated, showChrome],
+  ([loaded, authenticated, visible]) => {
+    if (loaded && authenticated && visible) startTaskPolling()
+    else stopTaskPolling()
+  },
+  { immediate: true },
+)
+function reconnectTasks() {
+  if (ready.value && isAuthenticated.value && showChrome.value) void refreshTasks()
+}
+window.addEventListener('online', reconnectTasks)
+document.addEventListener('visibilitychange', reconnectTasks)
+onBeforeUnmount(() => {
+  stopTaskPolling()
+  window.removeEventListener('online', reconnectTasks)
+  document.removeEventListener('visibilitychange', reconnectTasks)
+})
 
 setupAuthInterceptor(() => {
   if (route.name !== 'login') router.push({ name: 'login', query: { redirect: route.fullPath } })
@@ -126,6 +147,17 @@ function onLogout() {
         </form>
         <div class="header-tools">
           <button
+            class="icon-button task-button"
+            type="button"
+            aria-label="后台任务"
+            title="后台任务"
+            @click="panelOpen = true"
+          >
+            <AppIcon name="clock" :size="19" /><span v-if="activeTasks.length" class="task-badge">{{
+              activeTasks.length
+            }}</span>
+          </button>
+          <button
             class="icon-button"
             type="button"
             :aria-label="theme === 'dark' ? '切换到亮色' : '切换到暗色'"
@@ -167,6 +199,7 @@ function onLogout() {
         <AppIcon :name="item.icon" :size="20" /><span>{{ item.label }}</span>
       </router-link>
     </nav>
+    <TaskPanel v-if="showChrome" />
   </div>
 </template>
 
@@ -372,6 +405,20 @@ function onLogout() {
 .icon-button:hover {
   background: var(--panel-hover);
   color: var(--text);
+}
+.task-button {
+  position: relative;
+}
+.task-badge {
+  position: absolute;
+  top: 0;
+  right: -2px;
+  min-width: 15px;
+  padding: 1px 3px;
+  border-radius: 9px;
+  font-size: 9px;
+  background: var(--accent);
+  color: var(--bg);
 }
 .login-link {
   font-size: 12px;

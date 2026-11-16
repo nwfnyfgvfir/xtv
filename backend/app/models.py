@@ -8,6 +8,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    Index,
     String,
     Text,
     UniqueConstraint,
@@ -19,6 +20,62 @@ from app.db import Base
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+class BackgroundJob(Base):
+    __tablename__ = "background_jobs"
+
+    job_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="pending", index=True)
+    active_key: Mapped[str | None] = mapped_column(String(80), unique=True)
+    library_id: Mapped[int | None] = mapped_column(ForeignKey("libraries.id", ondelete="SET NULL"), index=True)
+    library_name: Mapped[str] = mapped_column(String(128), default="")
+    media_id: Mapped[int | None] = mapped_column(Integer, index=True)
+    media_label: Mapped[str | None] = mapped_column(String(512))
+    parent_id: Mapped[str | None] = mapped_column(String(32), unique=True)
+    params_json: Mapped[str] = mapped_column(Text, default="{}")
+    manifest_ready: Mapped[bool] = mapped_column(Boolean, default=False)
+    followup_ready: Mapped[bool] = mapped_column(Boolean, default=False)
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
+    phase: Mapped[str] = mapped_column(String(32), default="queued")
+    message: Mapped[str | None] = mapped_column(Text)
+    current: Mapped[str | None] = mapped_column(String(512))
+    total: Mapped[int] = mapped_column(Integer, default=0)
+    processed: Mapped[int] = mapped_column(Integer, default=0)
+    succeeded: Mapped[int] = mapped_column(Integer, default=0)
+    failed: Mapped[int] = mapped_column(Integer, default=0)
+    skipped: Mapped[int] = mapped_column(Integer, default=0)
+    scanned: Mapped[int] = mapped_column(Integer, default=0)
+    created: Mapped[int] = mapped_column(Integer, default=0)
+    scraped: Mapped[int] = mapped_column(Integer, default=0)
+    removed: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    items: Mapped[list[BackgroundJobItem]] = relationship(cascade="all, delete-orphan", passive_deletes=True)
+
+
+class BackgroundJobItem(Base):
+    __tablename__ = "background_job_items"
+    __table_args__ = (
+        UniqueConstraint("job_id", "item_key", name="uq_job_item"),
+        Index("ix_task_item_pending", "job_id", "status", "id"),
+        Index("ix_task_item_phase", "job_id", "phase", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    job_id: Mapped[str] = mapped_column(ForeignKey("background_jobs.job_id", ondelete="CASCADE"), index=True)
+    item_key: Mapped[str] = mapped_column(Text)
+    phase: Mapped[str] = mapped_column(String(24))
+    label: Mapped[str] = mapped_column(String(512))
+    path: Mapped[str | None] = mapped_column(Text)
+    media_id: Mapped[int | None] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(24), default="pending", index=True)
+    error: Mapped[str | None] = mapped_column(Text)
+    result_json: Mapped[str] = mapped_column(Text, default="{}")
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Library(Base):

@@ -175,6 +175,7 @@ async def scrape_media_item(
     provider_override: str | None = None,
     fallback_override: bool | None = None,
     url_override: str | None = None,
+    settings_override: Settings | None = None,
 ) -> bool:
     """Scrape metadata for a media item. Returns True if updated."""
     if not item.number and not url_override:
@@ -183,7 +184,7 @@ async def scrape_media_item(
         return False
 
     try:
-        settings = get_settings()
+        settings = settings_override or get_settings()
         use_stash = settings.scrape_source == "stash"
         use_standalone = settings.scrape_source == "stashscrapers"
         if use_standalone:

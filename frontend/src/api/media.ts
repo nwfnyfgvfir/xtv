@@ -14,6 +14,7 @@ import type {
   PlayInfo,
   Progress,
   ScanJob,
+  BackgroundTask,
   Settings,
 } from './types'
 
@@ -50,10 +51,10 @@ export const updateLibrary = (
 export const deleteLibrary = (id: number) => client.delete(`/libraries/${id}`)
 
 export const scanLibrary = (id: number) =>
-  client.post<ScanJob>(`/libraries/${id}/scan`).then((r) => r.data)
+  client.post<BackgroundTask>(`/libraries/${id}/scan`).then((r) => r.data)
 
 export const rescrapePendingLibrary = (id: number) =>
-  client.post<ScanJob>(`/libraries/${id}/rescrape-pending`).then((r) => r.data)
+  client.post<BackgroundTask>(`/libraries/${id}/rescrape-pending`).then((r) => r.data)
 
 export const getScanJob = (jobId: string) =>
   client.get<ScanJob>(`/scan/jobs/${jobId}`).then((r) => r.data)
@@ -79,7 +80,7 @@ export const getMedia = (id: number) => client.get<MediaDetail>(`/media/${id}`).
 export const rescrapeMedia = (
   id: number,
   body?: { provider?: string; fallback?: boolean; number?: string; url?: string },
-) => client.post<MediaDetail>(`/media/${id}/rescrape`, body || {}).then((r) => r.data)
+) => client.post<BackgroundTask>(`/media/${id}/rescrape-task`, body || {}).then((r) => r.data)
 
 export const translateMedia = (id: number) =>
   client.post<MediaDetail>(`/media/${id}/translate`).then((r) => r.data)
@@ -127,7 +128,8 @@ export const listActorMedia = (
   params?: { page?: number; page_size?: number; sort?: string },
 ) => client.get<PaginatedMedia>(`/actors/${id}/media`, { params }).then((r) => r.data)
 
-export const playMedia = (id: number) => client.get<PlayInfo>(`/media/${id}/play`).then((r) => r.data)
+export const playMedia = (id: number) =>
+  client.get<PlayInfo>(`/media/${id}/play`).then((r) => r.data)
 
 export const getProgress = (id: number) =>
   client.get<Progress>(`/media/${id}/progress`).then((r) => r.data)

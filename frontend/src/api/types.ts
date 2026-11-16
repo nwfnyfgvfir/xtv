@@ -131,12 +131,7 @@ export type ScrapeSource = 'metatube' | 'stash' | 'stashscrapers'
 export type TranslateProvider = 'google' | 'bing' | 'deepl' | 'ai'
 
 export type MediaSort =
-  | 'number_asc'
-  | 'number_desc'
-  | 'created_asc'
-  | 'created_desc'
-  | 'release_asc'
-  | 'release_desc'
+  'number_asc' | 'number_desc' | 'created_asc' | 'created_desc' | 'release_asc' | 'release_desc'
 
 export type ActorSort = 'media_count_desc' | 'debut_asc' | 'debut_desc'
 
@@ -194,6 +189,36 @@ export interface ScanJob {
   removed?: number
   errors: string[]
   message?: string | null
+}
+
+export interface BackgroundTask extends ScanJob {
+  kind: 'scan' | 'rescrape_pending' | 'rescrape'
+  media_id: number | null
+  media_label: string | null
+  library_name: string
+  parent_id: string | null
+  phase: string
+  current: string | null
+  total: number
+  processed: number
+  succeeded: number
+  failed: number
+  skipped: number
+  cancel_requested: boolean
+  retryable: boolean
+  resumable: boolean
+  created_at: string
+  updated_at: string
+  finished_at: string | null
+}
+
+export interface TaskItem {
+  id: number
+  phase: string
+  label: string
+  media_id: number | null
+  status: string
+  error: string | null
 }
 
 export interface Health {
