@@ -6,7 +6,8 @@ from pathlib import Path
 def read_strm_target(path: Path) -> str | None:
     """Read first non-empty, non-comment line from a .strm file."""
     try:
-        text = path.read_text(encoding="utf-8", errors="ignore")
+        with path.open("r", encoding="utf-8", errors="ignore") as handle:
+            text = handle.read(65536)
     except OSError:
         return None
     for line in text.splitlines():

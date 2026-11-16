@@ -15,6 +15,7 @@ from app.services.library_revision import bump_revision
 from app.services.naming import extract_number
 from app.services.scrape import scrape_media_item
 from app.services.strm import read_strm_target
+from app.services.file_readiness import check_file, FileDeferred, FileCheck, ignored_reason, apply_recognition
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +33,7 @@ def _is_media_file(path: Path, exts: set[str]) -> bool:
         return False
 
     # Always skip common download temporary files (e.g. yt-dlp output)
-    temp_exts = {"ts", "tmp", "part", "crdownload", "ytdlp", "partial"}
-    if path.suffix.lower().lstrip(".") in temp_exts:
+    if ignored_reason(path, path.parent):
         return False
 
     ext = path.suffix.lower().lstrip(".")
@@ -62,7 +62,7 @@ def scan_library_sync(db: Session, lib: Library, job: ScanJob | None = None) -> 
     exts = settings.extension_set
     seen_paths: set[str] = set()
     for path in root.rglob("*"):
-        if not path.is_file():
+        if not _is_media_file(path, exts):
             continue
         ext = path.suffix.lower().lstrip(".")
         if ext not in exts:
@@ -71,6 +71,8 @@ def scan_library_sync(db: Session, lib: Library, job: ScanJob | None = None) -> 
             item = _ingest_file(db, lib, path, job, auto_scrape=False)
             seen_paths.add(item.path)
             job.scanned += 1
+        except FileDeferred:
+            seen_paths.add(str(path.resolve()))
         except Exception as exc:  # noqa: BLE001
             logger.exception("ingest failed %s", path)
             job.errors.append(f"{path.name}: {exc}")
@@ -78,7 +80,7 @@ def scan_library_sync(db: Session, lib: Library, job: ScanJob | None = None) -> 
     # Remove DB rows for files that disappeared from disk.
     existing = db.query(MediaItem).filter(MediaItem.library_id == lib.id).all()
     for item in existing:
-        if item.path not in seen_paths:
+        if item.path not in seen_paths and not ignored_reason(Path(item.path), root, lib):
             db.delete(item)
             job.removed += 1
 
@@ -356,7 +358,10 @@ def refresh_paths(library_id: int, paths: list[str] | set[str]) -> dict:
         db.close()
 
 
-def _ingest_file(db: Session, lib: Library, path: Path, job: ScanJob, auto_scrape: bool) -> MediaItem:
+def _ingest_file(db: Session, lib: Library, path: Path, job: ScanJob, auto_scrape: bool, check: FileCheck | None = None) -> MediaItem:
+    check = check or check_file(db, lib, path)
+    if check.state != "ready":
+        raise FileDeferred(check)
     abs_path = str(path.resolve())
     existing = (
         db.query(MediaItem)
@@ -364,12 +369,12 @@ def _ingest_file(db: Session, lib: Library, path: Path, job: ScanJob, auto_scrap
         .one_or_none()
     )
     parsed = extract_number(path.name)
-    size = path.stat().st_size if path.exists() else None
+    size = check.stat.st_size
 
     source_type = "local"
     strm_target = None
     if path.suffix.lower() == ".strm":
-        strm_target = read_strm_target(path)
+        strm_target = check.strm_target
         source_type = "strm"
 
     if existing is None:
@@ -391,9 +396,6 @@ def _ingest_file(db: Session, lib: Library, path: Path, job: ScanJob, auto_scrap
     else:
         item = existing
         item.filename = path.name
-        item.number = parsed.number or item.number
-        item.disc = parsed.disc or item.disc
-        item.subtitle_flag = parsed.subtitle_flag or item.subtitle_flag
         item.file_size = size
         item.source_type = source_type
         item.strm_target = strm_target
@@ -402,6 +404,10 @@ def _ingest_file(db: Session, lib: Library, path: Path, job: ScanJob, auto_scrap
         db.add(item)
         db.flush()
 
+    apply_recognition(item, lib, path)
+    item.file_mtime_ns = str(check.stat.st_mtime_ns)
+    if not item.title:
+        item.title = item.number or path.stem
     if auto_scrape and item.number and not item.scraped_at:
         if asyncio.run(scrape_media_item(db, item, force=False)):
             job.scraped += 1
@@ -552,13 +558,8 @@ def rename_media_item(db: Session, library_id: int, media_id: int, new_filename:
         item.filename = new_path.name
         item.path = str(new_path.resolve())
         # Re-extract number/disc/subtitle flags from the new name when possible.
-        parsed = extract_number(new_path.name)
-        if parsed.number:
-            item.number = parsed.number
-        if parsed.disc:
-            item.disc = parsed.disc
-        if parsed.subtitle_flag:
-            item.subtitle_flag = parsed.subtitle_flag
+        apply_recognition(item, lib, new_path)
+        item.file_mtime_ns = str(new_path.stat().st_mtime_ns)
         db.add(item)
         db.commit()
         bump_revision(library_id)

@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+import unicodedata
+from dataclasses import dataclass, field
+from pathlib import Path
+
+RECOGNITION_VERSION = "names-v2"
 
 # Tokens often appended by scene groups — strip before matching
 _QUALITY_TOKENS = re.compile(
     r"(?i)[.\-_\s]?(?:1080p|720p|2160p|4k|8k|x264|x265|h264|h265|hevc|aac|ac3|flac|web-?dl|bluray|blu-?ray|remux|hdr|uhd|dvdrip|hdrip|fhd|chs|cht|jav)$"
 )
 
-_FC2 = re.compile(r"(?i)\bFC2[-_ ]?(?:PPV[-_ ]?)?(\d{6,8})\b")
-_HEYZO = re.compile(r"(?i)\bHEYZO[-_ ]?(\d{3,5})\b")
+_FC2 = re.compile(r"(?i)(?<![a-z0-9])FC2[-_. ]*(?:PPV[-_. ]*)?(\d{6,8})(?![a-z0-9])")
+_HEYZO = re.compile(r"(?i)(?<![a-z0-9])HEYZO[-_. ]*(\d{3,5})(?![a-z0-9])")
 _STANDARD = re.compile(
-    r"(?i)\b([A-Z]{2,15})[-_ ]?(\d{2,5})(?:[-_ ]?(C|CD\d+|PART\d+))?\b"
+    r"(?i)(?<![a-z0-9])([A-Z]{2,15})[-_. ]*(\d{2,5})(?![a-z0-9])"
 )
 _DATE_STYLE = re.compile(r"(?<!\d)(\d{6})[_.\- ](\d{2,3})(?!\d)")
 _DISC = re.compile(r"(?i)(?:^|[-_\s.])(cd\d+|part\d+)(?:$|[-_\s.])")
@@ -24,6 +28,9 @@ class ParsedName:
     disc: str | None
     subtitle_flag: str | None
     raw_stem: str
+    candidates: list[str] = field(default_factory=list)
+    source: str | None = None
+    notes: list[str] = field(default_factory=list)
 
 
 def _strip_quality(stem: str) -> str:
@@ -35,12 +42,14 @@ def _strip_quality(stem: str) -> str:
     return cur.strip(" .-_")
 
 
-def extract_number(filename: str) -> ParsedName:
+def extract_number(filename: str, *, stem_only: bool = False) -> ParsedName:
     """Extract 番号-style code from a media filename."""
-    stem = filename.rsplit(".", 1)[0] if "." in filename else filename
+    filename = unicodedata.normalize("NFKC", filename).translate(str.maketrans({c: "-" for c in "–—−﹣"}))
+    stem = filename if stem_only else filename.rsplit(".", 1)[0] if "." in filename else filename
     raw_stem = stem
     cleaned = stem.replace(" ", "-")
     cleaned = _strip_quality(cleaned)
+    cleaned = re.sub(r"(?i)^.*?[a-z0-9.-]+\.(?:com|net|org|xyz|example|tv)(?:/[^@\s]*)?[@_ -]+", "", cleaned)
 
     disc: str | None = None
     m_disc = _DISC.search(cleaned)
@@ -51,35 +60,44 @@ def extract_number(filename: str) -> ParsedName:
     if _SUB_C.search(cleaned) or re.search(r"(?i)-C(?:-|$)", cleaned):
         subtitle_flag = "C"
 
-    m = _FC2.search(cleaned)
-    if m:
-        return ParsedName(number=f"FC2-{m.group(1)}", disc=disc, subtitle_flag=subtitle_flag, raw_stem=raw_stem)
-
-    m = _HEYZO.search(cleaned)
-    if m:
-        return ParsedName(number=f"HEYZO-{m.group(1)}", disc=disc, subtitle_flag=subtitle_flag, raw_stem=raw_stem)
-
-    # Prefer match closest to start; skip pure quality-looking codes
+    candidates = []
+    for regex, prefix in ((_FC2, "FC2"), (_HEYZO, "HEYZO")):
+        candidates.extend(f"{prefix}-{m.group(1)}" for m in regex.finditer(cleaned))
     for m in _STANDARD.finditer(cleaned):
         prefix = m.group(1).upper()
         digits = m.group(2)
-        if prefix in {"CD", "PART", "VOL", "DISC", "H264", "H265", "X264", "X265", "AAC"}:
+        if prefix in {"CD", "PART", "VOL", "DISC", "H264", "H265", "X264", "X265", "AAC", "HDR", "HEVC", "FC", "HEYZO"}:
             continue
         number = f"{prefix}-{digits}"
-        extra = m.group(3)
-        if extra:
-            extra_u = extra.upper()
-            if extra_u == "C":
-                subtitle_flag = subtitle_flag or "C"
-            elif extra_u.startswith("CD") or extra_u.startswith("PART"):
-                disc = disc or extra.lower()
-        return ParsedName(number=number, disc=disc, subtitle_flag=subtitle_flag, raw_stem=raw_stem)
+        candidates.append(number)
+    candidates.extend(f"{m.group(1)}-{m.group(2)}" for m in _DATE_STYLE.finditer(cleaned))
+    candidates = list(dict.fromkeys(candidates))
+    return ParsedName(number=candidates[0] if len(candidates) == 1 else None, disc=disc,
+        subtitle_flag=subtitle_flag, raw_stem=raw_stem, candidates=candidates,
+        source="filename" if len(candidates) == 1 else None,
+        notes=["文件名包含多个番号，请手动确认"] if len(candidates) > 1 else [])
 
-    m = _DATE_STYLE.search(cleaned)
-    if m:
-        return ParsedName(number=f"{m.group(1)}-{m.group(2)}", disc=disc, subtitle_flag=subtitle_flag, raw_stem=raw_stem)
 
-    return ParsedName(number=None, disc=disc, subtitle_flag=subtitle_flag, raw_stem=raw_stem)
+def recognize_path(path: Path, root: Path, parent_depth: int = 2) -> ParsedName:
+    result = extract_number(path.name)
+    parent_result = None
+    parent = path.parent
+    for _ in range(max(0, min(parent_depth, 3))):
+        if parent == root or not parent.is_relative_to(root):
+            break
+        candidate = extract_number(parent.name, stem_only=True)
+        if re.search(r"(?i)合集|全集|collection|compilation", parent.name) or len(candidate.candidates) > 1:
+            break
+        if candidate.number:
+            parent_result = candidate
+            break
+        parent = parent.parent
+    if result.number and parent_result and result.number != parent_result.number:
+        result.notes.append(f"文件名与父目录番号冲突：目录为 {parent_result.number}，采用文件名")
+    if not result.candidates and parent_result:
+        result.number, result.candidates, result.source = parent_result.number, parent_result.candidates, "parent"
+        result.notes.append("番号取自最近的有效父目录")
+    return result
 
 
 def normalize_number(raw: str | None) -> str | None:

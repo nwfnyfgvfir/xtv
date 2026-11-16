@@ -51,7 +51,7 @@ def task_out(db: Session, job: BackgroundJob) -> TaskOut:
     fields = {key: getattr(job, key) for key in (
         "job_id", "kind", "status", "library_id", "library_name", "media_id", "media_label", "parent_id",
         "phase", "current", "total", "processed", "succeeded", "failed", "skipped",
-        "scanned", "created", "scraped", "removed", "message", "cancel_requested",
+        "scanned", "created", "scraped", "removed", "waiting", "message", "cancel_requested",
         "created_at", "updated_at", "finished_at",
     )}
     target_exists = job.library_id is not None and (job.kind != "rescrape" or db.get(MediaItem, job.media_id) is not None)
@@ -150,6 +150,7 @@ def retry_failed(db: Session, job: BackgroundJob) -> BackgroundJob:
     retry = BackgroundJob(job_id=uuid.uuid4().hex, kind=job.kind, library_id=job.library_id,
         library_name=job.library_name, media_id=job.media_id, media_label=job.media_label, parent_id=job.job_id,
         active_key=key, params_json=json.dumps(params, ensure_ascii=False), manifest_ready=True,
+        scan_manifest_json=job.scan_manifest_json,
         message="等待重试失败条目")
     try:
         db.add(retry)
@@ -178,11 +179,14 @@ def recount(db: Session, job: BackgroundJob) -> None:
     job.skipped = sum(item.status == "skipped" for item in rows)
     job.processed = job.succeeded + job.failed + job.skipped
     for key in ("scanned", "created", "scraped", "removed"):
+        if key == "scanned" and job.kind == "scan" and not json.loads(job.params_json).get("retry_only"):
+            continue
         setattr(job, key, sum(json.loads(item.result_json or "{}").get(key, 0) for item in rows if item.status == "succeeded"))
+    job.waiting = (0 if json.loads(job.params_json).get("retry_only") else json.loads(job.scan_manifest_json or "{}").get("waiting", 0)) + sum(json.loads(item.result_json or "{}").get("waiting", 0) for item in rows)
 
 
 def finish_item(db: Session, job: BackgroundJob, item: BackgroundJobItem,
-                status: str, result: dict[str, int] | None = None, error: str | None = None) -> None:
+                status: str, result: dict[str, int] | None = None, error: str | None = None, *, commit: bool = True) -> None:
     item.status, item.error = status, error
     item.result_json = json.dumps(result or {})
     job.processed += 1
@@ -190,7 +194,8 @@ def finish_item(db: Session, job: BackgroundJob, item: BackgroundJobItem,
     for key, value in (result or {}).items():
         setattr(job, key, getattr(job, key) + value)
     job.updated_at = utcnow()
-    db.commit()
+    if commit:
+        db.commit()
 
 
 def add_item(db: Session, job: BackgroundJob, phase: str, key: str, label: str,

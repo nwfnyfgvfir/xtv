@@ -71,6 +71,8 @@ def _ensure_column(table: str, column: str, ddl_type: str, default_sql: str | No
 def init_db() -> None:
     from app import models  # noqa: F401
 
+    existing = inspect(engine)
+    old_scan_policy = "libraries" in existing.get_table_names() and "scan_mode" not in {c["name"] for c in existing.get_columns("libraries")}
     Base.metadata.create_all(bind=engine)
     # Lightweight migrations for existing SQLite DBs
     _ensure_column("libraries", "auto_scan_enabled", "BOOLEAN", "0")
@@ -78,6 +80,26 @@ def init_db() -> None:
     _ensure_column("libraries", "scan_interval_seconds", "INTEGER", None)
     _ensure_column("media_items", "title_original", "TEXT", None)
     _ensure_column("media_items", "plot_original", "TEXT", None)
+    for column, ddl, default in (
+        ("full_scan_interval_seconds", "INTEGER", "86400"),
+        ("next_full_scan_at", "DATETIME", None), ("file_settle_seconds", "INTEGER", None),
+        ("parent_fallback_depth", "INTEGER", None), ("ignore_dirs", "TEXT", None),
+    ):
+        _ensure_column("libraries", column, ddl, default)
+    for column, ddl, default in (
+        ("number_locked", "BOOLEAN", "0"), ("number_source", "VARCHAR(24)", None),
+        ("recognition_notes", "TEXT", None), ("recognition_version", "VARCHAR(64)", None),
+        ("file_mtime_ns", "VARCHAR(32)", None),
+    ):
+        _ensure_column("media_items", column, ddl, default)
+    _ensure_column("background_jobs", "waiting", "INTEGER", "0")
+    _ensure_column("background_jobs", "scan_manifest_json", "TEXT", "'{}'")
+    if old_scan_policy:
+        # Legacy auto_scan_enabled was unused: preserve monitoring, at a lower rate.
+        with engine.begin() as conn:
+            conn.execute(text("UPDATE libraries SET auto_scan_enabled=enabled, scan_interval_seconds=CASE WHEN scan_interval_seconds>=30 THEN scan_interval_seconds ELSE 120 END"))
+    # Add the migration marker last so an interrupted upgrade can run again.
+    _ensure_column("libraries", "scan_mode", "VARCHAR(16)", "'poll'")
     # Backfill seconds from legacy hours when empty
     try:
         with engine.begin() as conn:

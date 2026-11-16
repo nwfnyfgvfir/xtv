@@ -50,6 +50,8 @@ class BackgroundJob(Base):
     created: Mapped[int] = mapped_column(Integer, default=0)
     scraped: Mapped[int] = mapped_column(Integer, default=0)
     removed: Mapped[int] = mapped_column(Integer, default=0)
+    waiting: Mapped[int] = mapped_column(Integer, default=0)
+    scan_manifest_json: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -86,7 +88,13 @@ class Library(Base):
     path: Mapped[str] = mapped_column(String(1024), nullable=False)
     type: Mapped[str] = mapped_column(String(32), default="mixed", nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    auto_scan_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    auto_scan_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    scan_mode: Mapped[str] = mapped_column(String(16), default="poll", nullable=False)
+    full_scan_interval_seconds: Mapped[int] = mapped_column(Integer, default=86400, nullable=False)
+    next_full_scan_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    file_settle_seconds: Mapped[int | None] = mapped_column(Integer)
+    parent_fallback_depth: Mapped[int | None] = mapped_column(Integer)
+    ignore_dirs: Mapped[str | None] = mapped_column(Text)
     scan_interval_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)  # legacy
     scan_interval_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -103,6 +111,11 @@ class MediaItem(Base):
     path: Mapped[str] = mapped_column(String(2048), nullable=False)
     filename: Mapped[str] = mapped_column(String(512), nullable=False)
     number: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    number_locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    number_source: Mapped[str | None] = mapped_column(String(24))
+    recognition_notes: Mapped[str | None] = mapped_column(Text)
+    recognition_version: Mapped[str | None] = mapped_column(String(64))
+    file_mtime_ns: Mapped[str | None] = mapped_column(String(32))
     title: Mapped[str | None] = mapped_column(String(512), nullable=True)
     title_original: Mapped[str | None] = mapped_column(String(512), nullable=True)
     plot: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -200,3 +213,20 @@ class AppSetting(Base):
 
     key: Mapped[str] = mapped_column(String(128), primary_key=True)
     value: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class FileObservation(Base):
+    __tablename__ = "file_observations"
+    __table_args__ = (UniqueConstraint("library_id", "path", name="uq_observed_path"),
+                     Index("ix_observation_due", "state", "next_check_at"))
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    library_id: Mapped[int] = mapped_column(ForeignKey("libraries.id", ondelete="CASCADE"), index=True)
+    path: Mapped[str] = mapped_column(Text)
+    size: Mapped[int | None] = mapped_column(Integer)
+    mtime_ns: Mapped[str | None] = mapped_column(String(32))
+    state: Mapped[str] = mapped_column(String(24), default="waiting")
+    reason: Mapped[str] = mapped_column(Text, default="")
+    changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    next_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    confirmed: Mapped[bool] = mapped_column(Boolean, default=False)

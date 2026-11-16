@@ -11,6 +11,13 @@ class LibraryCreate(BaseModel):
     path: str = Field(min_length=1, max_length=1024)
     type: Literal["local", "strm", "mixed"] = "mixed"
     enabled: bool = True
+    auto_scan_enabled: bool = True
+    scan_mode: Literal["poll", "native"] = "poll"
+    scan_interval_seconds: int | None = Field(default=None, ge=30, le=86400)
+    full_scan_interval_seconds: int = Field(default=86400, ge=900, le=2592000)
+    file_settle_seconds: int | None = Field(default=None, ge=0, le=3600)
+    parent_fallback_depth: int | None = Field(default=None, ge=0, le=3)
+    ignore_dirs: str | None = Field(default=None, max_length=2048)
 
 
 class LibraryUpdate(BaseModel):
@@ -18,6 +25,13 @@ class LibraryUpdate(BaseModel):
     path: str | None = None
     type: Literal["local", "strm", "mixed"] | None = None
     enabled: bool | None = None
+    auto_scan_enabled: bool | None = None
+    scan_mode: Literal["poll", "native"] | None = None
+    scan_interval_seconds: int | None = Field(default=None, ge=30, le=86400)
+    full_scan_interval_seconds: int | None = Field(default=None, ge=900, le=2592000)
+    file_settle_seconds: int | None = Field(default=None, ge=0, le=3600)
+    parent_fallback_depth: int | None = Field(default=None, ge=0, le=3)
+    ignore_dirs: str | None = Field(default=None, max_length=2048)
 
 
 class LibraryOut(BaseModel):
@@ -28,6 +42,18 @@ class LibraryOut(BaseModel):
     path: str
     type: str
     enabled: bool
+    auto_scan_enabled: bool = True
+    scan_mode: str = "poll"
+    scan_interval_seconds: int | None = None
+    full_scan_interval_seconds: int = 86400
+    file_settle_seconds: int | None = None
+    parent_fallback_depth: int | None = None
+    ignore_dirs: str | None = None
+    waiting_files: int = 0
+    effective_settle_seconds: int = 60
+    effective_poll_interval_seconds: int = 120
+    effective_parent_depth: int = 2
+    effective_ignore_dirs: str = ""
     media_count: int = 0
     # In-process LibraryChanged generation (bumped on ingest/remove/scrape).
     content_revision: int = 0
@@ -86,6 +112,9 @@ class MediaListItem(BaseModel):
 
 class MediaDetail(MediaListItem):
     path: str
+    number_locked: bool = False
+    number_source: str | None = None
+    recognition_notes: str | None = None
     plot: str | None = None
     provider_id: str | None = None
     runtime: int | None = None
@@ -114,7 +143,13 @@ class RescrapeIn(BaseModel):
     provider: str | None = None
     fallback: bool | None = None
     number: str | None = None  # optional override / fill-in 番号
+    number_locked: bool | None = None
     url: str | None = Field(default=None, max_length=2048)
+
+
+class NumberUpdate(BaseModel):
+    number: str | None = Field(default=None, max_length=512)
+    locked: bool = True
 
 
 class PaginatedMedia(BaseModel):
@@ -292,6 +327,8 @@ class ScanJobOut(BaseModel):
 
 class TaskOut(ScanJobOut):
     kind: str
+    waiting: int = 0
+
     media_id: int | None = None
     media_label: str | None = None
     library_name: str = ""

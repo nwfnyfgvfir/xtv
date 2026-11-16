@@ -14,6 +14,8 @@
 ## 功能
 
 - 扫描本地视频与 `.strm`
+- 文件名优先、父目录兜底的番号识别，支持手动锁定、过程文件过滤和就绪等待
+- 按库控制原生监听或低频轮询，增量索引、空闲退避、每日全库核对和只读清理预览
 - 番号解析 + MetaTube 自动刮削（海报 / 标题 / 演员）
 - 可切换 Stash 刮削后端，复用其已安装的社区刮削器，支持番号与来源 URL 刮削
 - 支持拾录 / StashScrapers 的独立 REST 接口，直接复用社区规则，无需运行完整 Stash
@@ -165,6 +167,22 @@ curl -sS http://127.0.0.1:8000/api/health
 创建时保存刮削后端、源优先级、fallback、扫描扩展名及手动重刮参数；执行、继续和重试沿用该策略。服务连接地址与凭证使用执行时的设置，凭证不会复制到任务记录或任务接口。活动任务按操作类型和资源去重；参数不同的重复请求返回 `409`，便于先取消旧任务再提交。多个应用进程通过数据库旁的文件锁共用一个执行器。
 
 接口：`POST /api/libraries/{id}/scan`、`POST /api/libraries/{id}/rescrape-pending`、`POST /api/media/{id}/rescrape-task` 均返回 `202` 和任务信息。`GET /api/tasks` 查询历史或活动任务，`GET /api/tasks/{id}` 查询进度，`GET /api/tasks/{id}/items?status=failed` 分页查看失败项；对 `/api/tasks/{id}/cancel`、`resume`、`retry` 发送 `POST` 操作任务。`GET /api/scan/jobs/{id}` 保留兼容查询，旧同步单片接口 `/api/media/{id}/rescrape` 已标记弃用。
+
+### 番号识别、下载就绪与自动扫描
+
+媒体库右上角菜单 → **扫描与识别**，统一配置扫描策略、预览识别结果、复查待就绪文件，以及检查已有疑似过程文件。新功能继续使用持久化后台任务；等待中的文件不会占住队列，其余就绪文件照常处理。
+
+- **识别顺序**：手动锁定 → 文件名 → 最近的有效父目录。支持全角字符、不同横线、点号、下划线以及紧邻中文的番号，剥离常见网站前缀；文件名和目录冲突时采用文件名并显示提示。文件名有多个候选时不猜测、不向目录兜底。默认向上检查两层，可设置 `0–3` 层；不采用媒体库根目录或含合集标记、多番号的目录。番号变化会标记待补刮，现有元数据保留到新刮削成功。
+- **手动锁定**：详情页 → 影片管理 → 填写番号、勾选“锁定番号”、点击“保存番号”。锁定后扫描、重命名都保留该番号；取消锁定并保存后，下次扫描可重新识别。也可以通过 `PATCH /api/media/{id}/number` 提交 `{"number":"SSIS-001","locked":true}`。识别预览不修改索引。
+- **过程文件过滤**：排除下载临时后缀、`.part.mp4` / `.tmp.mkv` / `.f137.mp4` 等临时文件名、隐藏媒体文件，以及配置中的临时子目录；不会遍历这些子目录。正常 `.ts` 文件继续按扩展名白名单处理，不再一律排除。
+- **就绪检测**：零字节文件、有对应 `.aria2` / `.part` / `.!qB` / `.!ut` 状态文件的媒体、尚无有效 HTTP(S) 地址的 STRM 会等待。新文件默认观察大小和纳秒修改时间连续稳定 `60` 秒后入库；任一变化都会重新计时，观察状态跨服务重启保留。小体积但有效的 STRM 不受视频大小阈值误伤。开启自动扫描时每 `30` 秒检查到期候选；手动模式点击“复查待就绪文件”。设为 `0` 秒只关闭稳定时间等待，其他过滤仍生效。
+- **自动扫描**：每库可关闭、选择低频轮询或原生事件。默认轮询基础间隔 `120` 秒，连续空闲时退避至 `600` 秒（基础值更大时使用基础值）；只为变化路径排任务，未变化的媒体跳过解析和索引更新。原生监听适合事件可靠的本地文件系统，启动失败时回退轮询。文件事件合并 `15` 秒，单纯目录修改不展开全库；不再因事件数量多就升级为全库扫描。默认每 `24` 小时补一次全库核对，间隔可调。关闭自动扫描后不进行轮询、定时核对或自动就绪复查。
+- **磁盘开销边界**：轮询和全库核对仍需枚举目录并读取文件属性，不读取视频正文；STRM 最多读取 `64 KiB`。原生模式依赖宿主机、容器挂载和网络文件系统能否可靠传递事件，建议保留每日核对。读取属性仍可能唤醒休眠磁盘；特别重视休眠时可选择原生模式、延长核对间隔或关闭自动扫描。
+- **已有疑似项**：“等待与清理” → “开始只读检查”。按批展示已有索引、具体路径和疑似原因，每次最多检查 `500` 条、返回 `50` 个疑似项，可继续下一批。**仅提供预览，不移除索引、不删除磁盘文件**；被过滤或暂未就绪的已有媒体也会保留索引。预览不会建立新的文件观察记录。
+
+稳定检测是启发式判断：暂停下载或预分配文件在长时间不变化且没有状态文件时，也可能看起来已完成。更可靠的方式是下载到排除目录，完成后移动进媒体库，或由下载器发送完成通知。`POST /api/libraries/{id}/download-complete` 提交 `{"paths":["子目录/SSIS-001.mp4"]}`（启用登录时携带 Bearer Token），可跳过时间等待并排增量扫描，但不能绕过临时标记、下载状态文件、零字节和非法 STRM 检查；路径必须位于该媒体库。活动扫描参数冲突时返回 `409`，稍后重试即可。
+
+环境变量 `FILE_SETTLE_SECONDS=60`、`FILENAME_PARENT_DEPTH=2`、`SCAN_POLL_INTERVAL_SECONDS=120`、`SCAN_EVENT_DEBOUNCE_SECONDS=15` 和 `DOWNLOAD_IGNORE_DIRS` 提供默认值，库内显式设置优先。升级自旧版时保留原先实际生效的监控范围，将低于 `30` 秒或未设置的轮询间隔改为 `120` 秒；原有媒体、收藏、播放进度和后台任务保留。
 
 ### Stash 社区刮削器（可选）
 
@@ -340,11 +358,10 @@ CORS_ORIGINS=http://127.0.0.1:5173,http://localhost:5173
 ## 2. 后端
 
 ```bash
+conda create -n tv python=3.10 nodejs -y
 cd backend
-python -m venv .venv
-# Windows
-.venv\Scripts\pip install -r requirements.txt
-.venv\Scripts\python -m uvicorn app.main:app --reload --port 8000
+conda run -n tv python -m pip install -r requirements.txt
+conda run -n tv python -m uvicorn app.main:app --reload --port 8000
 ```
 
 健康检查：<http://127.0.0.1:8000/api/health>
@@ -353,8 +370,8 @@ python -m venv .venv
 
 ```bash
 cd frontend
-npm install
-npm run dev
+conda run -n tv npm ci
+conda run -n tv npm run dev
 ```
 
 打开 <http://127.0.0.1:5173>（Vite 将 `/api` 代理到 8000）。
@@ -363,8 +380,10 @@ npm run dev
 
 ```bash
 cd backend
-.venv\Scripts\python -m pytest -q
+conda run -n tv python -m pytest -q
 ```
+
+测试应使用独立的 `DATABASE_URL` / `MEDIA_ROOT`，避免写入真实媒体库。原有同步扫描回归测试可设 `FILE_SETTLE_SECONDS=0`；稳定等待测试会单独设置时间窗口。所有 Python、Node 和 npm 开发命令均通过 `conda run -n tv` 执行，无需在非交互式终端激活环境。
 
 ---
 

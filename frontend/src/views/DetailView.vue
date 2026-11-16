@@ -16,10 +16,12 @@ import {
   playMedia,
   renameMedia,
   rescrapeMedia,
+  updateMediaNumber,
+  getRecognition,
   translateMedia,
   unfavoriteMedia,
 } from '@/api/media'
-import type { MediaDetail, PlayInfo, ScrapeSource } from '@/api/types'
+import type { MediaDetail, PlayInfo, ScrapeSource, RecognitionResult } from '@/api/types'
 import { normalizeScrapeSource, scrapeSources } from '@/utils/scrapeSources'
 import { getErrorMessage } from '@/utils/errors'
 import { formatFileSize } from '@/utils/format'
@@ -49,6 +51,9 @@ const FOLLOW_GLOBAL_SOURCE = '__follow_global_source__'
 const scrapeProvider = ref(FOLLOW_GLOBAL_SOURCE)
 const scrapeFallback = ref(true)
 const scrapeNumber = ref('')
+const numberLocked = ref(false)
+const savingNumber = ref(false)
+const recognitionResult = ref<RecognitionResult | null>(null)
 const scrapeUrl = ref('')
 const scrapeSource = ref<ScrapeSource>('metatube')
 const useStash = computed(() => scrapeSource.value === 'stash')
@@ -104,6 +109,34 @@ const canTranslate = computed(() => {
 
 function syncScrapeNumber() {
   scrapeNumber.value = item.value?.number || ''
+  numberLocked.value = Boolean(item.value?.number_locked)
+  recognitionResult.value = null
+}
+
+async function saveNumber() {
+  savingNumber.value = true
+  try {
+    item.value = await updateMediaNumber(
+      Number(props.id),
+      scrapeNumber.value.trim(),
+      numberLocked.value,
+    )
+    syncScrapeNumber()
+    ElMessage.success(
+      numberLocked.value ? '番号已保存并锁定，扫描时保留' : '番号已保存，后续扫描可重新识别',
+    )
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    savingNumber.value = false
+  }
+}
+async function previewNumber() {
+  try {
+    recognitionResult.value = await getRecognition(Number(props.id))
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  }
 }
 
 async function load() {
@@ -176,6 +209,7 @@ async function onRescrape() {
           ? true
           : scrapeFallback.value,
       number,
+      number_locked: numberLocked.value,
       url: url || undefined,
     })
     acceptTask(task)
@@ -288,7 +322,9 @@ async function doRename() {
   const newFilename = renameExt.value ? `${stem}${renameExt.value}` : stem
   renameLoading.value = true
   try {
-    item.value = await renameMedia(item.value.id, { new_filename: newFilename })
+    item.value = await renameMedia(item.value.id, {
+      new_filename: newFilename,
+    })
     ElMessage.success('重命名成功')
     renameVisible.value = false
   } catch (e: unknown) {
@@ -470,7 +506,9 @@ watch(() => props.id, load)
             </div>
             <div>
               <dt>文件格式</dt>
-              <dd>{{ item.filename.split('.').pop()?.toUpperCase() || '—' }}</dd>
+              <dd>
+                {{ item.filename.split('.').pop()?.toUpperCase() || '—' }}
+              </dd>
             </div>
             <div v-if="isLocal && fileSizeLabel">
               <dt>文件大小</dt>
@@ -507,6 +545,38 @@ watch(() => props.id, load)
                     aria-label="影片番号"
                     :disabled="scrapeLoading"
                 /></label>
+                <div class="number-tools">
+                  <el-checkbox
+                    v-model="numberLocked"
+                    :disabled="scrapeLoading || savingNumber"
+                    aria-label="锁定番号"
+                    >锁定番号，扫描时保留</el-checkbox
+                  >
+                  <div>
+                    <el-button :disabled="scrapeLoading" :loading="savingNumber" @click="saveNumber"
+                      >保存番号</el-button
+                    ><el-button text @click="previewNumber">识别预览</el-button>
+                  </div>
+                  <span class="field-hint muted"
+                    >来源：{{
+                      item?.number_locked
+                        ? '手动锁定'
+                        : item?.number_source === 'parent'
+                          ? '父目录'
+                          : item?.number_source === 'filename'
+                            ? '文件名'
+                            : item?.number_source === 'manual'
+                              ? '手动填写'
+                              : '未记录'
+                    }}。锁定选择在保存或执行重刮后生效。</span
+                  >
+                  <div v-if="recognitionResult" class="field-hint">
+                    自动候选：{{ recognitionResult.number || '未识别到唯一番号' }}
+                    <p v-for="note in recognitionResult.notes" :key="note">
+                      {{ note }}
+                    </p>
+                  </div>
+                </div>
                 <div class="management-field">
                   <span>刮削器</span
                   ><el-select
@@ -594,6 +664,15 @@ watch(() => props.id, load)
   </div>
 </template>
 <style scoped>
+.number-tools {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0;
+}
+.number-tools p {
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
 .top-actions {
   display: flex;
   justify-content: space-between;

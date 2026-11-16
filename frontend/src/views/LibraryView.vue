@@ -9,6 +9,7 @@ import MediaGrid from '@/components/MediaGrid.vue'
 import AppIcon from '@/components/AppIcon.vue'
 import SkeletonGrid from '@/components/SkeletonGrid.vue'
 import TaskProgress from '@/components/TaskProgress.vue'
+import LibraryToolsDialog from '@/components/LibraryToolsDialog.vue'
 import { isActiveTask, useTasks } from '@/composables/useTasks'
 import {
   createLibrary,
@@ -55,6 +56,7 @@ let lastSoftFingerprint = ''
 let loadedOnce = false
 
 const showCreate = ref(false)
+const showTools = ref(false)
 const showPathPicker = ref(false)
 const form = ref({
   name: '番号',
@@ -339,6 +341,7 @@ function onMoreCommand(cmd: string) {
   if (cmd === 'delete') void onDelete(lib)
   if (cmd === 'scan') void onScan(lib)
   if (cmd === 'rescrape') void onRescrapePending(lib)
+  if (cmd === 'tools') showTools.value = true
 }
 
 watch(
@@ -440,6 +443,7 @@ onBeforeUnmount(stopSoftRefresh)
           /></el-button>
           <template #dropdown
             ><el-dropdown-menu
+              ><el-dropdown-item command="tools">扫描与识别</el-dropdown-item
               ><el-dropdown-item command="delete"
                 ><span class="danger-text">删除媒体库</span></el-dropdown-item
               ></el-dropdown-menu
@@ -496,6 +500,7 @@ onBeforeUnmount(stopSoftRefresh)
               >扫描目录</el-dropdown-item
             ><el-dropdown-item :disabled="scanningId != null" command="rescrape"
               >补全未刮削影片</el-dropdown-item
+            ><el-dropdown-item command="tools">扫描与识别</el-dropdown-item
             ><el-dropdown-item divided command="delete"
               ><span class="danger-text">删除媒体库</span></el-dropdown-item
             ></el-dropdown-menu
@@ -525,6 +530,11 @@ onBeforeUnmount(stopSoftRefresh)
       <el-button text @click="panelOpen = true">查看全部后台任务</el-button>
     </div>
 
+    <div v-if="currentLibrary?.waiting_files" class="waiting-notice">
+      <span>{{ currentLibrary.waiting_files }} 个文件等待就绪，尚未进入媒体库。</span
+      ><el-button text @click="showTools = true">查看等待与扫描策略</el-button>
+    </div>
+    <LibraryToolsDialog v-model="showTools" :library="currentLibrary" @saved="loadLibraries" />
     <SkeletonGrid v-if="loading && !items.length" />
     <MediaGrid
       v-else
@@ -582,6 +592,19 @@ onBeforeUnmount(stopSoftRefresh)
   </div>
 </template>
 <style scoped>
+.waiting-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 14px;
+  margin-bottom: 20px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
 .library-task {
   margin-bottom: 22px;
 }

@@ -107,6 +107,9 @@ watch(
       {{ phase }} · {{ task.current }}
     </p>
     <p class="task-message">{{ task.message || phase }}</p>
+    <p v-if="task.waiting" class="task-message">
+      {{ task.waiting }} 个文件等待就绪，后续复查后再入库或刮削。
+    </p>
     <p v-if="task.kind === 'scan'" class="task-message">
       已扫描 {{ task.scanned }} · 新增 {{ task.created }} · 移除 {{ task.removed }} · 已刮削
       {{ task.scraped }}

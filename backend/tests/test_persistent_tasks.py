@@ -11,11 +11,12 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 from app import config
-from app.api import libraries, media, scan, tasks
+from app.api import libraries, media, scan, tasks, library_tools
 from app.db import Base, get_db
 from app.deps import require_auth
 from app.models import BackgroundJob, BackgroundJobItem, Library, MediaItem, utcnow
 from app.services import scanner, task_runner as runner, task_store as store
+from app.services import file_readiness, auto_scan
 
 
 @pytest.fixture
@@ -23,7 +24,7 @@ def workspace(tmp_path, monkeypatch):
     settings = config.Settings(_env_file=None, database_url=f"sqlite:///{tmp_path.as_posix()}/jobs.db",
         media_root=str(tmp_path), auto_translate=False, auto_scrape=True, scrape_source="stashscrapers",
         stashscrapers_token="test-secret-never-in-job", stashscrapers_scraper_priority='["A","B"]')
-    for module in (config, runner, store, scanner):
+    for module in (config, runner, store, scanner, file_readiness, auto_scan):
         monkeypatch.setattr(module, "get_settings", lambda: settings)
     monkeypatch.setattr(libraries, "reload_watches", lambda: None)
     engine = create_engine(settings.database_url, connect_args={"check_same_thread": False})
@@ -44,6 +45,7 @@ def workspace(tmp_path, monkeypatch):
         lib_id = lib.id
     app = FastAPI()
     for router, prefix in ((tasks.router, "/api"), (libraries.router, "/api/libraries"),
+                           (library_tools.router, "/api/libraries"),
                            (media.router, "/api/media"), (scan.router, "/api")):
         app.include_router(router, prefix=prefix)
 

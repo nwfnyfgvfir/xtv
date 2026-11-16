@@ -15,6 +15,9 @@ import type {
   Progress,
   ScanJob,
   BackgroundTask,
+  RecognitionResult,
+  WaitingFile,
+  CleanupPreview,
   Settings,
 } from './types'
 
@@ -45,6 +48,13 @@ export const updateLibrary = (
     path: string
     type: string
     enabled: boolean
+    auto_scan_enabled: boolean
+    scan_mode: 'poll' | 'native'
+    scan_interval_seconds: number
+    full_scan_interval_seconds: number
+    file_settle_seconds: number
+    parent_fallback_depth: number
+    ignore_dirs: string
   }>,
 ) => client.patch<Library>(`/libraries/${id}`, body).then((r) => r.data)
 
@@ -79,8 +89,40 @@ export const getMedia = (id: number) => client.get<MediaDetail>(`/media/${id}`).
 
 export const rescrapeMedia = (
   id: number,
-  body?: { provider?: string; fallback?: boolean; number?: string; url?: string },
+  body?: {
+    provider?: string
+    fallback?: boolean
+    number?: string
+    url?: string
+    number_locked?: boolean
+  },
 ) => client.post<BackgroundTask>(`/media/${id}/rescrape-task`, body || {}).then((r) => r.data)
+
+export const updateMediaNumber = (id: number, number: string, locked: boolean) =>
+  client.patch<MediaDetail>(`/media/${id}/number`, { number, locked }).then((r) => r.data)
+export const getRecognition = (id: number) =>
+  client.get<RecognitionResult>(`/media/${id}/recognition`).then((r) => r.data)
+export const previewRecognition = (id: number, filename: string, directory: string) =>
+  client
+    .post<RecognitionResult>(`/libraries/${id}/recognize`, {
+      filename,
+      directory,
+    })
+    .then((r) => r.data)
+export const getWaitingFiles = (id: number, offset = 0) =>
+  client
+    .get<{ total: number; items: WaitingFile[] }>(`/libraries/${id}/waiting`, {
+      params: { offset },
+    })
+    .then((r) => r.data)
+export const recheckWaiting = (id: number) =>
+  client.post<BackgroundTask>(`/libraries/${id}/recheck`).then((r) => r.data)
+export const cleanupPreview = (id: number, cursor = 0) =>
+  client
+    .get<CleanupPreview>(`/libraries/${id}/cleanup-preview`, {
+      params: { cursor },
+    })
+    .then((r) => r.data)
 
 export const translateMedia = (id: number) =>
   client.post<MediaDetail>(`/media/${id}/translate`).then((r) => r.data)

@@ -1,0 +1,347 @@
+<script setup lang="ts">
+import { computed, ref, watch } from 'vue'
+import { ElMessage } from 'element-plus'
+import type { Library, RecognitionResult, WaitingFile, CleanupItem } from '@/api/types'
+import {
+  updateLibrary,
+  previewRecognition,
+  getWaitingFiles,
+  recheckWaiting,
+  cleanupPreview,
+} from '@/api/media'
+import { useTasks } from '@/composables/useTasks'
+import { getErrorMessage } from '@/utils/errors'
+const props = defineProps<{ modelValue: boolean; library: Library | null }>()
+const emit = defineEmits<{
+  'update:modelValue': [value: boolean]
+  saved: []
+}>()
+const visible = computed({
+  get: () => props.modelValue,
+  set: (value) => emit('update:modelValue', value),
+})
+const tab = ref('policy')
+const busy = ref(false)
+const { acceptTask } = useTasks()
+const policy = ref({
+  auto_scan_enabled: true,
+  scan_mode: 'poll' as 'poll' | 'native',
+  scan_interval_seconds: 120,
+  full_hours: 24,
+  file_settle_seconds: 60,
+  parent_fallback_depth: 2,
+  ignore_dirs: '',
+})
+const filename = ref(''),
+  directory = ref('')
+const result = ref<RecognitionResult | null>(null)
+const waiting = ref<WaitingFile[]>([]),
+  waitingTotal = ref(0)
+const suspects = ref<CleanupItem[]>([]),
+  scanned = ref(0),
+  totalIndexed = ref(0)
+const cursor = ref<number | null>(0),
+  checked = ref(false)
+async function perform(work: () => Promise<void>) {
+  busy.value = true
+  try {
+    await work()
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    busy.value = false
+  }
+}
+async function loadWaiting(reset = false) {
+  if (!props.library) return
+  const rows = await getWaitingFiles(props.library.id, reset ? 0 : waiting.value.length)
+  waiting.value = reset ? rows.items : [...waiting.value, ...rows.items]
+  waitingTotal.value = rows.total
+}
+watch(
+  () => props.modelValue,
+  (open) => {
+    if (!open || !props.library) return
+    const lib = props.library
+    policy.value = {
+      auto_scan_enabled: lib.auto_scan_enabled,
+      scan_mode: lib.scan_mode || 'poll',
+      scan_interval_seconds: lib.effective_poll_interval_seconds || 120,
+      full_hours: (lib.full_scan_interval_seconds || 86400) / 3600,
+      file_settle_seconds: lib.effective_settle_seconds ?? 60,
+      parent_fallback_depth: lib.effective_parent_depth ?? 2,
+      ignore_dirs: lib.effective_ignore_dirs || '',
+    }
+    tab.value = 'policy'
+    result.value = null
+    suspects.value = []
+    scanned.value = 0
+    cursor.value = 0
+    checked.value = false
+    void perform(() => loadWaiting(true))
+  },
+)
+async function save() {
+  await perform(async () => {
+    if (!props.library) return
+    const { full_hours, ...body } = policy.value
+    await updateLibrary(props.library.id, {
+      ...body,
+      full_scan_interval_seconds: Math.round(full_hours * 3600),
+    })
+    emit('saved')
+    ElMessage.success('扫描与识别策略已保存')
+  })
+}
+async function recognize() {
+  await perform(async () => {
+    if (props.library)
+      result.value = await previewRecognition(
+        props.library.id,
+        filename.value.trim(),
+        directory.value.trim(),
+      )
+  })
+}
+async function recheck() {
+  await perform(async () => {
+    if (!props.library) return
+    acceptTask(await recheckWaiting(props.library.id))
+    ElMessage.success('已加入复查队列，就绪后自动入库')
+  })
+}
+async function inspect(reset = false) {
+  await perform(async () => {
+    if (!props.library || (!reset && cursor.value === null)) return
+    const data = await cleanupPreview(props.library.id, reset ? 0 : cursor.value || 0)
+    suspects.value = reset ? data.items : [...suspects.value, ...data.items]
+    scanned.value = (reset ? 0 : scanned.value) + data.scanned
+    totalIndexed.value = data.total_indexed
+    cursor.value = data.next_cursor
+    checked.value = true
+  })
+}
+</script>
+
+<template>
+  <el-dialog v-model="visible" title="扫描与识别" width="720px">
+    <p class="tool-intro">{{ library?.name }} · {{ library?.path }}</p>
+    <el-tabs v-model="tab">
+      <el-tab-pane label="扫描策略" name="policy">
+        <el-form label-position="top">
+          <el-form-item label="自动扫描"
+            ><el-switch v-model="policy.auto_scan_enabled" aria-label="启用自动扫描" /><span
+              class="tool-hint"
+              >关闭后仅手动扫描；与自动刮削分别控制。</span
+            ></el-form-item
+          >
+          <div class="policy-grid">
+            <el-form-item label="监听方式"
+              ><el-select v-model="policy.scan_mode" aria-label="监听方式"
+                ><el-option label="低频轮询（适合容器与 NAS）" value="poll" /><el-option
+                  label="原生事件（失败时回退轮询）"
+                  value="native" /></el-select
+            ></el-form-item>
+            <el-form-item label="轮询基础间隔（秒）"
+              ><el-input-number
+                v-model="policy.scan_interval_seconds"
+                :min="30"
+                :max="86400"
+                :step="30"
+                aria-label="轮询基础间隔"
+            /></el-form-item>
+            <el-form-item label="全库核对间隔（小时）"
+              ><el-input-number
+                v-model="policy.full_hours"
+                :min="0.25"
+                :max="720"
+                aria-label="全库核对间隔"
+            /></el-form-item>
+            <el-form-item label="文件连续稳定时间（秒）"
+              ><el-input-number
+                v-model="policy.file_settle_seconds"
+                :min="0"
+                :max="3600"
+                aria-label="文件连续稳定时间"
+            /></el-form-item>
+            <el-form-item label="父目录兜底层数"
+              ><el-input-number
+                v-model="policy.parent_fallback_depth"
+                :min="0"
+                :max="3"
+                aria-label="父目录兜底层数"
+            /></el-form-item>
+          </div>
+          <p class="tool-hint">
+            轮询空闲时会退避，只对变化路径建任务。稳定时间为 0
+            会关闭时间等待，过程文件和下载状态文件仍被拦截。父目录层数为 0 时只识别文件名。
+          </p>
+          <el-form-item label="排除的子目录名（逗号分隔）"
+            ><el-input
+              v-model="policy.ignore_dirs"
+              type="textarea"
+              :rows="2"
+              aria-label="排除的子目录名"
+          /></el-form-item>
+          <el-button type="primary" :loading="busy" @click="save">保存扫描策略</el-button>
+        </el-form>
+      </el-tab-pane>
+      <el-tab-pane label="识别预览" name="recognition">
+        <el-form label-position="top" @submit.prevent="recognize">
+          <el-form-item label="文件名"
+            ><el-input
+              v-model="filename"
+              placeholder="例如：SSIS.001中文字幕.mp4"
+              aria-label="预览文件名"
+          /></el-form-item>
+          <el-form-item label="所在子目录（相对媒体库，可留空）"
+            ><el-input
+              v-model="directory"
+              placeholder="例如：分类/SSIS-001"
+              aria-label="预览子目录"
+          /></el-form-item>
+          <el-button :loading="busy" :disabled="!filename.trim()" @click="recognize"
+            >预览识别结果</el-button
+          >
+        </el-form>
+        <div v-if="result" class="recognition-result" role="status">
+          <strong>{{ result.number || '未识别到唯一番号' }}</strong><span
+            >来源：{{
+              result.source === 'parent'
+                ? '父目录'
+                : result.source === 'filename'
+                  ? '文件名'
+                  : '待确认'
+            }}</span
+          ><span v-if="result.candidates.length">候选：{{ result.candidates.join('、') }}</span>
+          <p v-for="note in result.notes" :key="note">{{ note }}</p>
+        </div>
+        <p class="tool-hint">
+          只预览已保存策略的识别结果，不修改文件和索引。多个候选需要人工确认。
+        </p>
+      </el-tab-pane>
+      <el-tab-pane label="等待与清理" name="review">
+        <div class="review-header">
+          <h3>等待就绪 · {{ waitingTotal }}</h3>
+          <el-button :loading="busy" :disabled="!waitingTotal" @click="recheck"
+            >复查待就绪文件</el-button
+          >
+        </div>
+        <p class="tool-hint">开启自动扫描会自动复查；手动模式可点击复查。等待不会阻塞其他任务。</p>
+        <ul class="tool-list">
+          <li v-for="row in waiting" :key="row.path">
+            <strong>{{ row.filename }}</strong><span>{{ row.reason }}</span>
+          </li>
+        </ul>
+        <el-button v-if="waiting.length < waitingTotal" text @click="perform(() => loadWaiting())"
+          >加载更多等待文件</el-button
+        >
+        <el-button text @click="perform(() => loadWaiting(true))">刷新等待列表</el-button>
+        <div class="review-header">
+          <h3>疑似过程文件</h3>
+          <el-button :loading="busy" @click="inspect(true)">开始只读检查</el-button>
+        </div>
+        <p class="tool-hint">
+          只检查已有索引并给出疑似原因，不删除磁盘文件，也不移除索引。下载暂停也可能看起来稳定，结果需要人工判断。
+        </p>
+        <p v-if="checked" class="tool-hint">
+          已检查 {{ scanned }} / {{ totalIndexed }} 条索引 · 发现 {{ suspects.length }} 个疑似项{{
+            cursor === null ? ' · 检查完成' : ''
+          }}
+        </p>
+        <ul class="tool-list">
+          <li v-for="row in suspects" :key="row.id">
+            <strong>{{ row.filename }}</strong><span>{{ row.reason }}</span
+            ><small>{{ row.path }}</small>
+          </li>
+        </ul>
+        <el-button v-if="checked && cursor !== null" :loading="busy" @click="inspect()"
+          >继续检查下一批</el-button
+        >
+      </el-tab-pane>
+    </el-tabs>
+  </el-dialog>
+</template>
+
+<style scoped>
+.tool-intro {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  margin: 0 0 20px;
+}
+.policy-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 20px;
+}
+.policy-grid .el-select,
+.policy-grid .el-input-number {
+  width: 100%;
+}
+.tool-hint {
+  display: block;
+  font-size: 11px;
+  line-height: 1.8;
+  color: var(--muted);
+  margin: 8px 0 18px;
+}
+.review-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 24px;
+  flex-wrap: wrap;
+}
+h3 {
+  margin: 0;
+  font-size: 14px;
+}
+.tool-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 270px;
+  overflow: auto;
+}
+.tool-list li {
+  display: grid;
+  gap: 6px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.tool-list span,
+.tool-list small {
+  color: var(--muted);
+  line-height: 1.7;
+}
+.recognition-result {
+  display: grid;
+  gap: 10px;
+  padding: 20px;
+  margin-top: 20px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  font-size: 12px;
+}
+.recognition-result strong {
+  color: var(--accent);
+  font-size: 20px;
+}
+.recognition-result p {
+  margin: 0;
+  color: var(--muted);
+}
+@media (max-width: 640px) {
+  .policy-grid {
+    grid-template-columns: 1fr;
+  }
+  .el-button {
+    min-height: 44px;
+  }
+}
+</style>

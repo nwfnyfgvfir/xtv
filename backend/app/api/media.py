@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -24,11 +26,13 @@ from app.schemas import (
     RenameIn,
     RescrapeIn,
     TaskOut,
+    NumberUpdate,
 )
 from app.services.duplicates import list_duplicate_groups
 from app.services.images import rewrite_image_url
 from app.services.media_delete import delete_media_item
-from app.services.naming import normalize_number
+from app.services.naming import normalize_number, extract_number, recognize_path
+from app.services.file_readiness import root_path, parent_depth, check_file
 from app.services.scanner import rename_media_item
 from app.services.scrape import apply_translations, scrape_media_item
 from app.services.sorting import media_order_by
@@ -249,6 +253,39 @@ def get_media(
     return _with_proxied_images(item, detail=True)  # type: ignore[return-value]
 
 
+@router.get("/{media_id}/recognition")
+def media_recognition(media_id: int, _: Annotated[dict, Depends(require_auth)], db: Session = Depends(get_db)):
+    item = db.get(MediaItem, media_id)
+    if item is None:
+        raise HTTPException(404, "media not found")
+    lib = db.get(Library, item.library_id)
+    result = asdict(recognize_path(Path(item.path), root_path(lib), parent_depth(lib)))
+    result.update(locked=item.number_locked, effective_number=item.number if item.number_locked else result["number"])
+    return result
+
+
+@router.patch("/{media_id}/number", response_model=MediaDetail)
+def save_number(media_id: int, body: NumberUpdate, _: Annotated[dict, Depends(require_auth)], db: Session = Depends(get_db)):
+    item = db.get(MediaItem, media_id)
+    if item is None:
+        raise HTTPException(404, "media not found")
+    if task_store.active_for_library(db, item.library_id):
+        raise HTTPException(409, "请先取消或等待媒体库后台任务完成，再修改番号")
+    value = normalize_number(body.number)
+    if len(extract_number(body.number or "", stem_only=True).candidates) > 1:
+        raise HTTPException(422, "包含多个番号，请只输入一个")
+    if body.locked and not value:
+        raise HTTPException(422, "锁定番号前请先填写番号")
+    if value != item.number:
+        item.scraped_at = None
+    item.number, item.number_locked, item.number_source = value, body.locked, "manual"
+    item.recognition_version = None
+    db.commit()
+    from app.services.library_revision import bump_revision
+    bump_revision(item.library_id)
+    return _with_proxied_images(item, detail=True)
+
+
 @router.post("/{media_id}/rescrape-task", response_model=TaskOut, status_code=202)
 def enqueue_rescrape(media_id: int, _: Annotated[dict, Depends(require_auth)],
                      body: RescrapeIn | None = None, db: Session = Depends(get_db)) -> TaskOut:
@@ -262,6 +299,10 @@ def enqueue_rescrape(media_id: int, _: Annotated[dict, Depends(require_auth)],
     inputs = body.model_dump(exclude_none=True)
     url = (body.url or "").strip()
     number = normalize_number(body.number) if body.number and body.number.strip() else item.number
+    if body.number and len(extract_number(body.number, stem_only=True).candidates) > 1:
+        raise HTTPException(422, "包含多个番号，请只输入一个")
+    if body.number_locked and not number:
+        raise HTTPException(422, "锁定番号前请先填写番号")
     if url:
         if get_settings().scrape_source not in {"stash", "stashscrapers"}:
             raise HTTPException(400, "source URL scraping requires Stash or StashScrapers")
@@ -316,13 +357,31 @@ async def rescrape_media(
         if not valid_url:
             raise HTTPException(400, "invalid source URL")
     if body.number is not None and str(body.number).strip():
+        if len(extract_number(body.number, stem_only=True).candidates) > 1:
+            raise HTTPException(422, "包含多个番号，请只输入一个")
         normalized = normalize_number(body.number)
         if not normalized:
             raise HTTPException(400, "invalid number")
+        if normalized != item.number:
+            item.scraped_at = None
         item.number = normalized
+        item.number_source = "manual"
+        item.recognition_version = None
         db.add(item)
         db.commit()
         db.refresh(item)
+    if body.number_locked is not None:
+        if body.number_locked and not item.number:
+            raise HTTPException(422, "锁定番号前请先填写番号")
+        item.number_locked = body.number_locked
+        item.recognition_version = None
+        db.commit()
+    lib = db.get(Library, item.library_id)
+    if Path(item.path).exists():
+        readiness = check_file(db, lib, Path(item.path))
+        db.commit()
+        if readiness.state != "ready":
+            raise HTTPException(409, readiness.reason)
     if not item.number and not source_url:
         raise HTTPException(400, "no number; provide number to scrape")
     ok = await scrape_media_item(

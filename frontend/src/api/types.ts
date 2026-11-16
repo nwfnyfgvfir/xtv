@@ -4,6 +4,18 @@ export interface Library {
   path: string
   type: string
   enabled: boolean
+  auto_scan_enabled: boolean
+  scan_mode: 'poll' | 'native'
+  scan_interval_seconds: number | null
+  full_scan_interval_seconds: number
+  file_settle_seconds: number | null
+  parent_fallback_depth: number | null
+  ignore_dirs: string | null
+  effective_settle_seconds: number
+  effective_poll_interval_seconds: number
+  effective_parent_depth: number
+  effective_ignore_dirs: string
+  waiting_files: number
   media_count?: number
   /** Bumped when library media is added/removed/scraped (LibraryChanged-style). */
   content_revision?: number
@@ -52,6 +64,9 @@ export interface Actor {
 
 export interface MediaDetail extends MediaListItem {
   path: string
+  number_locked: boolean
+  number_source: string | null
+  recognition_notes: string | null
   plot?: string | null
   provider_id?: string | null
   runtime?: number | null
@@ -193,6 +208,7 @@ export interface ScanJob {
 
 export interface BackgroundTask extends ScanJob {
   kind: 'scan' | 'rescrape_pending' | 'rescrape'
+  waiting: number
   media_id: number | null
   media_label: string | null
   library_name: string
@@ -210,6 +226,33 @@ export interface BackgroundTask extends ScanJob {
   created_at: string
   updated_at: string
   finished_at: string | null
+}
+
+export interface RecognitionResult {
+  number: string | null
+  candidates: string[]
+  source: string | null
+  notes: string[]
+  locked?: boolean
+  effective_number?: string | null
+}
+
+export interface WaitingFile {
+  path: string
+  filename: string
+  state: string
+  reason: string
+}
+export interface CleanupItem extends WaitingFile {
+  id: number
+  number: string | null
+}
+export interface CleanupPreview {
+  items: CleanupItem[]
+  scanned: number
+  total_indexed: number
+  next_cursor: number | null
+  read_only: boolean
 }
 
 export interface TaskItem {
