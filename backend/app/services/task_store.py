@@ -60,7 +60,10 @@ def task_out(db: Session, job: BackgroundJob) -> TaskOut:
 
 def enqueue(db: Session, kind: str, library: Library, *, media_id: int | None = None,
             inputs: dict[str, Any] | None = None) -> BackgroundJob:
-    params = {"settings": source_snapshot(), "inputs": inputs or {}, "library_path": library.path}
+    settings = source_snapshot()
+    if kind == "rescrape" and inputs and inputs.get("scrape_source"):
+        settings["scrape_source"] = inputs["scrape_source"]
+    params = {"settings": settings, "inputs": inputs or {}, "library_path": library.path}
     key = resource_key(kind, library.id, media_id)
     existing = db.query(BackgroundJob).filter_by(active_key=key).first()
     if existing:

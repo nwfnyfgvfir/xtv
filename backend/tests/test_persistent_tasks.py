@@ -272,6 +272,79 @@ def test_single_rescrape_keeps_overrides_and_runs_as_background_job(workspace):
     assert api.get(f"/api/media/{media_id}").json()["number"] == "ABP-001"
 
 
+@pytest.mark.parametrize("source", ["metatube", "stash", "stashscrapers"])
+def test_single_rescrape_uses_selected_backend_and_saved_priority(workspace, source):
+    api, factory, _, _, calls, settings = workspace
+    settings.metatube_provider_priority = '["MetaFirst"]'
+    settings.stash_scraper_priority = '["StashFirst"]'
+    media_id = add_media(workspace)
+    body = {"scrape_source": source, "provider": "Selected"}
+    response = api.post(f"/api/media/{media_id}/rescrape-task", json=body)
+    assert response.status_code == 202, response.text
+    task = response.json()
+    assert api.post(f"/api/media/{media_id}/rescrape-task", json=body).json()["job_id"] == task["job_id"]
+    assert settings.scrape_source == "stashscrapers"
+    with factory() as db:
+        params = json.loads(db.get(BackgroundJob, task["job_id"]).params_json)
+        assert params["settings"]["scrape_source"] == source
+        assert "test-secret" not in json.dumps(params)
+    settings.scrape_source = "stash" if source != "stash" else "metatube"
+    settings.stashscrapers_scraper_priority = '["Changed"]'
+    assert run(workspace, task)["scraped"] == 1
+    selected = calls[-1][1]
+    assert selected["settings_override"].scrape_source == source
+    assert selected["settings_override"].stashscrapers_scraper_priority == '["A","B"]'
+    assert selected["provider_override"] == "Selected"
+
+
+def test_single_rescrape_backend_is_preserved_on_resume_and_retry(workspace, monkeypatch):
+    api, _, _, _, calls, settings = workspace
+    media_id = add_media(workspace)
+    task = api.post(f"/api/media/{media_id}/rescrape-task", json={"scrape_source": "stash"}).json()
+    api.post(f"/api/tasks/{task['job_id']}/cancel").raise_for_status()
+    settings.scrape_source = "metatube"
+    original = runner.scrape_media_item
+
+    async def fail(db, item, **kwargs):
+        assert kwargs["settings_override"].scrape_source == "stash"
+        return False
+
+    monkeypatch.setattr(runner, "scrape_media_item", fail)
+    resumed = api.post(f"/api/tasks/{task['job_id']}/resume").json()
+    assert run(workspace, resumed)["failed"] == 1
+    monkeypatch.setattr(runner, "scrape_media_item", original)
+    retry = api.post(f"/api/tasks/{task['job_id']}/retry").json()
+    assert run(workspace, retry)["scraped"] == 1
+    assert calls[-1][1]["settings_override"].scrape_source == "stash"
+    assert settings.scrape_source == "metatube"
+
+
+@pytest.mark.parametrize("global_source, selected, status", [
+    ("metatube", "stash", 202), ("metatube", "stashscrapers", 202),
+    ("stash", "metatube", 400), ("stash", None, 202), ("metatube", None, 400),
+])
+def test_single_rescrape_url_is_validated_for_selected_backend(workspace, global_source, selected, status):
+    api, _, _, _, _, settings = workspace
+    settings.scrape_source = global_source
+    media_id = add_media(workspace)
+    body = {"url": "https://source.example/scene/1"}
+    if selected:
+        body["scrape_source"] = selected
+    response = api.post(f"/api/media/{media_id}/rescrape-task", json=body)
+    assert response.status_code == status, response.text
+    assert settings.scrape_source == global_source
+
+
+def test_single_rescrape_rejects_unknown_backend_and_conflicting_backend(workspace):
+    api, _, _, _, _, _ = workspace
+    media_id = add_media(workspace)
+    url = f"/api/media/{media_id}/rescrape-task"
+    assert api.post(url, json={"scrape_source": "unknown"}).status_code == 422
+    first = api.post(url, json={"scrape_source": "stash", "provider": "A"}).json()
+    conflict = api.post(url, json={"scrape_source": "metatube", "provider": "A"})
+    assert conflict.status_code == 409 and conflict.headers["X-Task-Id"] == first["job_id"]
+
+
 def test_single_rescrape_does_not_scan_library_or_touch_other_files(workspace, monkeypatch):
     api, factory, _, root, calls, _ = workspace
     media_id = add_media(workspace, scraped=True)

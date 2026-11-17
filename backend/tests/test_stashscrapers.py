@@ -176,6 +176,22 @@ def test_search_uses_provider_ranking_without_inferring_catalog_codes(rest_setti
     assert rows[0]['title'] == 'Matched by source' and rows[0]['number'] == 'provider-code'
 
 
+def test_single_rescrape_can_select_rest_backend_with_metatube_global(rest_settings, rest_http, database, api):
+    requests, replies = rest_http
+    rest_settings.scrape_source = "metatube"
+    db, _ = database
+    item = seed(db)
+    replies.extend([catalog(), response(result()), response(result(title="Selected backend title"))])
+    out = api.post(f"/api/media/{item.id}/rescrape", json={
+        "scrape_source": "stashscrapers", "provider": "Folder/Source",
+    })
+    assert out.status_code == 200, out.text
+    assert out.json()["title"] == "Selected backend title"
+    assert out.json()["provider"] == "stashscrapers:Folder/Source"
+    assert rest_settings.scrape_source == "metatube"
+    assert all(request.headers["authorization"] == "Bearer rest-test-secret" for request in requests)
+
+
 def test_fragment_only_scraper_receives_catalog_filename(rest_settings, rest_http):
     requests, replies = rest_http
     replies.extend([catalog(entry(names=("fragment",))), response(result())])

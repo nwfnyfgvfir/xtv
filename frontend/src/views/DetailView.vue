@@ -12,6 +12,7 @@ import {
   deleteMedia,
   favoriteMedia,
   getMedia,
+  getMovieProviders,
   getSettings,
   playMedia,
   renameMedia,
@@ -19,7 +20,7 @@ import {
   translateMedia,
   unfavoriteMedia,
 } from '@/api/media'
-import type { MediaDetail, PlayInfo, ScrapeSource } from '@/api/types'
+import type { MediaDetail, PlayInfo, ScrapeSource, Settings } from '@/api/types'
 import { normalizeScrapeSource, scrapeSources } from '@/utils/scrapeSources'
 import { getErrorMessage } from '@/utils/errors'
 import { formatFileSize } from '@/utils/format'
@@ -47,31 +48,43 @@ const scrapeLoading = computed(
 const translateLoading = ref(false)
 const deleteLoading = ref(false)
 const providers = ref<string[]>([])
-const FOLLOW_GLOBAL_SOURCE = '__follow_global_source__'
-const scrapeProvider = ref(FOLLOW_GLOBAL_SOURCE)
+const providersLoading = ref(true)
+const providersError = ref('')
+const scrapeSettings = ref<Settings | null>(null)
+const FOLLOW_SOURCE_PRIORITY = '__source_priority__'
+const scrapeProvider = ref(FOLLOW_SOURCE_PRIORITY)
 const scrapeUrl = ref('')
 const scrapeSource = ref<ScrapeSource>('metatube')
+const sourceOptions = Object.entries(scrapeSources).map(([value, fields]) => ({
+  value,
+  label: fields.label,
+}))
 const useStash = computed(() => scrapeSource.value === 'stash')
 const supportsSourceUrl = computed(() => scrapeSource.value !== 'metatube')
 const sourceUrlPlaceholder = computed(() =>
   useStash.value ? '支持 Stash-box 场景链接或站点影片链接' : '可选，按所选刮削器或来源地址匹配',
 )
-const followsGlobalSource = computed(() => scrapeProvider.value === FOLLOW_GLOBAL_SOURCE)
+const followsSourcePriority = computed(() => scrapeProvider.value === FOLLOW_SOURCE_PRIORITY)
 const sourceModeHint = computed(() =>
   useStash.value && scrapeUrl.value.trim()
     ? 'Stash-box 场景链接可选择对应的 Stash-box；其他站点链接由 Stash 匹配刮削器。'
-    : followsGlobalSource.value
-      ? '先按设置页的优先级尝试，全部未命中后继续其余可用源。'
+    : followsSourcePriority.value
+      ? '先按所选后端的优先级尝试，全部未命中后继续该后端其余可用刮削器。'
       : scrapeProvider.value === ''
-        ? '自动尝试适用源，命中后停止；仅 URL 的源需填写来源地址。'
+        ? '自动尝试所选后端的适用刮削器，命中后停止；仅 URL 的源需填写来源地址。'
         : '仅本次使用所选来源，文件名原样交给来源查询。',
 )
 const providerLabels = ref<Record<string, string>>({})
+const providerLabelsBySource = ref<Partial<Record<ScrapeSource, Record<string, string>>>>({})
 const mediaProviderLabel = computed(() => {
   const provider = item.value?.provider
   if (!provider) return '尚未刮削'
-  const source = provider.startsWith('stash:') ? provider.slice(6) : provider
-  return providerLabels.value[source] || (source.startsWith('stash-box:') ? 'Stash-box' : provider)
+  const source: ScrapeSource = provider.startsWith('stashscrapers:')
+    ? 'stashscrapers' : provider.startsWith('stash:') ? 'stash' : 'metatube'
+  const id = source === 'metatube' ? provider : provider.slice(source.length + 1)
+  const label = providerLabelsBySource.value[source]?.[id]
+    || (id.startsWith('stash-box:') ? 'Stash-box' : id)
+  return `${scrapeSources[source].label} · ${label}`
 })
 const playerWrap = ref<HTMLElement | null>(null)
 const renameVisible = ref(false)
@@ -93,7 +106,8 @@ const { src: cover, showImage, failed: coverFailed, onError: onCoverError, reset
 const isChineseSub = computed(
   () => item.value?.subtitle_flag === 'C' || tags.value.includes('中文字幕'),
 )
-const canRescrape = computed(() => Boolean(item.value?.filename || scrapeUrl.value.trim()))
+const canRescrape = computed(() => Boolean(scrapeSettings.value)
+  && !providersLoading.value && Boolean(item.value?.filename || scrapeUrl.value.trim()))
 const isLocal = computed(() => item.value?.source_type === 'local')
 const canDelete = computed(() => Boolean(item.value))
 const deleteButtonLabel = computed(() => (isLocal.value ? '删除' : '删除索引'))
@@ -119,22 +133,58 @@ async function load() {
   }
 }
 
+let providersRequest = 0
 async function loadProviders() {
+  const request = ++providersRequest
+  providersLoading.value = true
+  providersError.value = ''
+  providers.value = []
+  providerLabels.value = {}
   try {
-    const s = await getSettings()
-    scrapeSource.value = normalizeScrapeSource(s.scrape_source)
-    const fields = scrapeSources[scrapeSource.value]
-    providerLabels.value = s.movie_provider_labels || {}
-    const list = [...(s.movie_providers || [])]
-    const pri = s[fields.priority] || []
+    let source = scrapeSource.value
+    let catalog: Awaited<ReturnType<typeof getMovieProviders>>
+    if (!scrapeSettings.value) {
+      const settings = await getSettings()
+      if (request !== providersRequest) return
+      scrapeSettings.value = settings
+      source = normalizeScrapeSource(settings.scrape_source)
+      scrapeSource.value = source
+      catalog = {
+        movie_providers: settings.movie_providers,
+        movie_provider_labels: settings.movie_provider_labels,
+        error: settings.movie_providers_error,
+        from_cache: settings.movie_providers_from_cache,
+      }
+    } else {
+      catalog = await getMovieProviders(source)
+      if (request !== providersRequest) return
+    }
+    const fields = scrapeSources[source]
+    const labels = catalog.movie_provider_labels || {}
+    providerLabels.value = labels
+    providerLabelsBySource.value[source] = labels
+    const list = [...(catalog.movie_providers || [])]
+    const pri = scrapeSettings.value[fields.priority] || []
     for (const p of pri) {
       if (p && !list.includes(p)) list.push(p)
     }
     providers.value = list
-    scrapeProvider.value = FOLLOW_GLOBAL_SOURCE
-  } catch {
-    /* ignore */
+    if (catalog.error) {
+      providersError.value = `${catalog.from_cache ? '正在使用缓存列表。' : ''}${catalog.error}`
+    }
+  } catch (error) {
+    if (request === providersRequest) {
+      providersError.value = getErrorMessage(error, '加载刮削器失败，请检查所选后端的连接配置')
+    }
+  } finally {
+    if (request === providersRequest) providersLoading.value = false
   }
+}
+
+function onScrapeSourceChange() {
+  scrapeProvider.value = FOLLOW_SOURCE_PRIORITY
+  scrapeUrl.value = ''
+  void loadProviders()
 }
 
 async function onPlay() {
@@ -156,8 +206,9 @@ async function onRescrape() {
   scrapeSubmitting.value = true
   try {
     const task = await rescrapeMedia(Number(props.id), {
-      // Omission follows global priorities; explicit "" requests full automatic mode.
-      provider: followsGlobalSource.value ? undefined : scrapeProvider.value,
+      scrape_source: scrapeSource.value,
+      // Omission follows this backend's priorities; explicit "" uses all its scrapers.
+      provider: followsSourcePriority.value ? undefined : scrapeProvider.value,
       url: url || undefined,
     })
     acceptTask(task)
@@ -478,6 +529,48 @@ watch(() => props.id, load)
             </summary>
             <div class="maintenance-content">
               <div class="scrape-row">
+                <div class="management-field">
+                  <span>刮削后端</span>
+                  <el-select
+                    v-model="scrapeSource"
+                    aria-label="刮削后端"
+                    :disabled="scrapeLoading || !scrapeSettings"
+                    @change="onScrapeSourceChange"
+                  >
+                    <el-option
+                      v-for="source in sourceOptions"
+                      :key="source.value"
+                      :label="source.label"
+                      :value="source.value"
+                    />
+                  </el-select>
+                  <span class="field-hint muted">仅用于本次重新刮削。</span>
+                </div>
+                <div class="management-field">
+                  <span>刮削器</span
+                  ><el-select
+                    v-model="scrapeProvider"
+                    clearable
+                    filterable
+                    allow-create
+                    default-first-option
+                    placeholder="自动选择"
+                    aria-label="刮削器"
+                    :loading="providersLoading"
+                    :disabled="scrapeLoading || providersLoading || !scrapeSettings"
+                    ><el-option label="按该后端的优先级" :value="FOLLOW_SOURCE_PRIORITY" />
+                    <el-option label="自动（该后端全部适用刮削器）" value="" /><el-option
+                      v-for="provider in providers"
+                      :key="provider"
+                      :label="providerLabels[provider] || provider"
+                      :value="provider"
+                  /></el-select>
+                  <span class="field-hint muted">{{ sourceModeHint }}</span>
+                </div>
+                <div v-if="providersError" class="provider-feedback" role="status">
+                  <span>{{ providersError }}</span>
+                  <el-button link :loading="providersLoading" @click="loadProviders">重试</el-button>
+                </div>
                 <label v-if="supportsSourceUrl" class="management-field"
                   >来源 URL<el-input
                     v-model="scrapeUrl"
@@ -490,26 +583,6 @@ watch(() => props.id, load)
                 <div class="management-field">
                   <span>查询文件名</span><code class="source-filename">{{ item.filename }}</code>
                   <span class="field-hint muted">直接使用原文件名去掉扩展名后的文本查询，由刮削源匹配。</span>
-                </div>
-                <div class="management-field">
-                  <span>刮削器</span
-                  ><el-select
-                    v-model="scrapeProvider"
-                    clearable
-                    filterable
-                    allow-create
-                    default-first-option
-                    placeholder="自动选择"
-                    aria-label="刮削器"
-                    :disabled="scrapeLoading"
-                    ><el-option label="跟随全局配置" :value="FOLLOW_GLOBAL_SOURCE" />
-                    <el-option label="自动（全部适用源）" value="" /><el-option
-                      v-for="provider in providers"
-                      :key="provider"
-                      :label="providerLabels[provider] || provider"
-                      :value="provider"
-                  /></el-select>
-                  <span class="field-hint muted">{{ sourceModeHint }}</span>
                 </div>
                 <div class="maintenance-actions">
                   <el-button
@@ -655,6 +728,18 @@ watch(() => props.id, load)
 .source-filename {
   overflow-wrap: anywhere;
   font-size: 13px;
+}
+.provider-feedback {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.provider-feedback > span {
+  flex: 1;
+  min-width: 0;
 }
 .cover-retry {
   position: absolute;

@@ -137,6 +137,7 @@ class MediaListQuery(BaseModel):
 
 
 class RescrapeIn(BaseModel):
+    scrape_source: Literal["metatube", "stash", "stashscrapers"] | None = None
     provider: str | None = None
     url: str | None = Field(default=None, max_length=2048)
 

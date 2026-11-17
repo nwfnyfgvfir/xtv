@@ -18,6 +18,7 @@ import type {
   WaitingFile,
   CleanupPreview,
   Settings,
+  ScrapeSource,
 } from './types'
 
 export const getHealth = () => client.get<Health>('/health').then((r) => r.data)
@@ -92,6 +93,7 @@ export const getMedia = (id: number) => client.get<MediaDetail>(`/media/${id}`).
 export const rescrapeMedia = (
   id: number,
   body?: {
+    scrape_source?: ScrapeSource
     provider?: string
     url?: string
   },
@@ -172,7 +174,7 @@ export const getSettings = () => client.get<Settings>('/settings').then((r) => r
 export const updateSettings = (body: Record<string, unknown>) =>
   client.put<Settings>('/settings', body).then((r) => r.data)
 
-export const getMovieProviders = () =>
+export const getMovieProviders = (source?: ScrapeSource) =>
   client
     .get<{
       movie_providers?: string[]
@@ -180,7 +182,8 @@ export const getMovieProviders = () =>
       count?: number
       data?: unknown
       from_cache?: boolean
-    }>('/settings/providers')
+      error?: string | null
+    }>('/settings/providers', { params: { source } })
     .then((r) => r.data)
 
 export const renameMedia = (id: number, body: { new_filename: string }) =>

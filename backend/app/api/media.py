@@ -258,7 +258,7 @@ def enqueue_rescrape(media_id: int, _: Annotated[dict, Depends(require_auth)],
     inputs = body.model_dump(exclude_none=True)
     url = (body.url or "").strip()
     if url:
-        if get_settings().scrape_source not in {"stash", "stashscrapers"}:
+        if (body.scrape_source or get_settings().scrape_source) not in {"stash", "stashscrapers"}:
             raise HTTPException(400, "source URL scraping requires Stash or StashScrapers")
         try:
             parts = urlsplit(url)
@@ -292,12 +292,16 @@ async def rescrape_media(
     if task_store.active_for_library(db, item.library_id):
         raise HTTPException(409, "该媒体库已有后台任务，请先取消或等待完成")
     body = body or RescrapeIn()
+    from app.config import get_settings
+
+    settings = get_settings()
+    if body.scrape_source:
+        settings = settings.model_copy(update={"scrape_source": body.scrape_source})
     source_url = (body.url or "").strip()
     if source_url:
         from urllib.parse import urlsplit
-        from app.config import get_settings
 
-        if get_settings().scrape_source not in {"stash", "stashscrapers"}:
+        if settings.scrape_source not in {"stash", "stashscrapers"}:
             raise HTTPException(400, "source URL scraping requires Stash or StashScrapers")
         try:
             parsed = urlsplit(source_url)
@@ -318,6 +322,7 @@ async def rescrape_media(
         force=True,
         provider_override=body.provider,
         url_override=source_url or None,
+        settings_override=settings,
     )
     db.refresh(item)
     if not ok:

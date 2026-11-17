@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -475,8 +475,9 @@ async def update_app_settings(
 async def list_movie_providers(
     _: Annotated[dict, Depends(require_auth)],
     db: Session = Depends(get_db),
+    source: Literal["metatube", "stash", "stashscrapers"] | None = None,
 ) -> dict[str, Any]:
-    source = get_settings().scrape_source
+    source = source or get_settings().scrape_source
     if source in {"stash", "stashscrapers"}:
         names, labels, error, from_cache = await (
             _stashscrapers_providers_with_status(db) if source == "stashscrapers" else _stash_providers_with_status(db)
