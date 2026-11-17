@@ -86,9 +86,11 @@ class Library(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     path: Mapped[str] = mapped_column(String(1024), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     type: Mapped[str] = mapped_column(String(32), default="mixed", nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     auto_scan_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Compatibility only: automatic monitoring always uses native events.
     scan_mode: Mapped[str] = mapped_column(String(16), default="native", nullable=False)
     ts_policy: Mapped[str] = mapped_column(String(16), default="auto", nullable=False)
     # Legacy scheduling columns are retained for upgrades; no periodic full scan uses them.
@@ -98,7 +100,7 @@ class Library(Base):
     parent_fallback_depth: Mapped[int | None] = mapped_column(Integer)
     ignore_dirs: Mapped[str | None] = mapped_column(Text)
     scan_interval_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)  # legacy
-    scan_interval_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    scan_interval_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)  # legacy
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     media_items: Mapped[list[MediaItem]] = relationship(back_populates="library", cascade="all, delete-orphan")

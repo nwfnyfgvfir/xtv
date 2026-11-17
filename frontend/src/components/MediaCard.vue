@@ -15,7 +15,7 @@ const favLoading = ref(false)
 const favorited = ref(Boolean(props.item.favorited))
 
 const title = computed(() => props.item.title || props.item.number || props.item.filename)
-// Prefer the poster thumbnail; each image keeps its original proportions.
+// Prefer the poster thumbnail in the same frame used by missing and failed artwork.
 const { src: cover, showImage, failed: coverFailed, onError: onImgError } = useCoverImage(() => [
   props.item.thumb_url, props.item.cover_url, props.item.backdrop_url,
 ])
@@ -121,15 +121,22 @@ async function toggleFav(e: Event) {
 .poster {
   position: relative;
   overflow: hidden;
+  aspect-ratio: 3 / 4;
   background: var(--bg-elevated);
   border-radius: 10px;
   isolation: isolate;
 }
 .poster > img {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
-  height: auto;
-  object-fit: contain;
+  height: 100%;
+  object-fit: cover;
+}
+.poster > :deep(.cover-placeholder) {
+  position: absolute;
+  inset: 0;
 }
 .card-link:focus-visible {
   outline-offset: 5px;

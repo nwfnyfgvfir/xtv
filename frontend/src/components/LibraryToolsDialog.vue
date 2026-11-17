@@ -24,9 +24,7 @@ const busy = ref(false)
 const { acceptTask, panelOpen } = useTasks()
 const policy = ref({
   auto_scan_enabled: true,
-  scan_mode: 'native' as 'poll' | 'native',
   ts_policy: 'auto' as 'auto' | 'complete',
-  scan_interval_seconds: 120,
   file_settle_seconds: 60,
   ignore_dirs: '',
 })
@@ -60,9 +58,7 @@ watch(
     const lib = props.library
     policy.value = {
       auto_scan_enabled: lib.auto_scan_enabled,
-      scan_mode: lib.scan_mode || 'native',
       ts_policy: lib.ts_policy || 'auto',
-      scan_interval_seconds: lib.effective_poll_interval_seconds || 120,
       file_settle_seconds: lib.effective_settle_seconds ?? 60,
       ignore_dirs: lib.effective_ignore_dirs || '',
     }
@@ -117,20 +113,6 @@ async function inspect(reset = false) {
             ></el-form-item
           >
           <div class="policy-grid">
-            <el-form-item label="监听方式"
-              ><el-select v-model="policy.scan_mode" aria-label="监听方式"
-                ><el-option label="轮询检测（网络共享可选）" value="poll" /><el-option
-                  label="文件事件（仅处理变化路径）"
-                  value="native" /></el-select
-            ></el-form-item>
-            <el-form-item v-if="policy.scan_mode === 'poll'" label="轮询基础间隔（秒）"
-              ><el-input-number
-                v-model="policy.scan_interval_seconds"
-                :min="30"
-                :max="86400"
-                :step="30"
-                aria-label="轮询基础间隔"
-            /></el-form-item>
             <el-form-item label="文件连续稳定时间（秒）"
               ><el-input-number
                 v-model="policy.file_settle_seconds"
@@ -149,10 +131,9 @@ async function inspect(reset = false) {
             自动模式会暂缓成组编号或哈希命名的疑似 TS
             分片，只记录一个待确认项。若实际是完整录像，可选择“完整文件”后重新扫描。播放清单明确引用的分片及下载临时目录仍会跳过。
           </p>
-          <p v-if="policy.scan_mode === 'native'" class="tool-hint">
-            仅在文件变化后处理对应路径，不做定时全库核对。首次入库、服务停机期间的变化或事件遗漏，可手动扫描。监听不可用时会提示，不会自动切换到轮询。
+          <p class="tool-hint">
+            自动扫描通过文件事件增量处理变化路径，不定时遍历媒体库。首次入库、服务停机期间的变化或事件遗漏，可手动扫描。监听不可用时会提示，可检查后重新保存设置以重试。
           </p>
-          <p v-else class="tool-hint">轮询会按间隔检查目录和文件属性，只对变化路径建任务；空闲时延长间隔，不做定时全库核对。</p>
           <p class="tool-hint">
             稳定时间为 0
             会关闭时间等待，过程文件和下载状态文件仍被拦截。刮削查询直接使用原文件名，不做番号识别。

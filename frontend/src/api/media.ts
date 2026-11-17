@@ -29,6 +29,9 @@ export const login = (password: string) =>
 
 export const listLibraries = () => client.get<Library[]>('/libraries').then((r) => r.data)
 
+export const reorderLibraries = (ids: number[]) =>
+  client.put<Library[]>('/libraries/order', { ids }).then((r) => r.data)
+
 /** List subdirectories under MEDIA_ROOT for the library path picker. */
 export const browseLibraryDirs = (path = '') =>
   client.get<BrowseDirsOut>('/libraries/browse', { params: { path } }).then((r) => r.data)
@@ -48,9 +51,7 @@ export const updateLibrary = (
     type: string
     enabled: boolean
     auto_scan_enabled: boolean
-    scan_mode: 'poll' | 'native'
     ts_policy: 'auto' | 'complete'
-    scan_interval_seconds: number
     file_settle_seconds: number
     ignore_dirs: string
   }>,

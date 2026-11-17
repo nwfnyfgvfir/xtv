@@ -12,9 +12,7 @@ class LibraryCreate(BaseModel):
     type: Literal["local", "strm", "mixed"] = "mixed"
     enabled: bool = True
     auto_scan_enabled: bool = True
-    scan_mode: Literal["poll", "native"] = "native"
     ts_policy: Literal["auto", "complete"] = "auto"
-    scan_interval_seconds: int | None = Field(default=None, ge=30, le=86400)
     file_settle_seconds: int | None = Field(default=None, ge=0, le=3600)
     ignore_dirs: str | None = Field(default=None, max_length=2048)
 
@@ -25,32 +23,32 @@ class LibraryUpdate(BaseModel):
     type: Literal["local", "strm", "mixed"] | None = None
     enabled: bool | None = None
     auto_scan_enabled: bool | None = None
-    scan_mode: Literal["poll", "native"] | None = None
     ts_policy: Literal["auto", "complete"] | None = None
-    scan_interval_seconds: int | None = Field(default=None, ge=30, le=86400)
     file_settle_seconds: int | None = Field(default=None, ge=0, le=3600)
     ignore_dirs: str | None = Field(default=None, max_length=2048)
+
+
+class LibraryOrder(BaseModel):
+    ids: list[int] = Field(min_length=1)
 
 
 class LibraryOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    sort_order: int = 0
     name: str
     path: str
     type: str
     enabled: bool
     auto_scan_enabled: bool = True
-    scan_mode: str = "native"
     ts_policy: str = "auto"
-    scan_interval_seconds: int | None = None
     file_settle_seconds: int | None = None
     ignore_dirs: str | None = None
     waiting_files: int = 0
     watch_mode: str | None = None
     watch_error: str | None = None
     effective_settle_seconds: int = 60
-    effective_poll_interval_seconds: int = 120
     effective_ignore_dirs: str = ""
     media_count: int = 0
     # In-process LibraryChanged generation (bumped on ingest/remove/scrape).

@@ -1,17 +1,15 @@
 export interface Library {
   id: number
+  sort_order: number
   name: string
   path: string
   type: string
   enabled: boolean
   auto_scan_enabled: boolean
-  scan_mode: 'poll' | 'native'
   ts_policy: 'auto' | 'complete'
-  scan_interval_seconds: number | null
   file_settle_seconds: number | null
   ignore_dirs: string | null
   effective_settle_seconds: number
-  effective_poll_interval_seconds: number
   effective_ignore_dirs: string
   waiting_files: number
   watch_mode?: string | null

@@ -7,6 +7,7 @@ import type { Health, ImageProxyMode, ScrapeSource, Settings, TranslateProvider 
 import { getErrorMessage } from '@/utils/errors'
 import { APP_VERSION } from '@/utils/version'
 import AppIcon from '@/components/AppIcon.vue'
+import LibraryOrderList from '@/components/LibraryOrderList.vue'
 import { normalizeScrapeSource, scrapeSources } from '@/utils/scrapeSources'
 
 const router = useRouter()
@@ -616,6 +617,8 @@ onMounted(() => {
               <el-input v-model="form.scan_extensions" />
             </el-form-item>
           </el-form>
+          <h3>媒体库顺序</h3>
+          <LibraryOrderList />
           <div class="directory-info">
             <AppIcon name="folder" :size="18" />
             <div>

@@ -12,6 +12,29 @@ from app.services.naming import source_name
 from test_persistent_tasks import workspace, add_media, run
 
 
+@pytest.fixture(autouse=True)
+def native_observer(monkeypatch):
+    class NativeObserver:
+        alive = False
+
+        def schedule(self, handler, path, recursive):
+            self.handler = handler
+
+        def start(self):
+            self.alive = True
+
+        def stop(self):
+            self.alive = False
+
+        def is_alive(self):
+            return self.alive
+
+        def join(self, **kwargs):
+            pass
+
+    monkeypatch.setattr(auto_scan, 'Observer', NativeObserver)
+
+
 @pytest.mark.parametrize('name', ['ABP-001.mp4.part', 'ABP-001.part.mp4', 'ABP-001.tmp.mp4',
     'ABP-001.f137.mp4', 'ABP-001.part.wmv', 'ABP-001.tmp.m2ts', '.ABP-001.mp4',
     'incomplete/ABP-001.mp4', '.cache/ABP-001.mp4'])
@@ -155,29 +178,31 @@ def test_pending_existing_file_keeps_its_index(workspace):
         assert db.get(MediaItem, media_id) is not None
 
 
-def test_polling_is_low_frequency_and_backs_off_when_idle(workspace):
+def test_legacy_poll_settings_cannot_trigger_directory_reads(workspace, monkeypatch):
     api, factory, lib_id, root, _, _ = workspace
-    api.patch(f'/api/libraries/{lib_id}', json={'scan_interval_seconds': 30}).raise_for_status()
+    with factory() as db:
+        lib = db.get(Library, lib_id)
+        lib.scan_mode, lib.scan_interval_seconds = 'poll', 30
+        db.commit()
     (root / 'ABP-001.mp4').write_bytes(b'fixture')
     manager = auto_scan.AutoScanner(factory)
+    monkeypatch.setattr(os, 'scandir', lambda *args, **kwargs: pytest.fail('Idle monitoring must not enumerate directories'))
     manager.tick(0)
-    manager.tick(29)
+    manager.tick(30)
+    manager.tick(86400)
+    manager.tick(172800)
     with factory() as db:
         assert db.query(BackgroundJob).count() == 0
-    manager.tick(30)
-    with factory() as db:
-        task = db.query(BackgroundJob).one()
-        assert json.loads(task.params_json)['inputs']['paths'] == [str(root / 'ABP-001.mp4')]
-    manager.tick(60)
-    assert manager.states[lib_id].idle_rounds == 1
-    assert manager.states[lib_id].next_poll == 120
+    status = manager.status()
+    assert status['observer_type'] == 'native' and status['libraries'][0]['mode'] == 'native'
+    assert 'poll_interval_sec' not in status
 
 
 def test_manual_mode_does_not_walk_or_auto_recheck(workspace, monkeypatch):
     api, factory, lib_id, _, _, _ = workspace
     api.patch(f'/api/libraries/{lib_id}', json={'auto_scan_enabled': False}).raise_for_status()
     manager = auto_scan.AutoScanner(factory)
-    monkeypatch.setattr(manager, 'snapshot', lambda _: pytest.fail('manual mode must not walk'))
+    monkeypatch.setattr(auto_scan, 'Observer', lambda: pytest.fail('Manual mode must not start a monitor'))
     manager.tick(0); manager.tick(86400)
     assert not manager.states
     with factory() as db:
@@ -261,7 +286,6 @@ def test_disappeared_waiting_file_stops_automatic_rechecks(workspace):
 
 def test_native_monitor_failure_is_reported_without_polling_or_daily_scan(workspace, monkeypatch):
     api, factory, lib_id, _, _, _ = workspace
-    api.patch(f'/api/libraries/{lib_id}', json={'scan_mode': 'native'}).raise_for_status()
     class UnavailableObserver:
         def schedule(self, *args, **kwargs):
             raise OSError('Unsupported filesystem')
@@ -271,7 +295,7 @@ def test_native_monitor_failure_is_reported_without_polling_or_daily_scan(worksp
             return False
     monkeypatch.setattr(auto_scan, 'Observer', UnavailableObserver)
     manager = auto_scan.AutoScanner(factory)
-    monkeypatch.setattr(manager, 'snapshot', lambda _: pytest.fail('Event mode must never silently poll'))
+    monkeypatch.setattr(os, 'scandir', lambda *args, **kwargs: pytest.fail('Monitoring failures must not trigger directory reads'))
     manager.tick(0)
     assert manager.status()['libraries'][0]['mode'] == 'unavailable'
     assert '不可用' in manager.status()['libraries'][0]['error']
@@ -292,7 +316,6 @@ def test_native_monitor_failure_is_reported_without_polling_or_daily_scan(worksp
 
 def test_event_mode_only_enqueues_changed_paths_and_retries_watch_setup_on_user_reload(workspace, monkeypatch):
     api, factory, lib_id, root, _, _ = workspace
-    api.patch(f'/api/libraries/{lib_id}', json={'scan_mode': 'native'}).raise_for_status()
     class NativeObserver:
         alive = False
         starts = 0
@@ -310,7 +333,7 @@ def test_event_mode_only_enqueues_changed_paths_and_retries_watch_setup_on_user_
     observer = NativeObserver()
     monkeypatch.setattr(auto_scan, 'Observer', lambda: observer)
     manager = auto_scan.AutoScanner(factory)
-    monkeypatch.setattr(manager, 'snapshot', lambda _: pytest.fail('Event mode must not walk the media directory'))
+    monkeypatch.setattr(os, 'scandir', lambda *args, **kwargs: pytest.fail('Event mode must not walk the media directory'))
     try:
         manager.tick(0)
         manager.tick(86400)
@@ -340,7 +363,7 @@ def test_legacy_daily_scan_timestamp_never_enqueues_a_full_scan(workspace, monke
         db.get(Library, lib_id).next_full_scan_at = utcnow() - timedelta(days=1)
         db.commit()
     manager = auto_scan.AutoScanner(factory)
-    monkeypatch.setattr(manager, 'snapshot', lambda _: {})
+    monkeypatch.setattr(os, 'scandir', lambda *args, **kwargs: pytest.fail('Legacy schedules must not walk the media directory'))
     manager.tick(0)
     manager.tick(86400)
     manager.tick(172800)
@@ -348,16 +371,22 @@ def test_legacy_daily_scan_timestamp_never_enqueues_a_full_scan(workspace, monke
         assert db.query(BackgroundJob).count() == 0
 
 
-def test_new_library_defaults_to_file_events_without_full_scan_controls(workspace):
-    api, _, _, root, _, _ = workspace
+def test_library_api_has_no_polling_or_periodic_scan_controls(workspace):
+    api, factory, lib_id, root, _, _ = workspace
     response = api.post('/api/libraries', json={'name': 'Event library', 'path': str(root), 'type': 'local'})
-    assert response.status_code == 200 and response.json()['scan_mode'] == 'native'
-    assert 'full_scan_interval_seconds' not in response.json()
+    assert response.status_code == 200
+    obsolete = {'scan_mode', 'scan_interval_seconds', 'effective_poll_interval_seconds', 'full_scan_interval_seconds'}
+    assert not obsolete.intersection(response.json())
+    # Older clients may send retired settings, but they cannot reactivate polling.
+    updated = api.patch(f'/api/libraries/{lib_id}', json={'scan_mode': 'poll', 'scan_interval_seconds': 30})
+    assert updated.status_code == 200 and not obsolete.intersection(updated.json())
+    with factory() as db:
+        lib = db.get(Library, lib_id)
+        assert lib.scan_mode == 'native' and lib.scan_interval_seconds is None
 
 
 def test_event_mode_rejects_watchdog_implicit_polling_backend(workspace, monkeypatch):
     api, factory, lib_id, _, _, _ = workspace
-    api.patch(f'/api/libraries/{lib_id}', json={'scan_mode': 'native'}).raise_for_status()
     observer = auto_scan.PollingObserver()
     monkeypatch.setattr(observer, 'schedule', lambda *args, **kwargs: pytest.fail('Implicit polling must not be scheduled'))
     monkeypatch.setattr(auto_scan, 'Observer', lambda: observer)
@@ -436,7 +465,7 @@ def test_v130_schema_migration_preserves_media_jobs_and_manual_policy(tmp_path, 
     with engine.begin() as connection:
         connection.execute(text('DROP TABLE file_observations'))
         for table, columns in {
-            'libraries': ('scan_mode', 'ts_policy', 'full_scan_interval_seconds', 'next_full_scan_at', 'file_settle_seconds', 'parent_fallback_depth', 'ignore_dirs'),
+            'libraries': ('sort_order', 'scan_mode', 'ts_policy', 'full_scan_interval_seconds', 'next_full_scan_at', 'file_settle_seconds', 'parent_fallback_depth', 'ignore_dirs'),
             'media_items': ('number_locked', 'number_source', 'recognition_notes', 'recognition_version', 'file_mtime_ns'),
             'background_jobs': ('waiting', 'scan_manifest_json'),
         }.items():
@@ -447,7 +476,7 @@ def test_v130_schema_migration_preserves_media_jobs_and_manual_policy(tmp_path, 
     database.init_db()
     with factory() as db:
         lib = db.query(Library).one()
-        assert lib.auto_scan_enabled and lib.scan_mode == 'poll' and lib.scan_interval_seconds == 120
+        assert lib.auto_scan_enabled and lib.scan_mode == 'native' and lib.scan_interval_seconds is None and lib.sort_order == 0
         assert db.query(MediaItem).one().title == 'Saved metadata'
         job = db.get(BackgroundJob, 'legacy-job')
         assert job.status == 'interrupted' and job.scanned == 3 and job.waiting == 0
@@ -457,4 +486,30 @@ def test_v130_schema_migration_preserves_media_jobs_and_manual_policy(tmp_path, 
     with factory() as db:
         assert not db.query(Library).one().auto_scan_enabled
         assert db.query(FileObservation).count() == 0
+    engine.dispose()
+
+
+def test_polling_upgrade_retires_schedules_and_preserves_disabled_libraries(tmp_path, monkeypatch):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from app import db as database
+
+    engine = create_engine(f'sqlite:///{tmp_path.as_posix()}/polling-upgrade.db')
+    database.Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    with factory() as db:
+        for enabled in (True, False):
+            db.add(Library(name=str(enabled), path=str(tmp_path), auto_scan_enabled=enabled,
+                scan_mode='poll', scan_interval_seconds=30, scan_interval_hours=1,
+                next_full_scan_at=utcnow() - timedelta(days=1)))
+        db.commit()
+    monkeypatch.setattr(database, 'engine', engine)
+    monkeypatch.setattr(database, 'SessionLocal', factory)
+    database.init_db()
+    database.init_db()
+    with factory() as db:
+        libraries = db.query(Library).order_by(Library.id).all()
+        assert [lib.auto_scan_enabled for lib in libraries] == [True, False]
+        assert all(lib.scan_mode == 'native' and lib.scan_interval_seconds is None
+            and lib.scan_interval_hours is None and lib.next_full_scan_at is None for lib in libraries)
     engine.dispose()

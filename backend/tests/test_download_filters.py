@@ -46,7 +46,13 @@ def test_two_thousand_fragments_do_not_get_per_file_stat_or_tasks(workspace, mon
     with factory() as db:
         assert db.query(MediaItem).count() == 1
         assert db.query(FileObservation).count() == (2 if kind == 'suspect' else 1)
-        assert len(auto_scan.AutoScanner(factory).snapshot(db.get(Library, lib_id))) == 1
+        manager = auto_scan.AutoScanner(factory)
+        lib = db.get(Library, lib_id)
+        manager.states[lib_id] = auto_scan.WatchState(lib, ())
+        manager.schedule(lib_id, [str(folder / '000001.ts'), str(complete)])
+        assert str(complete) in manager.pending[lib_id]
+        if kind == 'temporary':
+            assert str(folder / '000001.ts') not in manager.pending[lib_id]
     waiting = api.get(f'/api/libraries/{lib_id}/waiting').json()
     assert waiting['total'] == (1 if kind == 'suspect' else 0)
     if kind == 'suspect':

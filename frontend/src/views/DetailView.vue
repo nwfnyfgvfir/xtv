@@ -31,6 +31,7 @@ const item = ref<MediaDetail | null>(null)
 const play = ref<PlayInfo | null>(null)
 const loading = ref(false)
 const playing = ref(false)
+const coverPreviewVisible = ref(false)
 const favLoading = ref(false)
 const playLoading = ref(false)
 const { tasks, acceptTask, panelOpen } = useTasks()
@@ -105,6 +106,7 @@ const canTranslate = computed(() => {
 
 async function load() {
   loading.value = true
+  coverPreviewVisible.value = false
   resetCover()
   playing.value = false
   play.value = null
@@ -314,13 +316,15 @@ watch(() => props.id, load)
     <template v-else-if="item">
       <section class="detail" aria-label="影片信息与播放">
         <div class="cover-wrap">
-          <img
+          <button
             v-if="showImage"
-            class="cover"
-            :src="cover"
-            :alt="item.title || item.filename"
-            @error="onCoverError"
-          />
+            type="button"
+            class="cover-open"
+            aria-label="查看完整封面"
+            @click="coverPreviewVisible = true"
+          >
+            <img class="cover" :src="cover" :alt="item.title || item.filename" @error="onCoverError" />
+          </button>
           <CoverPlaceholder
             v-else
             size="lg"
@@ -539,6 +543,9 @@ watch(() => props.id, load)
         </aside>
       </div>
 
+      <el-dialog v-if="showImage" v-model="coverPreviewVisible" title="完整封面" width="min(1100px, 94vw)" append-to-body>
+        <img class="cover-original" :src="cover" :alt="item.title || item.filename" />
+      </el-dialog>
       <el-dialog v-model="renameVisible" title="重命名文件" width="min(440px, 92vw)">
         <p class="dialog-help">修改文件名，扩展名 {{ renameExt || '（无）' }} 将保持不变。</p>
         <el-input
@@ -613,14 +620,37 @@ watch(() => props.id, load)
 }
 .cover-wrap {
   position: relative;
+  aspect-ratio: 3 / 4;
   border-radius: 12px;
   overflow: hidden;
   background: var(--bg-elevated);
 }
+.cover-open,
+.cover-wrap > :deep(.cover-placeholder) {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.cover-open {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
 .cover {
   display: block;
   width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.cover-original {
+  display: block;
+  width: auto;
   height: auto;
+  max-width: 100%;
+  max-height: 75dvh;
+  margin: 0 auto;
   object-fit: contain;
 }
 .source-filename {

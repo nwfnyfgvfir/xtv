@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from watchdog.events import FileSystemEventHandler
@@ -13,7 +13,7 @@ from watchdog.observers.polling import PollingObserver
 from app.config import get_settings
 from app.db import SessionLocal
 from app.models import Library, FileObservation, utcnow
-from app.services.file_readiness import ignored_reason, ignored_directory, iter_files, root_path, control_target
+from app.services.file_readiness import ignored_reason, ignored_directory, root_path, control_target
 from app.services.task_store import enqueue, active_for_library, TaskConflict
 
 logger = logging.getLogger(__name__)
@@ -55,10 +55,7 @@ class WatchState:
     library: Library
     fingerprint: tuple
     observer: object | None = None
-    actual_mode: str = "poll"
-    snapshot: dict[str, tuple[int, int]] | None = None
-    next_poll: float = 0
-    idle_rounds: int = 0
+    actual_mode: str = "unavailable"
     last_error: str | None = None
 
 
@@ -120,33 +117,29 @@ class AutoScanner:
             if library_id not in wanted:
                 self._unwatch(library_id)
         for library_id, lib in wanted.items():
-            key = (lib.path, lib.scan_mode, lib.scan_interval_seconds, lib.ignore_dirs,
-                   lib.file_settle_seconds, lib.ts_policy)
+            key = (lib.path, lib.ignore_dirs, lib.file_settle_seconds, lib.ts_policy)
             old = self.states.get(library_id)
             if old and old.fingerprint == key and not (self.dirty and old.actual_mode == 'unavailable'):
                 old.library = lib
                 continue
             if old:
                 self._unwatch(library_id, keep_pending=True)
-            interval = max(30, lib.scan_interval_seconds or get_settings().scan_poll_interval_seconds)
-            state = WatchState(lib, key, next_poll=now + interval)
-            if lib.scan_mode == "native":
-                observer = None
-                try:
-                    observer = Observer()
-                    if isinstance(observer, PollingObserver):
-                        raise OSError('The operating system has no native file-event backend')
-                    observer.schedule(Handler(self, library_id), str(root_path(lib)), recursive=True)
-                    observer.start()
-                    state.observer, state.actual_mode = observer, "native"
-                except Exception:
-                    if observer is not None:
-                        observer.stop()
-                        if observer.is_alive():
-                            observer.join(timeout=2)
-                    state.actual_mode = 'unavailable'
-                    logger.exception("File event monitoring unavailable for library=%s", library_id)
-                    state.last_error = "文件事件监听不可用，请检查目录与监听权限后重新保存扫描设置；期间可手动扫描"
+            state = WatchState(lib, key)
+            observer = None
+            try:
+                observer = Observer()
+                if isinstance(observer, PollingObserver):
+                    raise OSError('The operating system has no native file-event backend')
+                observer.schedule(Handler(self, library_id), str(root_path(lib)), recursive=True)
+                observer.start()
+                state.observer, state.actual_mode = observer, "native"
+            except Exception:
+                if observer is not None:
+                    observer.stop()
+                    if observer.is_alive():
+                        observer.join(timeout=2)
+                logger.exception("File event monitoring unavailable for library=%s", library_id)
+                state.last_error = "文件事件监听不可用，请检查目录与监听权限后重新保存扫描设置；期间可手动扫描"
             self.states[library_id] = state
         self.next_config, self.dirty = now + 60, False
 
@@ -162,42 +155,15 @@ class AutoScanner:
                 self.first_events.pop(library_id, None)
                 self.generations.pop(library_id, None)
 
-    def snapshot(self, lib):
-        root = root_path(lib)
-        if not root.is_dir():
-            raise OSError("媒体库目录暂时不可访问")
-        result = {}
-        for path in iter_files(root, None, lib):
-            if not media_event_path(str(path)) or ignored_reason(path, root, lib) and not control_target(path):
-                continue
-            stat = path.stat()
-            result[str(path)] = (stat.st_size, stat.st_mtime_ns)
-        return result
-
     def tick(self, now=None):
         now = time.monotonic() if now is None else now
         if self.dirty or now >= self.next_config:
             self._refresh(now)
         for library_id, state in list(self.states.items()):
-            lib = state.library
             if state.actual_mode == 'native' and state.observer and not state.observer.is_alive():
                 state.actual_mode = 'unavailable'
                 state.last_error = '文件事件监听已停止，请检查后重新保存扫描设置；期间可手动扫描'
                 logger.error('File event monitor stopped for library=%s', library_id)
-            if state.actual_mode == "poll" and now >= state.next_poll:
-                try:
-                    snapshot = self.snapshot(lib)
-                    previous = state.snapshot or {}
-                    changed = {path for path in previous.keys() | snapshot.keys() if previous.get(path) != snapshot.get(path)}
-                    if changed:
-                        self.schedule(library_id, [str(control_target(Path(path)) or Path(path)) for path in changed], immediate=True, now=now)
-                    state.snapshot = snapshot
-                    state.idle_rounds = 0 if changed else min(3, state.idle_rounds + 1)
-                    state.last_error = None
-                except OSError:
-                    state.last_error = "目录暂时不可访问，保留索引并稍后重试"
-                interval = max(30, lib.scan_interval_seconds or get_settings().scan_poll_interval_seconds)
-                state.next_poll = now + min(interval * 2 ** state.idle_rounds, max(interval, 600))
         if now >= self.next_readiness and self.states:
             with self.factory() as db:
                 due = db.query(FileObservation).filter(FileObservation.library_id.in_(list(self.states)),
@@ -264,11 +230,10 @@ class AutoScanner:
         states = list(self.states.items())
         with self.lock:
             pending = sorted(self.pending)
-        return {"running": bool(self.thread and self.thread.is_alive()), "observer_type": "adaptive",
-            "poll_interval_sec": get_settings().scan_poll_interval_seconds,
+        return {"running": bool(self.thread and self.thread.is_alive()), "observer_type": "native",
             "watched_library_ids": sorted(key for key, _ in states), "pending_scans": pending,
-            "libraries": [{"id": key, "name": state.library.name, "mode": state.actual_mode, "error": state.last_error,
-                "idle_rounds": state.idle_rounds} for key, state in states]}
+            "libraries": [{"id": key, "name": state.library.name, "mode": state.actual_mode, "error": state.last_error}
+                for key, state in states]}
 
 
 manager = AutoScanner()

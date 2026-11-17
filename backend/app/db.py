@@ -76,6 +76,7 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     # Lightweight migrations for existing SQLite DBs
     _ensure_column("libraries", "auto_scan_enabled", "BOOLEAN", "0")
+    _ensure_column("libraries", "sort_order", "INTEGER", "0")
     _ensure_column("libraries", "scan_interval_hours", "INTEGER", None)
     _ensure_column("libraries", "scan_interval_seconds", "INTEGER", None)
     _ensure_column("media_items", "title_original", "TEXT", None)
@@ -96,22 +97,19 @@ def init_db() -> None:
     _ensure_column("background_jobs", "waiting", "INTEGER", "0")
     _ensure_column("background_jobs", "scan_manifest_json", "TEXT", "'{}'")
     if old_scan_policy:
-        # Legacy auto_scan_enabled was unused: preserve monitoring, at a lower rate.
+        # Legacy auto_scan_enabled was unused: preserve the previously monitored libraries.
         with engine.begin() as conn:
-            conn.execute(text("UPDATE libraries SET auto_scan_enabled=enabled, scan_interval_seconds=CASE WHEN scan_interval_seconds>=30 THEN scan_interval_seconds ELSE 120 END"))
+            conn.execute(text("UPDATE libraries SET auto_scan_enabled=enabled"))
     # Add the migration marker last so an interrupted upgrade can run again.
-    _ensure_column("libraries", "scan_mode", "VARCHAR(16)", "'poll'")
-    # Backfill seconds from legacy hours when empty
-    try:
-        with engine.begin() as conn:
-            conn.execute(
-                text(
-                    "UPDATE libraries SET scan_interval_seconds = scan_interval_hours * 3600 "
-                    "WHERE scan_interval_seconds IS NULL AND scan_interval_hours IS NOT NULL"
-                )
-            )
-    except Exception:  # noqa: BLE001
-        logger.debug("scan_interval backfill skipped", exc_info=True)
+    _ensure_column("libraries", "scan_mode", "VARCHAR(16)", "'native'")
+    # Retain old columns for non-destructive upgrades, but retire every polling schedule.
+    with engine.begin() as conn:
+        conn.execute(text(
+            "UPDATE libraries SET scan_mode='native', scan_interval_seconds=NULL, "
+            "scan_interval_hours=NULL, next_full_scan_at=NULL "
+            "WHERE scan_mode IS NULL OR scan_mode<>'native' OR scan_interval_seconds IS NOT NULL "
+            "OR scan_interval_hours IS NOT NULL OR next_full_scan_at IS NOT NULL"
+        ))
 
     _run_actor_dedupe_once()
 

@@ -7,10 +7,9 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.config import get_settings
 from app.deps import require_auth
 from app.models import Library, MediaItem, FileObservation
-from app.schemas import BrowseDirEntry, BrowseDirsOut, LibraryCreate, LibraryOut, LibraryUpdate, TaskOut
+from app.schemas import BrowseDirEntry, BrowseDirsOut, LibraryCreate, LibraryOrder, LibraryOut, LibraryUpdate, TaskOut
 from app.services.actors import delete_orphan_actors
 from app.services.fs_browse import BrowseError, list_subdirectories
 from app.services import task_store
@@ -31,7 +30,6 @@ def _library_out(db: Session, lib: Library) -> LibraryOut:
     data.media_count = int(count)
     data.content_revision = get_revision(lib.id)
     data.effective_settle_seconds = settle_seconds(lib)
-    data.effective_poll_interval_seconds = max(30, lib.scan_interval_seconds or get_settings().scan_poll_interval_seconds)
     data.effective_ignore_dirs = ",".join(sorted(ignored_dirs(lib)))
     data.waiting_files = db.query(func.count(FileObservation.id)).filter(FileObservation.library_id == lib.id, FileObservation.state.in_(("waiting", "unreadable"))).scalar() or 0
     return data
@@ -59,8 +57,25 @@ def list_libraries(
     _: Annotated[dict, Depends(require_auth)],
     db: Session = Depends(get_db),
 ) -> list[LibraryOut]:
-    libs = db.query(Library).order_by(Library.id.asc()).all()
+    libs = db.query(Library).order_by(Library.sort_order.asc(), Library.id.asc()).all()
     return [_library_out(db, lib) for lib in libs]
+
+
+@router.put("/order", response_model=list[LibraryOut])
+def order_libraries(
+    body: LibraryOrder,
+    _: Annotated[dict, Depends(require_auth)],
+    db: Session = Depends(get_db),
+) -> list[LibraryOut]:
+    if len(set(body.ids)) != len(body.ids):
+        raise HTTPException(422, "媒体库排序不能包含重复项")
+    libraries = {lib.id: lib for lib in db.query(Library).all()}
+    if set(body.ids) != set(libraries):
+        raise HTTPException(409, "媒体库列表已变化，请刷新后重新排序")
+    for position, library_id in enumerate(body.ids):
+        libraries[library_id].sort_order = position
+    db.commit()
+    return [_library_out(db, libraries[library_id]) for library_id in body.ids]
 
 
 @router.post("", response_model=LibraryOut)
@@ -69,7 +84,8 @@ def create_library(
     _: Annotated[dict, Depends(require_auth)],
     db: Session = Depends(get_db),
 ) -> LibraryOut:
-    lib = Library(**body.model_dump())
+    last_order = db.query(func.max(Library.sort_order)).scalar()
+    lib = Library(**body.model_dump(), sort_order=(last_order + 1 if last_order is not None else 0))
     db.add(lib)
     db.commit()
     db.refresh(lib)
@@ -88,7 +104,7 @@ def update_library(
     if not lib:
         raise HTTPException(404, "library not found")
     data = body.model_dump(exclude_unset=True)
-    for key in ("name", "path", "type", "enabled", "auto_scan_enabled", "scan_mode", "ts_policy"):
+    for key in ("name", "path", "type", "enabled", "auto_scan_enabled", "ts_policy"):
         if key in data and data[key] is None:
             raise HTTPException(422, f"{key} cannot be null")
     if "path" in data and data["path"] != lib.path and task_store.active_for_library(db, library_id):

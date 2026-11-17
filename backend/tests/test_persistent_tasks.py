@@ -39,7 +39,7 @@ def workspace(tmp_path, monkeypatch):
     root = tmp_path / "local"
     root.mkdir()
     with factory() as db:
-        lib = Library(name="Task fixtures", path=str(root), type="local", scan_mode="poll")
+        lib = Library(name="Task fixtures", path=str(root), type="local")
         db.add(lib)
         db.commit()
         lib_id = lib.id

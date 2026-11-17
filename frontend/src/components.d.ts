@@ -35,6 +35,7 @@ declare module 'vue' {
     ElTabPane: typeof import('element-plus/es')['ElTabPane']
     ElTabs: typeof import('element-plus/es')['ElTabs']
     ExternalPlayersBar: typeof import('./components/ExternalPlayersBar.vue')['default']
+    LibraryOrderList: typeof import('./components/LibraryOrderList.vue')['default']
     LibraryToolsDialog: typeof import('./components/LibraryToolsDialog.vue')['default']
     MediaCard: typeof import('./components/MediaCard.vue')['default']
     MediaGrid: typeof import('./components/MediaGrid.vue')['default']

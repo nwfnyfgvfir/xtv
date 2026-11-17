@@ -9,6 +9,7 @@ import MediaGrid from '@/components/MediaGrid.vue'
 import AppIcon from '@/components/AppIcon.vue'
 import SkeletonGrid from '@/components/SkeletonGrid.vue'
 import LibraryToolsDialog from '@/components/LibraryToolsDialog.vue'
+import LibraryOrderList from '@/components/LibraryOrderList.vue'
 import { isActiveTask, useTasks } from '@/composables/useTasks'
 import {
   createLibrary,
@@ -30,6 +31,7 @@ const { route, page, replaceQuery, goPage, syncPageFromRoute } = usePagedRoute()
 
 const items = ref<MediaListItem[]>([])
 const libraries = ref<Library[]>([])
+const showLibraryOrder = ref(false)
 const total = ref(0)
 const sort = ref<MediaSort>(loadMediaSort())
 const filter = ref<MediaFilter>(parseFilter(queryString(route.query, 'filter')))
@@ -416,6 +418,9 @@ onBeforeUnmount(stopSoftRefresh)
         <AppIcon name="folder" :size="16" /><span class="name">{{ lib.name }}</span
         ><span class="count">{{ lib.media_count ?? 0 }}</span>
       </button>
+      <button v-if="libraries.length > 1" type="button" class="lib-tab lib-sort" aria-label="排序媒体库" @click="showLibraryOrder = true">
+        <span aria-hidden="true">⠿</span>排序
+      </button>
     </nav>
 
     <div v-if="currentLibrary" class="lib-toolbar">
@@ -526,6 +531,9 @@ onBeforeUnmount(stopSoftRefresh)
       ><el-button text @click="showTools = true">查看等待与扫描策略</el-button>
     </div>
     <LibraryToolsDialog v-model="showTools" :library="currentLibrary" @saved="loadLibraries" />
+    <el-dialog v-model="showLibraryOrder" title="媒体库排序" width="min(560px, 94vw)">
+      <LibraryOrderList v-if="showLibraryOrder" @saved="libraries = $event" />
+    </el-dialog>
     <SkeletonGrid v-if="loading && !items.length" />
     <MediaGrid
       v-else
@@ -637,6 +645,14 @@ onBeforeUnmount(stopSoftRefresh)
 }
 .lib-tab:hover {
   color: var(--text);
+}
+.lib-sort {
+  position: sticky;
+  right: 0;
+  margin-left: auto;
+  padding-left: 12px;
+  padding-right: 8px;
+  background: var(--bg);
 }
 .lib-tab.on {
   color: var(--text);
