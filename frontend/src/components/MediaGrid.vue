@@ -49,7 +49,7 @@ watch(
 <style scoped>
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(164px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--media-card-min-width)), 1fr));
   gap: 28px 20px;
 }
 .empty {

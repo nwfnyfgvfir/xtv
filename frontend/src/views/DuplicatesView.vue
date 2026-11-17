@@ -17,6 +17,7 @@ const pageSize = 20
 const q = ref('')
 const loading = ref(false)
 const deleteLoading = ref(false)
+const failedCovers = ref<Record<number, string[]>>({})
 const selected = ref<Set<number>>(new Set())
 
 const selectedCount = computed(() => selected.value.size)
@@ -30,6 +31,7 @@ async function load() {
       page_size: pageSize,
     })
     groups.value = data.items
+    failedCovers.value = {}
     total.value = data.total
     // Drop selections that are no longer on this page
     const visible = new Set(data.items.flatMap((g) => g.items.map((i) => i.id)))
@@ -102,7 +104,14 @@ function keepLargest(group: DuplicateGroup) {
 }
 
 function coverOf(item: DuplicateMediaItem) {
-  return item.thumb_url || item.cover_url || ''
+  return [item.cover_url, item.thumb_url].find(
+    (url) => url && !failedCovers.value[item.id]?.includes(url),
+  ) || ''
+}
+
+function onCoverError(item: DuplicateMediaItem, event: Event) {
+  const url = (event.target as HTMLImageElement).getAttribute('src')
+  if (url) failedCovers.value[item.id] = [...(failedCovers.value[item.id] || []), url]
 }
 
 function openDetail(id: number) {
@@ -232,10 +241,11 @@ onMounted(() => {
               :src="coverOf(item)"
               alt=""
               loading="lazy"
-              @error="($event.target as HTMLImageElement).style.display = 'none'"
+              @error="onCoverError(item, $event)"
             />
             <CoverPlaceholder
               v-else
+              size="xs"
               :number="item.number"
               :title="item.title"
               :filename="item.filename"
@@ -348,7 +358,7 @@ onMounted(() => {
 }
 .row {
   display: grid;
-  grid-template-columns: auto 64px 1fr;
+  grid-template-columns: auto 96px minmax(0, 1fr);
   gap: var(--space-3);
   align-items: center;
   padding: var(--space-3) var(--space-4);
@@ -358,8 +368,8 @@ onMounted(() => {
   border-bottom: none;
 }
 .thumb {
-  width: 64px;
-  height: 90px;
+  width: 96px;
+  aspect-ratio: var(--poster-ratio);
   border: none;
   padding: 0;
   border-radius: var(--radius-sm);

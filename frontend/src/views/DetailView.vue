@@ -612,7 +612,7 @@ watch(() => props.id, load)
 }
 .detail {
   display: grid;
-  grid-template-columns: minmax(210px, 280px) minmax(0, 1fr);
+  grid-template-columns: minmax(280px, 440px) minmax(0, 1fr);
   gap: clamp(28px, 3vw, 50px);
   align-items: start;
   padding-bottom: 40px;
@@ -620,7 +620,7 @@ watch(() => props.id, load)
 }
 .cover-wrap {
   position: relative;
-  aspect-ratio: 3 / 4;
+  aspect-ratio: var(--poster-ratio);
   border-radius: 12px;
   overflow: hidden;
   background: var(--bg-elevated);
@@ -1105,7 +1105,7 @@ watch(() => props.id, load)
 }
 @media (max-width: 1180px) {
   .detail {
-    grid-template-columns: 225px minmax(0, 1fr);
+    grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
     gap: 28px;
   }
   .detail-content {
@@ -1148,7 +1148,7 @@ watch(() => props.id, load)
     gap: 23px;
   }
   .cover-wrap {
-    width: min(72%, 260px);
+    width: 100%;
     margin: 0 auto;
   }
   .hero-info {

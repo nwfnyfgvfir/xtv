@@ -15,9 +15,9 @@ const favLoading = ref(false)
 const favorited = ref(Boolean(props.item.favorited))
 
 const title = computed(() => props.item.title || props.item.number || props.item.filename)
-// Prefer the poster thumbnail in the same frame used by missing and failed artwork.
+// Prefer the complete landscape cover, retaining other artwork as recovery candidates.
 const { src: cover, showImage, failed: coverFailed, onError: onImgError } = useCoverImage(() => [
-  props.item.thumb_url, props.item.cover_url, props.item.backdrop_url,
+  props.item.cover_url, props.item.thumb_url, props.item.backdrop_url,
 ])
 const isChineseSub = computed(() => props.item.subtitle_flag === 'C')
 const score = computed(() =>
@@ -71,8 +71,8 @@ async function toggleFav(e: Event) {
           v-if="showImage"
           :src="cover"
           :alt="title"
-          width="200"
-          height="267"
+          width="300"
+          height="200"
           loading="lazy"
           decoding="async"
           @error="onImgError"
@@ -121,7 +121,7 @@ async function toggleFav(e: Event) {
 .poster {
   position: relative;
   overflow: hidden;
-  aspect-ratio: 3 / 4;
+  aspect-ratio: var(--poster-ratio);
   background: var(--bg-elevated);
   border-radius: 10px;
   isolation: isolate;

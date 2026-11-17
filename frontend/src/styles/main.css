@@ -77,6 +77,8 @@
   --z-toast: 60;
   --z-progress: 100;
   --page-max: 1500px;
+  --poster-ratio: 3 / 2;
+  --media-card-min-width: 240px;
   --gutter: clamp(18px, 3vw, 40px);
   --font-body: 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Segoe UI', sans-serif;
   --font-display: 'Bahnschrift', 'DIN Alternate', 'PingFang SC', 'Microsoft YaHei', sans-serif;
@@ -507,7 +509,7 @@ code {
   background: var(--panel);
 }
 .skeleton-poster {
-  aspect-ratio: 3 / 4;
+  aspect-ratio: var(--poster-ratio);
   background: linear-gradient(90deg, var(--skeleton), var(--skeleton-shine), var(--skeleton));
   background-size: 200% 100%;
   animation: shimmer 1.4s var(--ease-in-out) infinite;

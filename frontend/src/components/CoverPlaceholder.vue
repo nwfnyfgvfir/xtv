@@ -7,7 +7,7 @@ const props = withDefaults(
     number?: string | null
     title?: string | null
     filename?: string | null
-    size?: 'sm' | 'lg'
+    size?: 'xs' | 'sm' | 'lg'
   }>(),
   { size: 'sm' },
 )
@@ -31,7 +31,7 @@ const caption = computed(() => props.number || props.title || '')
 .cover-placeholder {
   width: 100%;
   height: 100%;
-  aspect-ratio: 3 / 4;
+  aspect-ratio: var(--poster-ratio);
   position: relative;
   display: flex;
   flex-direction: column;
@@ -78,7 +78,19 @@ const caption = computed(() => props.number || props.title || '')
   color: #b5c8bd;
 }
 .lg {
-  min-height: 280px;
   border-radius: 12px;
+}
+.xs {
+  gap: 0;
+  padding: 6px;
+}
+.xs .glyph {
+  font-size: 24px;
+}
+.xs::before {
+  inset: 6px;
+}
+.xs::after {
+  display: none;
 }
 </style>
