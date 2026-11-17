@@ -191,13 +191,13 @@ curl -sS http://127.0.0.1:8000/api/health
 
 环境变量 `FILE_SETTLE_SECONDS=60`、`FILENAME_PARENT_DEPTH=2`、`SCAN_POLL_INTERVAL_SECONDS=120`、`SCAN_EVENT_DEBOUNCE_SECONDS=15` 和 `DOWNLOAD_IGNORE_DIRS` 提供默认值，库内显式设置优先。升级自旧版时保留原先实际生效的监控范围，将低于 `30` 秒或未设置的轮询间隔改为 `120` 秒；原有媒体、收藏、播放进度和后台任务保留。
 
-### Stash 社区刮削器（可选）
+### Stash 社区刮削器与 Stash-box（可选）
 
-1. 在已有或另行部署的 Stash 中完成初始化，进入 **设置 → 元数据提供者 → 可用刮削器**，安装需要的社区刮削器。
-2. 在本项目 **设置 → 刮削后端** 选择 **Stash（社区刮削器）**，填写服务地址和 API Key，保存后刷新源列表。地址支持根地址或完整的 `/graphql` 地址，且须能从本项目后端访问；容器里的 `127.0.0.1` 指向容器自身。
+1. 在 Stash 中安装需要的社区刮削器，或配置所需的 Stash-box（如 StashDB）。Stash-box 的服务地址和凭证继续由 Stash 管理，TV 不读取它的 API Key。
+2. 在本项目 **设置 → 刮削后端** 选择 **Stash（社区刮削器 / Stash-box）**，填写现有 Stash 服务地址和 API Key，保存后刷新源列表。已配置的实例会显示为 `名称（Stash-box）`，可与社区刮削器一起设置优先级。地址支持根地址或完整的 `/graphql` 地址，且须能从本项目后端访问；容器里的 `127.0.0.1` 指向容器自身。
 3. API Key 从 Stash **设置 → 安全 → 身份验证** 获取。Stash 未开启鉴权时可以留空；已保存的 Key 不回显，输入框留空保留原值。
-4. 从源列表选择刮削器，设置优先级及“失败时 fallback”。这个开关决定是否继续尝试 **Stash 的其他刮削器**。MetaTube 与 Stash 的优先级和凭证各自保存，切换后端不会覆盖另一边的配置。
-5. 扫描时使用番号搜索；影片详情页也可手动选择刮削器重新刮削。对于标记 **仅 URL** 的源，在详情页填写来源页面 URL；填写后由 Stash 自动匹配 URL 刮削器，不使用下拉框的单源或 fallback 设置。没有番号的影片也可以通过来源 URL 刮削。
+4. 从源列表选择刮削器或 Stash-box，设置优先级及“失败时 fallback”。这个开关决定是否继续尝试 **Stash 的其余来源**。MetaTube 与 Stash 的优先级和凭证各自保存，切换后端不会覆盖另一边的配置。
+5. 扫描时使用番号搜索；影片详情页可选择来源重刮。对于标记 **仅 URL** 的源，填写站点影片链接后由 Stash 匹配 URL 刮削器。Stash-box 支持 `/scenes/<UUID>` 场景链接：与配置地址同源时自动识别；若 Stash 使用内网地址、链接使用外网域名，请手动选择对应的 Stash-box。没有番号的影片也可通过来源 URL 刮削。
 
 环境变量示例（设置页保存的值优先）：
 
@@ -211,11 +211,13 @@ STASH_FALLBACK=false
 
 刮削器 ID 以实际安装后返回的列表为准。建议只安装、选择需要的刮削器，并按需关闭 fallback，减少逐个尝试带来的等待。
 
+Stash-box 来源使用基于端点生成的稳定 ID，配置列表重新排序不会改变 TV 保存的优先级。查询由 `TV → Stash → Stash-box` 完成，TV 不直接连接 Stash-box、不另外保存它的凭证，也不会自动导入或扫描 Stash 的媒体库。较旧 Stash 若不支持端点选择，会在明确的字段兼容错误后回退到当前配置索引。Box 中必须存在匹配元数据；番号搜索拒绝明确冲突的结果，不会取搜索结果第一条强行入库。当前不执行视频指纹计算，也不使用依赖 Stash 本地影片 ID 的匹配。
+
 接入通过 Stash 的只读 GraphQL 刮削查询完成，无需把本项目媒体再次导入 Stash。名称搜索返回的详情链接会继续读取完整元数据；标题、简介、演员、标签、发行日期和时长进入现有入库与翻译流程。Stash 返回的 Base64 封面和头像保存到 `data/scraped-images`，不会嵌入媒体列表响应，也不依赖 MetaTube 图片接口。
 
 支持名称搜索，以及使用标题 / 番号的元数据片段搜索。**仅依赖 Stash 本地文件名或指纹的片段刮削器不能直接处理本项目文件**，可改用其名称搜索或来源 URL。具体站点是否可用仍取决于 Stash 中的刮削器版本、登录配置与网络环境。
 
-接口与运行方式依据 [Stash API 文档](https://docs.stashapp.cc/api/)、[Stash GraphQL 刮削定义](https://github.com/stashapp/stash/blob/develop/graphql/schema/types/scraper.graphql)及 [CommunityScrapers](https://github.com/stashapp/CommunityScrapers)交叉核对。
+接口与运行方式依据 Stash 官方的 [GraphQL 刮削定义](https://github.com/stashapp/stash/blob/develop/graphql/schema/types/scraper.graphql)、[Stash-box 配置字段](https://github.com/stashapp/stash/blob/develop/graphql/schema/types/stash-box.graphql)、[刮削查询实现](https://github.com/stashapp/stash/blob/develop/internal/api/resolver_query_scraper.go)及 [Stash-box 场景客户端](https://github.com/stashapp/stash/blob/develop/pkg/stashbox/scene.go)核对。
 
 ### 拾录 / StashScrapers（独立刮削服务）
 

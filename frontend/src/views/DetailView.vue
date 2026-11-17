@@ -58,17 +58,25 @@ const scrapeSource = ref<ScrapeSource>('metatube')
 const useStash = computed(() => scrapeSource.value === 'stash')
 const supportsSourceUrl = computed(() => scrapeSource.value !== 'metatube')
 const sourceUrlPlaceholder = computed(() =>
-  useStash.value ? '可选，由 Stash 自动匹配刮削器' : '可选，按所选刮削器或来源地址匹配',
+  useStash.value ? '支持 Stash-box 场景链接或站点影片链接' : '可选，按所选刮削器或来源地址匹配',
 )
 const followsGlobalSource = computed(() => scrapeProvider.value === FOLLOW_GLOBAL_SOURCE)
 const sourceModeHint = computed(() =>
-  followsGlobalSource.value
-    ? '使用设置页的完整优先级和回退策略；未指定源时自动遍历适用源。'
-    : scrapeProvider.value === ''
-      ? '自动遍历适用源，命中后停止；仅 URL 的源需填写来源地址。'
-      : '使用所选刮削器；失败后是否尝试其他源由下方开关决定。',
+  useStash.value && scrapeUrl.value.trim()
+    ? 'Stash-box 场景链接可选择对应的 Stash-box；其他站点链接由 Stash 匹配刮削器。'
+    : followsGlobalSource.value
+      ? '使用设置页的完整优先级和回退策略；未指定源时自动遍历适用源。'
+      : scrapeProvider.value === ''
+        ? '自动遍历适用源，命中后停止；仅 URL 的源需填写来源地址。'
+        : '使用所选刮削器；失败后是否尝试其他源由下方开关决定。',
 )
 const providerLabels = ref<Record<string, string>>({})
+const mediaProviderLabel = computed(() => {
+  const provider = item.value?.provider
+  if (!provider) return '尚未刮削'
+  const source = provider.startsWith('stash:') ? provider.slice(6) : provider
+  return providerLabels.value[source] || (source.startsWith('stash-box:') ? 'Stash-box' : provider)
+})
 const playerWrap = ref<HTMLElement | null>(null)
 const renameVisible = ref(false)
 const renameInput = ref('')
@@ -501,7 +509,7 @@ watch(() => props.id, load)
           <dl class="file-facts">
             <div>
               <dt>刮削来源</dt>
-              <dd>{{ item.provider || '尚未刮削' }}</dd>
+              <dd>{{ mediaProviderLabel }}</dd>
             </div>
             <div>
               <dt>文件格式</dt>
@@ -586,7 +594,7 @@ watch(() => props.id, load)
                     default-first-option
                     placeholder="自动选择"
                     aria-label="刮削器"
-                    :disabled="scrapeLoading || (useStash && !!scrapeUrl.trim())"
+                    :disabled="scrapeLoading"
                     ><el-option label="跟随全局配置" :value="FOLLOW_GLOBAL_SOURCE" />
                     <el-option label="自动（全部适用源）" value="" /><el-option
                       v-for="provider in providers"

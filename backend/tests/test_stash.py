@@ -36,6 +36,18 @@ def scraper(scraper_id="JavBus", types=None):
     }
 
 
+BOX_ENDPOINT = 'https://box.example/graphql'
+BOX_SCENE_ID = 'a1406f23-5c83-49a1-9445-1eb7b9b8316f'
+
+
+def configured_boxes(*boxes, scrapers=None):
+    return graphql(listScrapers=scrapers or [], configuration={'general': {'stashBoxes': list(boxes)}})
+
+
+def box(endpoint=BOX_ENDPOINT, name='StashDB'):
+    return {'name': name, 'endpoint': endpoint}
+
+
 @pytest.fixture
 def stash_settings(monkeypatch, tmp_path):
     settings = config.Settings(
@@ -412,3 +424,123 @@ def test_stash_auto_fallback_skips_url_only_and_already_attempted_source(stash_s
     rows = asyncio.run(run())
     assert rows[0]["provider"] == "stash:B"
     assert [json.loads(req.content)["variables"]["source"]["scraper_id"] for req in requests[1:]] == ["A", "B"]
+
+
+def test_stash_configured_boxes_are_listed_without_requesting_their_credentials(stash_settings, stash_http):
+    requests, replies = stash_http
+    replies.append(configured_boxes(box(), box(), {'name': 'Invalid', 'endpoint': 'file:///private'}, scrapers=[scraper('A')]))
+    rows = asyncio.run(stash.StashClient().list_scrapers())
+    assert len(rows) == 2 and rows[0]['id'] == 'A'
+    assert rows[1]['id'].startswith('stash-box:') and rows[1]['name'] == 'StashDB（Stash-box）'
+    assert rows[1]['types'] == ['NAME'] and rows[1]['box_index'] == 0
+    query = json.loads(requests[0].content)['query']
+    assert 'stashBoxes { name endpoint }' in query and 'api_key' not in query
+    assert all(request.url.host == 'stash.example' for request in requests)
+
+
+def test_box_identity_survives_configuration_reordering(stash_settings, stash_http):
+    _, replies = stash_http
+    replies.extend([configured_boxes(box(), box('https://other.example/graphql', 'Other')),
+        configured_boxes(box('https://other.example/graphql', 'Other'), box())])
+    first = asyncio.run(stash.StashClient().list_scrapers())
+    second = asyncio.run(stash.StashClient().list_scrapers())
+    assert first[0]['id'] == second[1]['id'] and first[0]['box_index'] == 0 and second[1]['box_index'] == 1
+
+
+def test_stash_box_metadata_uses_stash_endpoint_and_existing_metadata_pipeline(stash_settings, stash_http, database):
+    requests, replies = stash_http
+    db, _ = database
+    stash_settings.stash_scraper = stash._box_id(BOX_ENDPOINT)
+    item = seed_media(db)
+    replies.extend([configured_boxes(box()), graphql(scrapeSingleScene=[{
+        'title': 'Full box title', 'code': 'ABP-001', 'details': 'Full box plot',
+        'remote_site_id': BOX_SCENE_ID, 'date': '2025-01-02', 'duration': 1200,
+        'urls': [f'https://box.example/scenes/{BOX_SCENE_ID}'], 'image': INLINE_IMAGE,
+        'studio': {'name': 'Box studio'}, 'performers': [{'name': 'Box actor', 'remote_site_id': 'actor-id', 'image': INLINE_IMAGE}],
+        'tags': [{'name': 'Box tag'}],
+    }])])
+    assert asyncio.run(scrape.scrape_media_item(db, item)) is True
+    assert item.title == 'Full box title' and item.plot == 'Full box plot'
+    assert item.runtime == 20 and item.studio == 'Box studio' and item.release_date == '2025-01-02'
+    assert item.provider.startswith('stash:stash-box:') and item.provider_id == BOX_SCENE_ID
+    assert item.cover_url.startswith('/api/images/scraped/') and item.actors[0].name == 'Box actor'
+    assert len(requests) == 2
+    assert json.loads(requests[1].content)['variables'] == {'source': {'stash_box_endpoint': BOX_ENDPOINT}, 'input': {'query': 'ABP-001'}}
+    assert all(request.url.host == 'stash.example' and request.headers['ApiKey'] == 'stash-test-secret' for request in requests)
+
+
+@pytest.mark.parametrize('code', ['ABP-002', 'ABP-0010'])
+def test_stash_box_search_rejects_a_conflicting_number(stash_settings, stash_http, code):
+    _, replies = stash_http
+    replies.extend([configured_boxes(box()), graphql(scrapeSingleScene=[{'title': 'ABP-001 misleading title', 'code': code}])])
+    assert asyncio.run(stash.StashClient().search_movie('ABP-001', stash._box_id(BOX_ENDPOINT), False)) == []
+
+
+def test_stash_box_participates_in_automatic_fallback(stash_settings, stash_http):
+    requests, replies = stash_http
+    replies.extend([configured_boxes(box(), scrapers=[scraper('A')]), graphql(scrapeSingleScene=[]),
+        graphql(scrapeSingleScene=[{'code': 'ABP-001', 'title': 'Box result'}])])
+    rows = asyncio.run(stash.StashClient().search_movie('ABP-001'))
+    assert rows[0]['_scraper_id'] == stash._box_id(BOX_ENDPOINT)
+    assert json.loads(requests[1].content)['variables']['source'] == {'scraper_id': 'A'}
+    assert json.loads(requests[2].content)['variables']['source'] == {'stash_box_endpoint': BOX_ENDPOINT}
+
+
+def test_legacy_stash_box_index_is_used_only_after_schema_rejection(stash_settings, stash_http):
+    requests, replies = stash_http
+    replies.extend([configured_boxes(box()), httpx.Response(422, json={'errors': [{'message': 'Field "stash_box_endpoint" is not defined by type "ScraperSourceInput".'}]}),
+        graphql(scrapeSingleScene=[{'code': 'ABP-001', 'title': 'Legacy box result'}])])
+    rows = asyncio.run(stash.StashClient().search_movie('ABP-001', stash._box_id(BOX_ENDPOINT), False))
+    assert rows[0]['title'] == 'Legacy box result'
+    assert json.loads(requests[-1].content)['variables']['source'] == {'stash_box_index': 0}
+
+
+def test_box_auth_failure_does_not_retry_with_another_source_shape(stash_settings, stash_http):
+    requests, replies = stash_http
+    replies.extend([configured_boxes(box()), httpx.Response(401)])
+    with pytest.raises(stash.StashError):
+        asyncio.run(stash.StashClient().search_movie('ABP-001', stash._box_id(BOX_ENDPOINT), False))
+    assert len(requests) == 2
+
+
+def test_box_scene_url_uses_scene_uuid_via_stash(stash_settings, stash_http, database, api):
+    requests, replies = stash_http
+    db, _ = database
+    item = seed_media(db, number=None)
+    replies.extend([configured_boxes(box()), graphql(scrapeSingleScene=[{
+        'title': 'Scene from box URL', 'code': 'ABP-002', 'remote_site_id': BOX_SCENE_ID,
+    }])])
+    response = api.post(f'/api/media/{item.id}/rescrape', json={'url': f'https://box.example/scenes/{BOX_SCENE_ID}'})
+    assert response.status_code == 200 and response.json()['number'] == 'ABP-002'
+    assert response.json()['provider'].startswith('stash:stash-box:')
+    assert json.loads(requests[-1].content)['variables'] == {'source': {'stash_box_endpoint': BOX_ENDPOINT}, 'input': {'query': BOX_SCENE_ID}}
+
+
+def test_explicit_box_source_supports_a_different_public_scene_hostname(stash_settings, stash_http):
+    requests, replies = stash_http
+    replies.extend([configured_boxes(box('http://internal-box:9998/graphql')), graphql(scrapeSingleScene=[{
+        'title': 'Mapped public scene', 'code': 'ABP-001', 'remote_site_id': BOX_SCENE_ID,
+    }])])
+    result = asyncio.run(stash.StashClient().scrape_url(f'https://public-box.example/scenes/{BOX_SCENE_ID}', provider=stash._box_id('http://internal-box:9998/graphql')))
+    assert result[0]['title'] == 'Mapped public scene'
+    assert json.loads(requests[-1].content)['variables']['source'] == {'stash_box_endpoint': 'http://internal-box:9998/graphql'}
+
+
+def test_box_url_never_accepts_a_different_scene_uuid(stash_settings, stash_http):
+    _, replies = stash_http
+    replies.extend([configured_boxes(box()), graphql(scrapeSingleScene=[{
+        'title': 'Wrong scene', 'remote_site_id': 'b75e8417-f991-408d-9015-370f592d358d',
+    }])])
+    assert asyncio.run(stash.StashClient().scrape_url(f'https://box.example/scenes/{BOX_SCENE_ID}')) == []
+
+
+def test_box_sources_are_exposed_and_persisted_in_existing_stash_priority_settings(stash_settings, stash_http, database, api):
+    _, replies = stash_http
+    source_id = stash._box_id(BOX_ENDPOINT)
+    replies.append(configured_boxes(box(), scrapers=[scraper('A')]))
+    response = api.put('/api/settings', json={'stash_scraper_priority': [source_id, 'A']})
+    assert response.status_code == 200
+    data = response.json()
+    assert data['scrape_source'] == 'stash' and data['stash_scraper_priority'] == [source_id, 'A']
+    assert data['movie_provider_labels'][source_id] == 'StashDB（Stash-box）'
+    assert BOX_ENDPOINT not in response.text and 'stash-test-secret' not in response.text

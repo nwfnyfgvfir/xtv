@@ -241,7 +241,10 @@ async def scrape_media_item(
             if not results and use_fallback and chain:
                 results = await client.scrape_url(url_override)
         elif isinstance(client, StashClient) and url_override:
-            results = await client.scrape_url(url_override)
+            if provider_override and provider_override.startswith('stash-box:'):
+                results = await client.scrape_url(url_override, provider=provider_override)
+            else:
+                results = await client.scrape_url(url_override)
         else:
             results = await _search_with_chain(
                 client,

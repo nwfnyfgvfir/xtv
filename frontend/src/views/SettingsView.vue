@@ -436,7 +436,7 @@ onMounted(() => {
             <el-form-item label="刮削后端">
               <el-select v-model="form.scrape_source" style="width: 100%">
                 <el-option label="MetaTube" value="metatube" />
-                <el-option label="Stash（社区刮削器）" value="stash" />
+                <el-option label="Stash（社区刮削器 / Stash-box）" value="stash" />
                 <el-option label="拾录 / StashScrapers（独立刮削服务）" value="stashscrapers" />
               </el-select>
             </el-form-item>
@@ -486,8 +486,9 @@ onMounted(() => {
                 </span>
               </el-form-item>
               <p class="field-hint muted span-full">
-                先在 Stash 安装社区刮削器，保存连接配置后刷新源列表。仅支持 URL
-                的刮削器需在影片详情页填写来源 URL。
+                自动读取 Stash 中已安装的社区刮削器和已配置的 Stash-box（如
+                StashDB）。保存连接配置后刷新源列表，再设置优先级；Stash-box 的地址和凭证由 Stash
+                管理。仅支持 URL 的刮削器需在详情页填写来源 URL。
               </p>
             </template>
             <template v-else>

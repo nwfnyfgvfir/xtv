@@ -6,6 +6,7 @@ import logging
 import re
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
+from uuid import UUID
 
 import httpx
 
@@ -30,6 +31,12 @@ query TVScrapeSceneURL($url: String!) {
   scrapeSceneURL(url: $url) { %s }
 }
 """ % _SCENE_FIELDS
+_SOURCES_QUERY = """
+query TVSceneScrapers {
+  listScrapers(types: [SCENE]) { id name scene { supported_scrapes urls } }
+  configuration { general { stashBoxes { name endpoint } } }
+}
+"""
 
 
 class StashError(Exception):
@@ -81,6 +88,30 @@ def _provider_key(scraper_id: str) -> str:
     return value if len(value) <= 64 else f"stash:{hashlib.sha256(scraper_id.encode()).hexdigest()[:40]}"
 
 
+def _box_id(endpoint: str) -> str:
+    return 'stash-box:' + hashlib.sha256(endpoint.rstrip('/').encode()).hexdigest()[:40]
+
+
+def _box_scene_id(url: str) -> str | None:
+    try:
+        parts = urlsplit(url).path.rstrip('/').split('/')
+        if len(parts) >= 2 and parts[-2] == 'scenes':
+            return str(UUID(parts[-1]))
+    except ValueError:
+        pass
+    return None
+
+
+def _same_box(url: str, endpoint: str) -> bool:
+    try:
+        left, right = urlsplit(url), urlsplit(endpoint)
+        origin = lambda p: (p.scheme.lower(), p.hostname, p.port or (443 if p.scheme == 'https' else 80))
+        base = right.path.rstrip('/').removesuffix('/graphql')
+        return origin(left) == origin(right) and left.path.startswith(base + '/scenes/')
+    except ValueError:
+        return False
+
+
 def _matches_number(scene: dict[str, Any], query: str) -> bool:
     number = re.sub(r"[^a-z0-9]", "", query.lower())
     code = re.sub(r"[^a-z0-9]", "", str(scene.get("number") or "").lower())
@@ -104,6 +135,7 @@ class StashClient:
         self._movies: dict[tuple[str, str], dict[str, Any]] = {}
         self._actors: dict[tuple[str, str], dict[str, Any]] = {}
         self._attempted: dict[str, set[str]] = {}
+        self._legacy_box_source = False
 
     async def _query(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
         if not self.endpoint:
@@ -126,7 +158,7 @@ class StashClient:
             if response.status_code in _RETRYABLE_STATUS and attempt < 3:
                 await asyncio.sleep(0.8 * attempt)
                 continue
-            if not response.is_success:
+            if not response.is_success and response.status_code not in {400, 422}:
                 raise StashError(f"Stash HTTP {response.status_code}; check the URL, API key and service")
             try:
                 body = response.json()
@@ -143,6 +175,8 @@ class StashClient:
                 if self.token:
                     message = message.replace(self.token, "[redacted]")
                 raise StashError(f"Stash: {message[:300]}")
+            if not response.is_success:
+                raise StashError(f'Stash HTTP {response.status_code}; check the GraphQL schema and request')
             data = body.get("data")
             if not isinstance(data, dict):
                 raise StashError("Stash GraphQL response has no data")
@@ -156,13 +190,7 @@ class StashClient:
     async def list_scrapers(self) -> list[dict[str, Any]]:
         if self._scrapers is not None:
             return self._scrapers
-        data = await self._query("""
-            query TVSceneScrapers {
-              listScrapers(types: [SCENE]) {
-                id name scene { supported_scrapes urls }
-              }
-            }
-        """)
+        data = await self._query(_SOURCES_QUERY)
         rows = data.get("listScrapers")
         if not isinstance(rows, list):
             raise StashError("Stash returned an invalid scraper list")
@@ -178,8 +206,42 @@ class StashClient:
                 "id": str(row["id"]), "name": str(row.get("name") or row["id"]),
                 "types": types, "urls": scene.get("urls") or [],
             })
+        config = data.get('configuration')
+        general = config.get('general') if isinstance(config, dict) else None
+        boxes = general.get('stashBoxes') if isinstance(general, dict) else []
+        seen = {row['id'] for row in scrapers}
+        for index, box in enumerate(boxes if isinstance(boxes, list) else []):
+            if not isinstance(box, dict):
+                continue
+            endpoint = str(box.get('endpoint') or '').strip()
+            if not graphql_url(endpoint):
+                continue
+            source_id = _box_id(endpoint)
+            if source_id in seen:
+                continue
+            seen.add(source_id)
+            name = str(box.get('name') or urlsplit(endpoint).hostname or 'Stash-box')
+            scrapers.append({'id': source_id, 'name': name + '（Stash-box）', 'types': ['NAME'], 'urls': [],
+                'kind': 'stash-box', 'endpoint': endpoint, 'box_index': index})
         self._scrapers = scrapers
         return scrapers
+
+    async def _query_source(self, scraper, inputs):
+        if scraper.get('kind') != 'stash-box':
+            source = {'scraper_id': scraper['id']}
+        elif self._legacy_box_source:
+            source = {'stash_box_index': scraper['box_index']}
+        else:
+            source = {'stash_box_endpoint': scraper['endpoint']}
+        try:
+            return await self._query(_SCENE_QUERY, {'source': source, 'input': inputs})
+        except StashError as exc:
+            message = str(exc).lower()
+            if ('stash_box_endpoint' not in source or 'stash_box_endpoint' not in message
+                    or not any(token in message for token in ('not defined', 'unknown field', 'unknown argument'))):
+                raise
+            self._legacy_box_source = True
+            return await self._query(_SCENE_QUERY, {'source': {'stash_box_index': scraper['box_index']}, 'input': inputs})
 
     def _normalize_actor(self, data: dict[str, Any], provider: str) -> dict[str, Any]:
         urls = _urls(data)
@@ -225,7 +287,7 @@ class StashClient:
             inputs = {"scene_input": {"title": query, "code": query}}
         else:
             return []
-        data = await self._query(_SCENE_QUERY, {"source": {"scraper_id": scraper["id"]}, "input": inputs})
+        data = await self._query_source(scraper, inputs)
         rows = data.get("scrapeSingleScene")
         if not isinstance(rows, list):
             raise StashError("Stash returned invalid scene results")
@@ -234,7 +296,7 @@ class StashClient:
             # Never mark an unrelated name-search result as the requested catalog number.
             scenes = [scene for scene in scenes if _matches_number(scene, query)]
             for scene in scenes:
-                scene["_needs_detail"] = bool(scene["_urls"])
+                scene["_needs_detail"] = bool(scene["_urls"]) and scraper.get('kind') != 'stash-box'
         else:
             scenes = [scene for scene in scenes if not scene.get("number") or _matches_number(scene, query)]
         return scenes
@@ -261,9 +323,26 @@ class StashClient:
                 logger.warning("Stash scraper %s failed; trying the next scraper", scraper["id"])
         return []
 
-    async def scrape_url(self, url: str) -> list[dict[str, Any]]:
+    async def scrape_url(self, url: str, provider: str | None = None) -> list[dict[str, Any]]:
         if not _http_url(url):
             raise StashError("A Stash source URL must use HTTP(S)")
+        scene_id = _box_scene_id(url)
+        if scene_id:
+            boxes = [row for row in await self.list_scrapers() if row.get('kind') == 'stash-box']
+            selected = [row for row in boxes if row['id'] == provider] if provider else [row for row in boxes if _same_box(url, row['endpoint'])]
+            if provider and provider.startswith('stash-box:') and not selected:
+                raise StashError('The selected Stash-box is no longer configured in Stash; refresh the source list')
+            for box in selected:
+                data = await self._query_source(box, {'query': scene_id})
+                rows = data.get('scrapeSingleScene')
+                if not isinstance(rows, list):
+                    raise StashError('Stash returned invalid Stash-box scene results')
+                scenes = [scene for row in rows if (scene := self._normalize_scene(row, box['id'], scene_id))
+                    and str(scene.get('_remote_site_id') or '').lower() == scene_id]
+                if scenes:
+                    return scenes
+            if selected:
+                return []
         # URL scraping is matched by Stash itself, including URL-only scrapers.
         data = await self._query(_URL_QUERY, {"url": url})
         scene = self._normalize_scene(data.get("scrapeSceneURL"), "url", url)
