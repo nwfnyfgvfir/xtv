@@ -132,7 +132,7 @@ async function toggleFav(e: Event) {
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: fill;
 }
 .poster > :deep(.cover-placeholder) {
   position: absolute;

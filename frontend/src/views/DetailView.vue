@@ -642,7 +642,7 @@ watch(() => props.id, load)
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: fill;
 }
 .cover-original {
   display: block;
