@@ -236,9 +236,11 @@ async def proxy_image(url: str = Query(..., min_length=8)):
     from app.config import get_settings
     from app.services.images import (
         cache_get,
+        cache_remove,
         cache_set,
         disk_cache_get,
         disk_cache_set,
+        image_content_type,
         validate_proxy_url,
     )
 
@@ -247,25 +249,30 @@ async def proxy_image(url: str = Query(..., min_length=8)):
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
-    headers = {"Cache-Control": "public, max-age=3600"}
+    headers = {"Cache-Control": "public, max-age=3600", "X-Content-Type-Options": "nosniff"}
 
     cached = cache_get(url)
     if cached:
-        ctype, body = cached
-        return Response(content=body, media_type=ctype, headers=headers)
+        _, body = cached
+        ctype = image_content_type(body)
+        if ctype:
+            return Response(content=body, media_type=ctype, headers=headers)
+        cache_remove(url)
 
     settings = get_settings()
     if settings.image_local_cache:
         disk = disk_cache_get(url)
         if disk:
-            ctype, body = disk
-            if len(body) <= 5 * 1024 * 1024:
-                cache_set(url, ctype, body)
-            return Response(
-                content=body,
-                media_type=ctype,
-                headers={**headers, "Cache-Control": "public, max-age=604800"},
-            )
+            _, body = disk
+            ctype = image_content_type(body)
+            if ctype:
+                if len(body) <= 5 * 1024 * 1024:
+                    cache_set(url, ctype, body)
+                return Response(
+                    content=body,
+                    media_type=ctype,
+                    headers={**headers, "Cache-Control": "public, max-age=604800"},
+                )
 
     try:
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
@@ -280,11 +287,10 @@ async def proxy_image(url: str = Query(..., min_length=8)):
         raise HTTPException(502, f"upstream fetch failed: {exc}") from exc
     if resp.status_code >= 400:
         raise HTTPException(resp.status_code, "upstream image error")
-    content_type = resp.headers.get("content-type", "image/jpeg")
-    if "image" not in content_type and "octet-stream" not in content_type:
-        # still allow (some CDNs return wrong types)
-        content_type = content_type or "image/jpeg"
     body = resp.content
+    content_type = image_content_type(body)
+    if not content_type:
+        raise HTTPException(502, "upstream did not return a supported image")
     if len(body) <= 5 * 1024 * 1024:
         cache_set(url, content_type, body)
         if settings.image_local_cache:

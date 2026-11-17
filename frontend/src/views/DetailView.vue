@@ -23,6 +23,7 @@ import { normalizeScrapeSource, scrapeSources } from '@/utils/scrapeSources'
 import { getErrorMessage } from '@/utils/errors'
 import { formatFileSize } from '@/utils/format'
 import { monogramChar, monogramStyle } from '@/utils/monogram'
+import { useCoverImage } from '@/composables/useCoverImage'
 
 const props = defineProps<{ id: string }>()
 const router = useRouter()
@@ -30,7 +31,6 @@ const item = ref<MediaDetail | null>(null)
 const play = ref<PlayInfo | null>(null)
 const loading = ref(false)
 const playing = ref(false)
-const imgFailed = ref(false)
 const favLoading = ref(false)
 const playLoading = ref(false)
 const { tasks, acceptTask, panelOpen } = useTasks()
@@ -86,8 +86,9 @@ const tags = computed(() => {
   }
 })
 
-const cover = computed(() => item.value?.cover_url || item.value?.thumb_url || '')
-const showImage = computed(() => Boolean(cover.value) && !imgFailed.value)
+const { src: cover, showImage, failed: coverFailed, onError: onCoverError, reset: resetCover } = useCoverImage(() => [
+  item.value?.cover_url, item.value?.thumb_url, item.value?.backdrop_url,
+])
 const isChineseSub = computed(
   () => item.value?.subtitle_flag === 'C' || tags.value.includes('中文字幕'),
 )
@@ -104,7 +105,7 @@ const canTranslate = computed(() => {
 
 async function load() {
   loading.value = true
-  imgFailed.value = false
+  resetCover()
   playing.value = false
   play.value = null
   try {
@@ -179,7 +180,7 @@ watch(
       const updated = await getMedia(Number(id))
       if (props.id === id) {
         item.value = updated
-            imgFailed.value = false
+        resetCover()
       }
     } catch {
       /* Normal page loading still reports errors. */
@@ -318,7 +319,7 @@ watch(() => props.id, load)
             class="cover"
             :src="cover"
             :alt="item.title || item.filename"
-            @error="imgFailed = true"
+            @error="onCoverError"
           />
           <CoverPlaceholder
             v-else
@@ -328,6 +329,9 @@ watch(() => props.id, load)
             :filename="item.filename"
           />
           <span v-if="isChineseSub" class="sub-badge">中文字幕</span>
+          <button v-if="coverFailed" type="button" class="cover-retry" @click="resetCover">
+            <AppIcon name="refresh" :size="16" />图片加载失败，重试
+          </button>
         </div>
         <div class="hero-info">
           <div class="media-kicker">
@@ -611,17 +615,34 @@ watch(() => props.id, load)
   position: relative;
   border-radius: 12px;
   overflow: hidden;
-  aspect-ratio: 3 / 4;
   background: var(--bg-elevated);
 }
 .cover {
+  display: block;
   width: 100%;
-  height: 100%;
+  height: auto;
   object-fit: contain;
 }
 .source-filename {
   overflow-wrap: anywhere;
   font-size: 13px;
+}
+.cover-retry {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
 }
 .sub-badge {
   position: absolute;

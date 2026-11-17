@@ -24,10 +24,9 @@ const busy = ref(false)
 const { acceptTask, panelOpen } = useTasks()
 const policy = ref({
   auto_scan_enabled: true,
-  scan_mode: 'poll' as 'poll' | 'native',
+  scan_mode: 'native' as 'poll' | 'native',
   ts_policy: 'auto' as 'auto' | 'complete',
   scan_interval_seconds: 120,
-  full_hours: 24,
   file_settle_seconds: 60,
   ignore_dirs: '',
 })
@@ -61,10 +60,9 @@ watch(
     const lib = props.library
     policy.value = {
       auto_scan_enabled: lib.auto_scan_enabled,
-      scan_mode: lib.scan_mode || 'poll',
+      scan_mode: lib.scan_mode || 'native',
       ts_policy: lib.ts_policy || 'auto',
       scan_interval_seconds: lib.effective_poll_interval_seconds || 120,
-      full_hours: (lib.full_scan_interval_seconds || 86400) / 3600,
       file_settle_seconds: lib.effective_settle_seconds ?? 60,
       ignore_dirs: lib.effective_ignore_dirs || '',
     }
@@ -79,11 +77,7 @@ watch(
 async function save() {
   await perform(async () => {
     if (!props.library) return
-    const { full_hours, ...body } = policy.value
-    await updateLibrary(props.library.id, {
-      ...body,
-      full_scan_interval_seconds: Math.round(full_hours * 3600),
-    })
+    await updateLibrary(props.library.id, policy.value)
     emit('saved')
     ElMessage.success('扫描设置策略已保存')
   })
@@ -112,6 +106,7 @@ async function inspect(reset = false) {
 <template>
   <el-dialog v-model="visible" title="扫描设置" width="720px">
     <p class="tool-intro">{{ library?.name }} · {{ library?.path }}</p>
+    <p v-if="library?.watch_error" class="tool-hint" role="alert">{{ library.watch_error }}</p>
     <el-tabs v-model="tab">
       <el-tab-pane label="扫描策略" name="policy">
         <el-form label-position="top">
@@ -124,24 +119,17 @@ async function inspect(reset = false) {
           <div class="policy-grid">
             <el-form-item label="监听方式"
               ><el-select v-model="policy.scan_mode" aria-label="监听方式"
-                ><el-option label="低频轮询（适合容器与 NAS）" value="poll" /><el-option
-                  label="原生事件（失败时回退轮询）"
+                ><el-option label="轮询检测（网络共享可选）" value="poll" /><el-option
+                  label="文件事件（仅处理变化路径）"
                   value="native" /></el-select
             ></el-form-item>
-            <el-form-item label="轮询基础间隔（秒）"
+            <el-form-item v-if="policy.scan_mode === 'poll'" label="轮询基础间隔（秒）"
               ><el-input-number
                 v-model="policy.scan_interval_seconds"
                 :min="30"
                 :max="86400"
                 :step="30"
                 aria-label="轮询基础间隔"
-            /></el-form-item>
-            <el-form-item label="全库核对间隔（小时）"
-              ><el-input-number
-                v-model="policy.full_hours"
-                :min="0.25"
-                :max="720"
-                aria-label="全库核对间隔"
             /></el-form-item>
             <el-form-item label="文件连续稳定时间（秒）"
               ><el-input-number
@@ -161,8 +149,12 @@ async function inspect(reset = false) {
             自动模式会暂缓成组编号或哈希命名的疑似 TS
             分片，只记录一个待确认项。若实际是完整录像，可选择“完整文件”后重新扫描。播放清单明确引用的分片及下载临时目录仍会跳过。
           </p>
+          <p v-if="policy.scan_mode === 'native'" class="tool-hint">
+            仅在文件变化后处理对应路径，不做定时全库核对。首次入库、服务停机期间的变化或事件遗漏，可手动扫描。监听不可用时会提示，不会自动切换到轮询。
+          </p>
+          <p v-else class="tool-hint">轮询会按间隔检查目录和文件属性，只对变化路径建任务；空闲时延长间隔，不做定时全库核对。</p>
           <p class="tool-hint">
-            轮询空闲时会退避，只对变化路径建任务。稳定时间为 0
+            稳定时间为 0
             会关闭时间等待，过程文件和下载状态文件仍被拦截。刮削查询直接使用原文件名，不做番号识别。
           </p>
           <el-form-item label="排除的子目录名（逗号分隔）"

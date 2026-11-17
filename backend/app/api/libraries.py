@@ -16,7 +16,7 @@ from app.services.fs_browse import BrowseError, list_subdirectories
 from app.services import task_store
 from app.api.tasks import conflict
 from app.services.library_revision import get_revision
-from app.services.watcher import reload_watches
+from app.services.watcher import reload_watches, watcher_status
 from app.services.file_readiness import settle_seconds, ignored_dirs
 
 router = APIRouter()
@@ -25,6 +25,9 @@ router = APIRouter()
 def _library_out(db: Session, lib: Library) -> LibraryOut:
     count = db.query(func.count(MediaItem.id)).filter(MediaItem.library_id == lib.id).scalar() or 0
     data = LibraryOut.model_validate(lib)
+    state = next((entry for entry in watcher_status().get('libraries', []) if entry['id'] == lib.id), None)
+    if state:
+        data.watch_mode, data.watch_error = state['mode'], state['error']
     data.media_count = int(count)
     data.content_revision = get_revision(lib.id)
     data.effective_settle_seconds = settle_seconds(lib)
@@ -85,13 +88,11 @@ def update_library(
     if not lib:
         raise HTTPException(404, "library not found")
     data = body.model_dump(exclude_unset=True)
-    for key in ("name", "path", "type", "enabled", "auto_scan_enabled", "scan_mode", "ts_policy", "full_scan_interval_seconds"):
+    for key in ("name", "path", "type", "enabled", "auto_scan_enabled", "scan_mode", "ts_policy"):
         if key in data and data[key] is None:
             raise HTTPException(422, f"{key} cannot be null")
     if "path" in data and data["path"] != lib.path and task_store.active_for_library(db, library_id):
         raise HTTPException(409, "请先取消或等待该媒体库的后台任务完成，再修改目录")
-    if "full_scan_interval_seconds" in data and data["full_scan_interval_seconds"] != lib.full_scan_interval_seconds:
-        lib.next_full_scan_at = None
     for k, v in data.items():
         setattr(lib, k, v)
     db.add(lib)

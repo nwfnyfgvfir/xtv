@@ -4,11 +4,11 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import timedelta
 from pathlib import Path
 
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
+from watchdog.observers.polling import PollingObserver
 
 from app.config import get_settings
 from app.db import SessionLocal
@@ -114,11 +114,6 @@ class AutoScanner:
         with self.factory() as db:
             libs = db.query(Library).filter_by(enabled=True, auto_scan_enabled=True).all()
             for lib in libs:
-                if lib.next_full_scan_at is None:
-                    lib.next_full_scan_at = utcnow() + timedelta(seconds=lib.full_scan_interval_seconds)
-            db.commit()
-            for lib in libs:
-                db.refresh(lib)
                 db.expunge(lib)
         wanted = {lib.id: lib for lib in libs}
         for library_id in list(self.states):
@@ -126,9 +121,9 @@ class AutoScanner:
                 self._unwatch(library_id)
         for library_id, lib in wanted.items():
             key = (lib.path, lib.scan_mode, lib.scan_interval_seconds, lib.ignore_dirs,
-                   lib.file_settle_seconds, lib.parent_fallback_depth, lib.full_scan_interval_seconds, lib.ts_policy)
+                   lib.file_settle_seconds, lib.ts_policy)
             old = self.states.get(library_id)
-            if old and old.fingerprint == key:
+            if old and old.fingerprint == key and not (self.dirty and old.actual_mode == 'unavailable'):
                 old.library = lib
                 continue
             if old:
@@ -136,17 +131,22 @@ class AutoScanner:
             interval = max(30, lib.scan_interval_seconds or get_settings().scan_poll_interval_seconds)
             state = WatchState(lib, key, next_poll=now + interval)
             if lib.scan_mode == "native":
-                observer = Observer()
+                observer = None
                 try:
+                    observer = Observer()
+                    if isinstance(observer, PollingObserver):
+                        raise OSError('The operating system has no native file-event backend')
                     observer.schedule(Handler(self, library_id), str(root_path(lib)), recursive=True)
                     observer.start()
                     state.observer, state.actual_mode = observer, "native"
                 except Exception:
-                    observer.stop()
-                    if observer.is_alive():
-                        observer.join(timeout=2)
-                    logger.warning("Native monitoring unavailable; using low-frequency polling for library=%s", library_id)
-                    state.last_error = "原生监听不可用，已回退低频轮询"
+                    if observer is not None:
+                        observer.stop()
+                        if observer.is_alive():
+                            observer.join(timeout=2)
+                    state.actual_mode = 'unavailable'
+                    logger.exception("File event monitoring unavailable for library=%s", library_id)
+                    state.last_error = "文件事件监听不可用，请检查目录与监听权限后重新保存扫描设置；期间可手动扫描"
             self.states[library_id] = state
         self.next_config, self.dirty = now + 60, False
 
@@ -180,6 +180,10 @@ class AutoScanner:
             self._refresh(now)
         for library_id, state in list(self.states.items()):
             lib = state.library
+            if state.actual_mode == 'native' and state.observer and not state.observer.is_alive():
+                state.actual_mode = 'unavailable'
+                state.last_error = '文件事件监听已停止，请检查后重新保存扫描设置；期间可手动扫描'
+                logger.error('File event monitor stopped for library=%s', library_id)
             if state.actual_mode == "poll" and now >= state.next_poll:
                 try:
                     snapshot = self.snapshot(lib)
@@ -207,14 +211,6 @@ class AutoScanner:
                     else:
                         self.schedule(observation.library_id, [observation.path], immediate=True, now=now)
                 db.commit()
-                for lib in db.query(Library).filter(Library.id.in_(list(self.states)), Library.next_full_scan_at <= utcnow()):
-                    if not active_for_library(db, lib.id):
-                        try:
-                            enqueue(db, "scan", lib)
-                            lib.next_full_scan_at = utcnow() + timedelta(seconds=lib.full_scan_interval_seconds)
-                            db.commit()
-                        except TaskConflict:
-                            pass
             self.next_readiness = now + 30
         with self.lock:
             ready = [(library_id, set(paths), self.generations.get(library_id, 0)) for library_id, paths in self.pending.items() if self.deadlines.get(library_id, now + 1) <= now]
@@ -271,7 +267,7 @@ class AutoScanner:
         return {"running": bool(self.thread and self.thread.is_alive()), "observer_type": "adaptive",
             "poll_interval_sec": get_settings().scan_poll_interval_seconds,
             "watched_library_ids": sorted(key for key, _ in states), "pending_scans": pending,
-            "libraries": [{"id": key, "mode": state.actual_mode, "error": state.last_error,
+            "libraries": [{"id": key, "name": state.library.name, "mode": state.actual_mode, "error": state.last_error,
                 "idle_rounds": state.idle_rounds} for key, state in states]}
 
 

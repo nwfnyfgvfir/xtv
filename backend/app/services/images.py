@@ -29,6 +29,35 @@ _SCRAPED_IMAGE_EXTENSIONS = {
 }
 
 
+def image_content_type(body: bytes) -> str | None:
+    """Identify image responses before serving or caching upstream error pages."""
+    if body.startswith(b'\x89PNG\r\n\x1a\n'):
+        return 'image/png'
+    if body.startswith(b'\xff\xd8\xff'):
+        return 'image/jpeg'
+    if body.startswith((b'GIF87a', b'GIF89a')):
+        return 'image/gif'
+    if body.startswith(b'RIFF') and body[8:12] == b'WEBP':
+        return 'image/webp'
+    if body[4:8] == b'ftyp' and any(brand in body[8:40] for brand in (b'avif', b'avis')):
+        return 'image/avif'
+    if body.startswith(b'BM'):
+        return 'image/bmp'
+    if body.startswith(b'\x00\x00\x01\x00'):
+        return 'image/x-icon'
+    if body.startswith((b'II\x2a\x00', b'MM\x00\x2a')):
+        return 'image/tiff'
+    prefix = body[:4096].lstrip(b'\xef\xbb\xbf \t\r\n')
+    if re.match(rb'(?:<\?xml[^>]*\?>\s*)?(?:<!--.*?-->\s*)*(?:<!DOCTYPE\s+svg[^>]*>\s*)?<svg(?:\s|>)', prefix, re.I | re.S):
+        return 'image/svg+xml'
+    return None
+
+
+def cache_remove(url: str) -> None:
+    with _CACHE_LOCK:
+        _CACHE.pop(url, None)
+
+
 def scraped_image_path(name: str) -> Path | None:
     if not re.fullmatch(r"[0-9a-f]{64}\.(?:jpg|png|webp|gif|avif)", name):
         return None
@@ -54,6 +83,9 @@ def store_scraped_image(value: str | None) -> str | None:
     except (ValueError, binascii.Error):
         return None
     if not body or len(body) > _MAX_BODY:
+        return None
+    extension = _SCRAPED_IMAGE_EXTENSIONS.get(image_content_type(body) or '')
+    if not extension:
         return None
     name = f"{hashlib.sha256(body).hexdigest()}.{extension}"
     path = scraped_image_path(name)

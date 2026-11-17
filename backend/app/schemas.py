@@ -12,10 +12,9 @@ class LibraryCreate(BaseModel):
     type: Literal["local", "strm", "mixed"] = "mixed"
     enabled: bool = True
     auto_scan_enabled: bool = True
-    scan_mode: Literal["poll", "native"] = "poll"
+    scan_mode: Literal["poll", "native"] = "native"
     ts_policy: Literal["auto", "complete"] = "auto"
     scan_interval_seconds: int | None = Field(default=None, ge=30, le=86400)
-    full_scan_interval_seconds: int = Field(default=86400, ge=900, le=2592000)
     file_settle_seconds: int | None = Field(default=None, ge=0, le=3600)
     ignore_dirs: str | None = Field(default=None, max_length=2048)
 
@@ -29,7 +28,6 @@ class LibraryUpdate(BaseModel):
     scan_mode: Literal["poll", "native"] | None = None
     ts_policy: Literal["auto", "complete"] | None = None
     scan_interval_seconds: int | None = Field(default=None, ge=30, le=86400)
-    full_scan_interval_seconds: int | None = Field(default=None, ge=900, le=2592000)
     file_settle_seconds: int | None = Field(default=None, ge=0, le=3600)
     ignore_dirs: str | None = Field(default=None, max_length=2048)
 
@@ -43,13 +41,14 @@ class LibraryOut(BaseModel):
     type: str
     enabled: bool
     auto_scan_enabled: bool = True
-    scan_mode: str = "poll"
+    scan_mode: str = "native"
     ts_policy: str = "auto"
     scan_interval_seconds: int | None = None
-    full_scan_interval_seconds: int = 86400
     file_settle_seconds: int | None = None
     ignore_dirs: str | None = None
     waiting_files: int = 0
+    watch_mode: str | None = None
+    watch_error: str | None = None
     effective_settle_seconds: int = 60
     effective_poll_interval_seconds: int = 120
     effective_ignore_dirs: str = ""
@@ -99,6 +98,7 @@ class MediaListItem(BaseModel):
     title: str | None = None
     cover_url: str | None = None
     thumb_url: str | None = None
+    backdrop_url: str | None = None
     source_type: str
     provider: str | None = None
     release_date: str | None = None
@@ -115,7 +115,6 @@ class MediaDetail(MediaListItem):
     provider_id: str | None = None
     runtime: int | None = None
     studio: str | None = None
-    backdrop_url: str | None = None
     strm_target: str | None = None
     tags_json: str | None = None
     file_size: int | None = None

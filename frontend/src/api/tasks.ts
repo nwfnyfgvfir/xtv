@@ -17,3 +17,8 @@ export const listFailedItems = (id: string, offset = 0) =>
   client
     .get<TaskItem[]>(`/tasks/${id}/items`, { params: { status: 'failed', limit: 50, offset } })
     .then((r) => r.data)
+
+export const listSkippedItems = (id: string, offset = 0) =>
+  client
+    .get<TaskItem[]>(`/tasks/${id}/items`, { params: { status: 'skipped', limit: 50, offset } })
+    .then((r) => r.data)

@@ -74,6 +74,7 @@ const activePriority = computed({
 const savedSource = computed(() => normalizeScrapeSource(settings.value?.scrape_source))
 const connectedSource = computed(() => scrapeSources[savedSource.value].label)
 const sourceHealth = computed(() => health.value?.[savedSource.value])
+const watcherIssues = computed(() => (health.value?.watcher?.libraries || []).filter((entry) => entry.error))
 const sourceCredentialSet = computed(
   () => settings.value?.[scrapeSources[savedSource.value].credentialSet],
 )
@@ -839,6 +840,10 @@ onMounted(() => {
                   · {{ health.watcher.watched_library_ids.length }} 个媒体库</span
                 >
               </dd>
+            </div>
+            <div v-for="entry in watcherIssues" :key="`watcher-${entry.id}`">
+              <dt>{{ entry.name || `媒体库 ${entry.id}` }} 监听</dt>
+              <dd class="err">{{ entry.error }}</dd>
             </div>
             <div>
               <dt>媒体根目录</dt>

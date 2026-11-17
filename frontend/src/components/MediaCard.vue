@@ -7,17 +7,18 @@ import AppIcon from './AppIcon.vue'
 import { favoriteMedia, unfavoriteMedia } from '@/api/media'
 import { getErrorMessage } from '@/utils/errors'
 import { rememberListAnchor } from '@/utils/listScrollAnchor'
+import { useCoverImage } from '@/composables/useCoverImage'
 
 const props = defineProps<{ item: MediaListItem }>()
 const emit = defineEmits<{ refreshed: [MediaListItem] }>()
-const imgFailed = ref(false)
 const favLoading = ref(false)
 const favorited = ref(Boolean(props.item.favorited))
 
 const title = computed(() => props.item.title || props.item.number || props.item.filename)
-// Prefer portrait thumb for 3:4 cards; cover is often a landscape jacket.
-const cover = computed(() => props.item.thumb_url || props.item.cover_url || '')
-const showImage = computed(() => Boolean(cover.value) && !imgFailed.value)
+// Prefer the poster thumbnail; each image keeps its original proportions.
+const { src: cover, showImage, failed: coverFailed, onError: onImgError } = useCoverImage(() => [
+  props.item.thumb_url, props.item.cover_url, props.item.backdrop_url,
+])
 const isChineseSub = computed(() => props.item.subtitle_flag === 'C')
 const score = computed(() =>
   typeof props.item.score === 'number' ? props.item.score.toFixed(1) : '',
@@ -35,16 +36,9 @@ watch(
     favorited.value = Boolean(v)
   },
 )
-watch(cover, () => {
-  imgFailed.value = false
-})
 
 function onOpen() {
   rememberListAnchor('media', props.item.id)
-}
-
-function onImgError() {
-  imgFailed.value = true
 }
 
 async function toggleFav(e: Event) {
@@ -72,7 +66,7 @@ async function toggleFav(e: Event) {
       :aria-label="`查看影片 ${item.number || ''} ${title}`"
       @click="onOpen"
     >
-      <div class="poster">
+      <div class="poster" :title="coverFailed ? '图片加载失败，进入详情可重试' : undefined">
         <img
           v-if="showImage"
           :src="cover"
@@ -118,6 +112,7 @@ async function toggleFav(e: Event) {
 .card {
   min-width: 0;
   position: relative;
+  align-self: start;
 }
 .card-link {
   display: block;
@@ -126,16 +121,14 @@ async function toggleFav(e: Event) {
 .poster {
   position: relative;
   overflow: hidden;
-  aspect-ratio: 3 / 4;
   background: var(--bg-elevated);
   border-radius: 10px;
   isolation: isolate;
 }
 .poster > img {
-  position: absolute;
-  inset: 0;
+  display: block;
   width: 100%;
-  height: 100%;
+  height: auto;
   object-fit: contain;
 }
 .card-link:focus-visible {

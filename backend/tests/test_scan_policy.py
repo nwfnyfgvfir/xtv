@@ -259,7 +259,7 @@ def test_disappeared_waiting_file_stops_automatic_rechecks(workspace):
     assert api.get(f'/api/libraries/{lib_id}/waiting').json()['total'] == 0
 
 
-def test_native_monitor_failure_falls_back_and_daily_scan_respects_active_jobs(workspace, monkeypatch):
+def test_native_monitor_failure_is_reported_without_polling_or_daily_scan(workspace, monkeypatch):
     api, factory, lib_id, _, _, _ = workspace
     api.patch(f'/api/libraries/{lib_id}', json={'scan_mode': 'native'}).raise_for_status()
     class UnavailableObserver:
@@ -271,24 +271,100 @@ def test_native_monitor_failure_falls_back_and_daily_scan_respects_active_jobs(w
             return False
     monkeypatch.setattr(auto_scan, 'Observer', UnavailableObserver)
     manager = auto_scan.AutoScanner(factory)
+    monkeypatch.setattr(manager, 'snapshot', lambda _: pytest.fail('Event mode must never silently poll'))
     manager.tick(0)
-    assert manager.status()['libraries'][0]['mode'] == 'poll'
+    assert manager.status()['libraries'][0]['mode'] == 'unavailable'
+    assert '不可用' in manager.status()['libraries'][0]['error']
+    from app.api import libraries as library_api
+    monkeypatch.setattr(library_api, 'watcher_status', manager.status)
+    exposed = api.get('/api/libraries').json()[0]
+    assert exposed['watch_mode'] == 'unavailable' and '不可用' in exposed['watch_error']
     with factory() as db:
         lib = db.get(Library, lib_id)
-        assert (lib.next_full_scan_at - utcnow().replace(tzinfo=None)).total_seconds() > 86300
+        assert lib.next_full_scan_at is None
         lib.next_full_scan_at = utcnow() - timedelta(seconds=1)
         db.commit()
-    manager.tick(30)
+    manager.tick(86400)
+    manager.tick(172800)
     with factory() as db:
-        task = db.query(BackgroundJob).one()
-        assert json.loads(task.params_json)['inputs'] == {}
-        due = db.get(Library, lib_id).next_full_scan_at
-        assert due > utcnow().replace(tzinfo=None)
-        db.get(Library, lib_id).next_full_scan_at = utcnow() - timedelta(seconds=1)
+        assert db.query(BackgroundJob).count() == 0
+
+
+def test_event_mode_only_enqueues_changed_paths_and_retries_watch_setup_on_user_reload(workspace, monkeypatch):
+    api, factory, lib_id, root, _, _ = workspace
+    api.patch(f'/api/libraries/{lib_id}', json={'scan_mode': 'native'}).raise_for_status()
+    class NativeObserver:
+        alive = False
+        starts = 0
+        def schedule(self, handler, path, recursive):
+            self.handler = handler
+        def start(self):
+            self.alive = True
+            self.starts += 1
+        def stop(self):
+            self.alive = False
+        def is_alive(self):
+            return self.alive
+        def join(self, **kwargs):
+            pass
+    observer = NativeObserver()
+    monkeypatch.setattr(auto_scan, 'Observer', lambda: observer)
+    manager = auto_scan.AutoScanner(factory)
+    monkeypatch.setattr(manager, 'snapshot', lambda _: pytest.fail('Event mode must not walk the media directory'))
+    try:
+        manager.tick(0)
+        manager.tick(86400)
+        with factory() as db:
+            assert db.query(BackgroundJob).count() == 0
+        path = root / 'new_movie.mp4'
+        manager.schedule(lib_id, [str(path)], immediate=True, now=86401)
+        manager.tick(86401)
+        with factory() as db:
+            task = db.query(BackgroundJob).one()
+            assert json.loads(task.params_json)['inputs'] == {'paths': [str(path)]}
+        observer.alive = False
+        manager.tick(86402)
+        assert manager.status()['libraries'][0]['mode'] == 'unavailable'
+        manager.tick(172800)
+        assert observer.starts == 1
+        manager.reload()
+        manager.tick(172801)
+        assert observer.starts == 2 and manager.status()['libraries'][0]['mode'] == 'native'
+    finally:
+        manager._unwatch(lib_id)
+
+
+def test_legacy_daily_scan_timestamp_never_enqueues_a_full_scan(workspace, monkeypatch):
+    _, factory, lib_id, _, _, _ = workspace
+    with factory() as db:
+        db.get(Library, lib_id).next_full_scan_at = utcnow() - timedelta(days=1)
         db.commit()
-    manager.tick(60)
+    manager = auto_scan.AutoScanner(factory)
+    monkeypatch.setattr(manager, 'snapshot', lambda _: {})
+    manager.tick(0)
+    manager.tick(86400)
+    manager.tick(172800)
     with factory() as db:
-        assert db.query(BackgroundJob).count() == 1
+        assert db.query(BackgroundJob).count() == 0
+
+
+def test_new_library_defaults_to_file_events_without_full_scan_controls(workspace):
+    api, _, _, root, _, _ = workspace
+    response = api.post('/api/libraries', json={'name': 'Event library', 'path': str(root), 'type': 'local'})
+    assert response.status_code == 200 and response.json()['scan_mode'] == 'native'
+    assert 'full_scan_interval_seconds' not in response.json()
+
+
+def test_event_mode_rejects_watchdog_implicit_polling_backend(workspace, monkeypatch):
+    api, factory, lib_id, _, _, _ = workspace
+    api.patch(f'/api/libraries/{lib_id}', json={'scan_mode': 'native'}).raise_for_status()
+    observer = auto_scan.PollingObserver()
+    monkeypatch.setattr(observer, 'schedule', lambda *args, **kwargs: pytest.fail('Implicit polling must not be scheduled'))
+    monkeypatch.setattr(auto_scan, 'Observer', lambda: observer)
+    manager = auto_scan.AutoScanner(factory)
+    manager.tick(0)
+    assert manager.status()['libraries'][0]['mode'] == 'unavailable'
+    assert manager.states[lib_id].observer is None
 
 
 def test_cleanup_preview_pages_without_mutating_rows_or_files(workspace):

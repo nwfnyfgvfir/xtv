@@ -51,9 +51,7 @@ export const updateLibrary = (
     scan_mode: 'poll' | 'native'
     ts_policy: 'auto' | 'complete'
     scan_interval_seconds: number
-    full_scan_interval_seconds: number
     file_settle_seconds: number
-    parent_fallback_depth: number
     ignore_dirs: string
   }>,
 ) => client.patch<Library>(`/libraries/${id}`, body).then((r) => r.data)

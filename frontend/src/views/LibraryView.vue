@@ -84,7 +84,7 @@ function libraryFingerprint(
   ids: number[],
 ) {
   const libPart = libs
-    .map((l) => `${l.id}:${l.media_count ?? 0}:${l.content_revision ?? 0}`)
+    .map((l) => `${l.id}:${l.media_count ?? 0}:${l.content_revision ?? 0}:${l.watch_mode || ''}:${l.watch_error || ''}`)
     .join('|')
   return `${libPart}#${libId ?? ''}:${mediaTotal}:${ids.join(',')}`
 }
@@ -453,6 +453,7 @@ onBeforeUnmount(stopSoftRefresh)
       </div>
     </div>
 
+    <p v-if="currentLibrary?.watch_error" class="watcher-error" role="alert">{{ currentLibrary.watch_error }}</p>
     <div v-if="currentLibrary" class="library-controls">
       <div class="filter-chips" role="group" aria-label="列表筛选">
         <button
@@ -582,6 +583,16 @@ onBeforeUnmount(stopSoftRefresh)
   </div>
 </template>
 <style scoped>
+.watcher-error {
+  padding: 12px 16px;
+  margin: 0 0 18px;
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.7;
+}
 .waiting-notice {
   display: flex;
   align-items: center;

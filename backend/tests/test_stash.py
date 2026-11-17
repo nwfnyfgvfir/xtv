@@ -398,6 +398,17 @@ def test_stash_images_bypass_metatube_proxy(stash_settings):
     assert url.startswith("/api/images/proxy?")
 
 
+def test_media_list_and_actor_media_expose_proxied_backup_artwork(stash_settings, database, api):
+    from app.api.actors import _proxy_media
+    db, _ = database
+    item = seed_media(db)
+    item.backdrop_url = 'https://cdn.example/backup.jpg'
+    db.commit()
+    data = api.get('/api/media').json()['items'][0]
+    assert data['backdrop_url'].startswith('/api/images/proxy?')
+    assert _proxy_media(item, set()).backdrop_url.startswith('/api/images/proxy?')
+
+
 @pytest.mark.parametrize("value", [
     "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=", "data:image/png;base64,invalid!", "data:text/html;base64,SGVsbG8=",
 ])

@@ -53,10 +53,10 @@ def _with_proxied_images(
     data.thumb_url = rewrite_image_url(
         data.thumb_url, provider=item.provider, provider_id=item.provider_id
     )
+    data.backdrop_url = rewrite_image_url(
+        data.backdrop_url, provider=item.provider, provider_id=item.provider_id
+    )
     if detail and isinstance(data, MediaDetail):
-        data.backdrop_url = rewrite_image_url(
-            data.backdrop_url, provider=item.provider, provider_id=item.provider_id
-        )
         data.actors = [
             a.model_copy(update={"image_url": rewrite_image_url(a.image_url)}) for a in data.actors
         ]

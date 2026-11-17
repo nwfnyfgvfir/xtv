@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import AppIcon from './AppIcon.vue'
 import type { BackgroundTask, TaskItem } from '@/api/types'
-import { listFailedItems } from '@/api/tasks'
+import { listFailedItems, listSkippedItems } from '@/api/tasks'
 import { isActiveTask, taskStatus, taskTitle, useTasks } from '@/composables/useTasks'
 import { getErrorMessage } from '@/utils/errors'
 
@@ -12,6 +12,9 @@ const { busy, control, panelOpen, removeRecord } = useTasks()
 const failures = ref<TaskItem[]>([])
 const expanded = ref(false)
 const loadingFailures = ref(false)
+const skippedItems = ref<TaskItem[]>([])
+const showSkipped = ref(false)
+const loadingSkipped = ref(false)
 const showDetails = ref(false)
 const compact = computed(() => Boolean(props.history && !isActiveTask(props.task)))
 const percentage = computed(() =>
@@ -59,11 +62,28 @@ async function loadFailures() {
     loadingFailures.value = false
   }
 }
+async function loadSkipped() {
+  loadingSkipped.value = true
+  try {
+    const jobId = props.task.job_id
+    const rows = await listSkippedItems(jobId, skippedItems.value.length)
+    if (jobId === props.task.job_id) {
+      skippedItems.value.push(...rows)
+      showSkipped.value = true
+    }
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '获取跳过原因失败'))
+  } finally {
+    loadingSkipped.value = false
+  }
+}
 watch(
   () => props.task.job_id,
   () => {
     failures.value = []
     expanded.value = false
+    skippedItems.value = []
+    showSkipped.value = false
   },
 )
 </script>
@@ -174,7 +194,18 @@ watch(
         "
         >{{ expanded ? '收起失败条目' : '查看失败条目' }}</el-button
       >
+      <el-button v-if="task.skipped" size="small" text :loading="loadingSkipped"
+        @click="showSkipped ? (showSkipped = false) : skippedItems.length ? (showSkipped = true) : loadSkipped()"
+        >{{ showSkipped ? '收起跳过原因' : `跳过原因（${task.skipped}）` }}</el-button>
     </div>
+    <ul v-if="showSkipped" class="task-failures task-skips">
+      <li v-for="entry in skippedItems" :key="entry.id">
+        <strong>{{ entry.label }}</strong><span>{{ entry.error || '该条目无需处理' }}</span>
+      </li>
+      <li v-if="skippedItems.length < task.skipped">
+        <el-button text :loading="loadingSkipped" @click="loadSkipped">加载更多跳过条目</el-button>
+      </li>
+    </ul>
     <ul v-if="expanded" class="task-failures">
       <li v-for="failure in failures" :key="failure.id">
         <strong>{{ failure.label }}</strong><span>{{ failure.error }}</span>

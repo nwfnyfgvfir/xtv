@@ -8,13 +8,14 @@ export interface Library {
   scan_mode: 'poll' | 'native'
   ts_policy: 'auto' | 'complete'
   scan_interval_seconds: number | null
-  full_scan_interval_seconds: number
   file_settle_seconds: number | null
   ignore_dirs: string | null
   effective_settle_seconds: number
   effective_poll_interval_seconds: number
   effective_ignore_dirs: string
   waiting_files: number
+  watch_mode?: string | null
+  watch_error?: string | null
   media_count?: number
   /** Bumped when library media is added/removed/scraped (LibraryChanged-style). */
   content_revision?: number
@@ -41,6 +42,7 @@ export interface MediaListItem {
   title?: string | null
   cover_url?: string | null
   thumb_url?: string | null
+  backdrop_url?: string | null
   source_type: string
   provider?: string | null
   release_date?: string | null
@@ -264,6 +266,7 @@ export interface Health {
     running?: boolean
     watched_library_ids?: number[]
     pending_scans?: number[]
+    libraries?: { id: number; name?: string; mode: string; error: string | null }[]
   } | null
 }
 

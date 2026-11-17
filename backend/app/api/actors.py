@@ -25,6 +25,9 @@ def _proxy_media(item: MediaItem, favorited_ids: set[int]) -> MediaListItem:
     data.thumb_url = rewrite_image_url(
         data.thumb_url, provider=item.provider, provider_id=item.provider_id
     )
+    data.backdrop_url = rewrite_image_url(
+        data.backdrop_url, provider=item.provider, provider_id=item.provider_id
+    )
     data.favorited = item.id in favorited_ids
     return data
 
