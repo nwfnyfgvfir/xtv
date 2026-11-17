@@ -8,7 +8,6 @@ import DirectoryPickerDialog from '@/components/DirectoryPickerDialog.vue'
 import MediaGrid from '@/components/MediaGrid.vue'
 import AppIcon from '@/components/AppIcon.vue'
 import SkeletonGrid from '@/components/SkeletonGrid.vue'
-import TaskProgress from '@/components/TaskProgress.vue'
 import LibraryToolsDialog from '@/components/LibraryToolsDialog.vue'
 import { isActiveTask, useTasks } from '@/composables/useTasks'
 import {
@@ -40,7 +39,8 @@ const { tasks, acceptTask, panelOpen } = useTasks()
 const submittingLibraryId = ref<number | null>(null)
 const libraryTask = computed(() =>
   tasks.value.find(
-    (task) => task.library_id === currentLibraryId.value && task.kind !== 'rescrape',
+    (task) =>
+      task.library_id === currentLibraryId.value && task.kind !== 'rescrape' && isActiveTask(task),
   ),
 )
 const scanningId = computed(
@@ -274,7 +274,7 @@ async function onScan(lib: Library) {
   try {
     const job = await scanLibrary(lib.id)
     acceptTask(job)
-    ElMessage.info('扫描任务已加入后台队列')
+    panelOpen.value = true
   } catch (e: unknown) {
     ElMessage.error(getErrorMessage(e, '扫描失败'))
   } finally {
@@ -288,7 +288,7 @@ async function onRescrapePending(lib: Library) {
   try {
     const job = await rescrapePendingLibrary(lib.id)
     acceptTask(job)
-    ElMessage.info('补刮任务已加入后台队列')
+    panelOpen.value = true
   } catch (e: unknown) {
     ElMessage.error(getErrorMessage(e, '补刮失败'))
   } finally {
@@ -520,18 +520,8 @@ onBeforeUnmount(stopSoftRefresh)
       /></el-select>
     </div>
 
-    <div
-      v-if="
-        libraryTask && (isActiveTask(libraryTask) || libraryTask.resumable || libraryTask.failed)
-      "
-      class="library-task"
-    >
-      <TaskProgress :task="libraryTask" />
-      <el-button text @click="panelOpen = true">查看全部后台任务</el-button>
-    </div>
-
     <div v-if="currentLibrary?.waiting_files" class="waiting-notice">
-      <span>{{ currentLibrary.waiting_files }} 个文件等待就绪，尚未进入媒体库。</span
+      <span>待就绪或待确认 {{ currentLibrary.waiting_files }} 项</span
       ><el-button text @click="showTools = true">查看等待与扫描策略</el-button>
     </div>
     <LibraryToolsDialog v-model="showTools" :library="currentLibrary" @saved="loadLibraries" />
@@ -604,9 +594,6 @@ onBeforeUnmount(stopSoftRefresh)
   border-radius: 8px;
   font-size: 12px;
   color: var(--muted);
-}
-.library-task {
-  margin-bottom: 22px;
 }
 .description-dot {
   margin: 0 10px;

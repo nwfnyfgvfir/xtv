@@ -9,6 +9,10 @@ export const listTasks = (
 export const taskAction = (id: string, action: 'cancel' | 'resume' | 'retry') =>
   client.post<BackgroundTask>(`/tasks/${id}/${action}`).then((r) => r.data)
 
+export const deleteTaskRecord = (id: string) => client.delete(`/tasks/${id}`)
+export const clearTaskHistory = () =>
+  client.delete<{ deleted: number }>('/tasks/history').then((r) => r.data)
+
 export const listFailedItems = (id: string, offset = 0) =>
   client
     .get<TaskItem[]>(`/tasks/${id}/items`, { params: { status: 'failed', limit: 50, offset } })

@@ -383,7 +383,7 @@ def test_v130_schema_migration_preserves_media_jobs_and_manual_policy(tmp_path, 
     with engine.begin() as connection:
         connection.execute(text('DROP TABLE file_observations'))
         for table, columns in {
-            'libraries': ('scan_mode', 'full_scan_interval_seconds', 'next_full_scan_at', 'file_settle_seconds', 'parent_fallback_depth', 'ignore_dirs'),
+            'libraries': ('scan_mode', 'ts_policy', 'full_scan_interval_seconds', 'next_full_scan_at', 'file_settle_seconds', 'parent_fallback_depth', 'ignore_dirs'),
             'media_items': ('number_locked', 'number_source', 'recognition_notes', 'recognition_version', 'file_mtime_ns'),
             'background_jobs': ('waiting', 'scan_manifest_json'),
         }.items():

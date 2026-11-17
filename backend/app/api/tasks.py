@@ -42,6 +42,23 @@ def list_tasks(db: Session = Depends(get_db), active_only: bool = False,
     return [store.task_out(db, job) for job in rows]
 
 
+@router.delete('/history')
+def clear_history(db: Session = Depends(get_db)):
+    count = db.query(BackgroundJob).filter(BackgroundJob.status.in_(store.TERMINAL)).delete(synchronize_session=False)
+    db.commit()
+    return {'deleted': count}
+
+
+@router.delete('/{job_id}', status_code=204)
+def delete_history_item(job_id: str, db: Session = Depends(get_db)):
+    require_job(db, job_id)
+    count = db.query(BackgroundJob).filter(BackgroundJob.job_id == job_id,
+        BackgroundJob.status.in_(store.TERMINAL)).delete(synchronize_session=False)
+    if not count:
+        raise HTTPException(409, '请先取消并等待任务停止，再删除记录')
+    db.commit()
+
+
 @router.get("/{job_id}", response_model=TaskOut)
 def get_task(job_id: str, db: Session = Depends(get_db)):
     return store.task_out(db, require_job(db, job_id))

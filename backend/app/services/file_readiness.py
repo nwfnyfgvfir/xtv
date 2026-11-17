@@ -12,14 +12,23 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.models import FileObservation, Library, MediaItem, utcnow
 from app.services.strm import read_strm_target
+from app.services.ts_files import TsGuard, inspect_directory
 
 TEMP_SUFFIXES = {".tmp", ".part", ".crdownload", ".ytdlp", ".partial", ".aria2", ".!qb", ".!ut", ".td"}
 TEMP_NAME = re.compile(r"(?i)(?:[._-](?:part|partial|tmp|temp|download)|\.f\d{1,5})\.[a-z0-9]{2,8}$")
+TEMP_DIRS = {'temp', '.temp', '_temp', '_tmp', 'temporary', 'download_temp', 'downloads_temp',
+             'downloads_tmp', 'download_cache', 'downloading', '.downloading', '临时', '临时目录',
+             '下载临时', '下载临时目录', '临时下载', '下载缓存'}
+_TEMP_DIR = re.compile(r'(?i)^[._]?(?:tmp|temp)(?:[._-](?:\d{6,}|[a-f0-9]{8,}))?$')
 
 
 def ignored_dirs(lib: Library | None = None) -> set[str]:
     raw = lib.ignore_dirs if lib and lib.ignore_dirs is not None else get_settings().download_ignore_dirs
-    return {part.strip().casefold() for part in raw.split(",") if part.strip()}
+    return {part.strip().casefold() for part in raw.split(",") if part.strip()} | TEMP_DIRS
+
+
+def ignored_directory(name: str, lib: Library | None = None) -> bool:
+    return name.casefold() in ignored_dirs(lib) or bool(_TEMP_DIR.fullmatch(name))
 
 
 def settle_seconds(lib: Library) -> int:
@@ -40,7 +49,7 @@ def ignored_reason(path: Path, root: Path, lib: Library | None = None) -> str | 
         relative = path.relative_to(root)
     except ValueError:
         return "文件位于媒体库目录之外"
-    if any(part.casefold() in ignored_dirs(lib) for part in relative.parts[:-1]):
+    if any(ignored_directory(part, lib) for part in relative.parts[:-1]):
         return "位于排除的下载临时目录"
     if path.suffix.casefold() in TEMP_SUFFIXES:
         return "下载临时后缀或控制文件"
@@ -55,29 +64,64 @@ def control_target(path: Path) -> Path | None:
     return path.with_suffix("") if path.suffix.casefold() in {".aria2"} else None
 
 
-def iter_files(root: Path, scopes: list[str] | None, lib: Library):
+def iter_files(root: Path, scopes: list[str] | None, lib: Library, *, checkpoint=None, guard=None, on_deferred=None):
     """Yield paths without reading media contents; never walk ignored subtrees."""
     seen: set[str] = set()
+    guard = guard or TsGuard(checkpoint)
+    deferred_dirs = set()
+    def allowed(path):
+        if ignored_reason(path, root, lib) and not control_target(path):
+            return False
+        verdict = guard.classify(path, lib)
+        if verdict:
+            if verdict[0] == 'waiting' and on_deferred and path.parent not in deferred_dirs:
+                deferred_dirs.add(path.parent)
+                on_deferred(path, verdict[1])
+            return False
+        return True
     for raw in scopes or [str(root)]:
+        if checkpoint:
+            checkpoint()
         target = Path(raw).resolve()
         if not target.is_relative_to(root):
             continue
+        if ignored_reason(target, root, lib) and not control_target(target):
+            continue
         if target.is_file():
-            if str(target) not in seen:
+            if str(target) not in seen and allowed(target):
                 seen.add(str(target))
                 yield target
             continue
-        if not target.is_dir() or target != root and target.name.casefold() in ignored_dirs(lib):
+        if not target.is_dir() or target != root and ignored_directory(target.name, lib):
             continue
-        def fail(error):
-            raise error
-        for directory, dirs, files in os.walk(target, onerror=fail, followlinks=False):
-            dirs[:] = [name for name in dirs if name.casefold() not in ignored_dirs(lib) and not (Path(directory) / name).is_symlink()]
-            for name in files:
-                path = Path(directory) / name
-                if str(path) not in seen:
+        stack = [target]
+        while stack:
+            if checkpoint:
+                checkpoint()
+            directory = stack.pop()
+            entries = []
+            with os.scandir(directory) as listing:
+                for entry in listing:
+                    if checkpoint:
+                        checkpoint()
+                    entries.append(entry)
+            if any(entry.name.lower().endswith('.ts') for entry in entries):
+                guard.directories[directory] = inspect_directory(directory, [entry.name for entry in entries], checkpoint)
+            directories = []
+            for entry in entries:
+                if checkpoint:
+                    checkpoint()
+                path = Path(entry.path)
+                if entry.is_dir(follow_symlinks=False):
+                    if not ignored_directory(entry.name, lib):
+                        directories.append(path)
+                    continue
+                if entry.is_symlink() and not entry.is_file():
+                    continue
+                if str(path) not in seen and allowed(path):
                     seen.add(str(path))
                     yield path
+            stack.extend(reversed(directories))
 
 
 @dataclass
@@ -95,7 +139,7 @@ class FileDeferred(Exception):
 
 
 def check_file(db: Session, lib: Library, path: Path, *, now: datetime | None = None,
-               readonly: bool = False, confirmed: bool = False) -> FileCheck:
+               readonly: bool = False, confirmed: bool = False, guard=None) -> FileCheck:
     now = (now or utcnow()).replace(tzinfo=None)
     root = root_path(lib)
     reason = ignored_reason(path, root, lib)
@@ -104,6 +148,8 @@ def check_file(db: Session, lib: Library, path: Path, *, now: datetime | None = 
     if path.suffix.lower().lstrip(".") not in get_settings().extension_set:
         return FileCheck("unsupported", "不在扫描扩展名白名单中")
     try:
+        if verdict := (guard or TsGuard()).classify(path, lib):
+            return FileCheck(*verdict)
         stat = path.stat()
         if not path.is_file():
             return FileCheck("ignored", "不是普通文件")

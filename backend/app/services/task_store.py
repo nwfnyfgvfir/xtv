@@ -5,12 +5,14 @@ import threading
 import uuid
 from typing import Any
 
+from sqlalchemy import case
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.models import BackgroundJob, BackgroundJobItem, Library, MediaItem, utcnow
 from app.schemas import TaskOut
+from app.services import task_control
 
 ACTIVE = ("pending", "running", "cancelling")
 TERMINAL = ("done", "error", "cancelled", "interrupted")
@@ -93,15 +95,23 @@ def enqueue(db: Session, kind: str, library: Library, *, media_id: int | None = 
 def cancel(db: Session, job: BackgroundJob) -> BackgroundJob:
     if job.status not in ACTIVE:
         return job
-    job.cancel_requested = True
-    if job.status == "pending":
-        job.status, job.active_key = "cancelled", None
-        job.finished_at = utcnow()
-        job.message = "已取消，未完成条目可继续"
-    else:
-        job.status = "cancelling"
-        job.message = "正在取消，当前条目结束后停止"
+    task_control.request_cancel(job.job_id)
+    queued = BackgroundJob.status == 'pending'
+    # Evaluate the current row atomically: a stale API read must not turn a
+    # finished task back into an eternally "cancelling" task.
+    db.query(BackgroundJob).filter(BackgroundJob.job_id == job.job_id,
+        BackgroundJob.status.in_(ACTIVE)).update({
+            'cancel_requested': True,
+            'status': case((queued, 'cancelled'), else_='cancelling'),
+            'active_key': case((queued, None), else_=BackgroundJob.active_key),
+            'finished_at': case((queued, utcnow()), else_=BackgroundJob.finished_at),
+            'updated_at': utcnow(),
+            'message': case((queued, '已取消，未完成条目可继续'), else_='正在停止任务，已请求中断当前操作'),
+        }, synchronize_session=False)
     db.commit()
+    db.refresh(job)
+    if job.status not in ACTIVE:
+        task_control.clear(job.job_id)
     wakeup.set()
     return job
 
@@ -126,6 +136,7 @@ def resume(db: Session, job: BackgroundJob) -> BackgroundJob:
     if not task_out(db, job).resumable:
         raise TaskConflict("该任务无法继续，可重试失败条目")
     job.active_key = _require_free(db, job)
+    task_control.clear(job.job_id)
     job.status, job.cancel_requested, job.finished_at = "pending", False, None
     db.query(BackgroundJobItem).filter_by(job_id=job.job_id, status="running").update({"status": "pending"})
     job.message = "等待继续未完成条目"

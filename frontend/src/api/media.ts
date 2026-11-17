@@ -50,6 +50,7 @@ export const updateLibrary = (
     enabled: boolean
     auto_scan_enabled: boolean
     scan_mode: 'poll' | 'native'
+    ts_policy: 'auto' | 'complete'
     scan_interval_seconds: number
     full_scan_interval_seconds: number
     file_settle_seconds: number

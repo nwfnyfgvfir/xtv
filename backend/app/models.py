@@ -90,6 +90,7 @@ class Library(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     auto_scan_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     scan_mode: Mapped[str] = mapped_column(String(16), default="poll", nullable=False)
+    ts_policy: Mapped[str] = mapped_column(String(16), default="auto", nullable=False)
     full_scan_interval_seconds: Mapped[int] = mapped_column(Integer, default=86400, nullable=False)
     next_full_scan_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     file_settle_seconds: Mapped[int | None] = mapped_column(Integer)

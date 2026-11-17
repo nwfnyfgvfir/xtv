@@ -13,6 +13,7 @@ class LibraryCreate(BaseModel):
     enabled: bool = True
     auto_scan_enabled: bool = True
     scan_mode: Literal["poll", "native"] = "poll"
+    ts_policy: Literal["auto", "complete"] = "auto"
     scan_interval_seconds: int | None = Field(default=None, ge=30, le=86400)
     full_scan_interval_seconds: int = Field(default=86400, ge=900, le=2592000)
     file_settle_seconds: int | None = Field(default=None, ge=0, le=3600)
@@ -27,6 +28,7 @@ class LibraryUpdate(BaseModel):
     enabled: bool | None = None
     auto_scan_enabled: bool | None = None
     scan_mode: Literal["poll", "native"] | None = None
+    ts_policy: Literal["auto", "complete"] | None = None
     scan_interval_seconds: int | None = Field(default=None, ge=30, le=86400)
     full_scan_interval_seconds: int | None = Field(default=None, ge=900, le=2592000)
     file_settle_seconds: int | None = Field(default=None, ge=0, le=3600)
@@ -44,6 +46,7 @@ class LibraryOut(BaseModel):
     enabled: bool
     auto_scan_enabled: bool = True
     scan_mode: str = "poll"
+    ts_policy: str = "auto"
     scan_interval_seconds: int | None = None
     full_scan_interval_seconds: int = 86400
     file_settle_seconds: int | None = None

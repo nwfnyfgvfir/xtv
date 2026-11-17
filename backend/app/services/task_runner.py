@@ -13,8 +13,10 @@ from sqlalchemy.engine import make_url
 
 from app.config import get_settings
 from app.db import SessionLocal
-from app.models import BackgroundJob, BackgroundJobItem, Library, MediaItem, utcnow
+from app.models import BackgroundJob, BackgroundJobItem, Library, MediaItem, FileObservation, utcnow
 from app.services import task_store as store
+from app.services import task_control
+from app.services.ts_files import TsGuard
 from app.services.actors import delete_orphan_actors
 from app.services.jobs import ScanJob
 from app.services.library_revision import bump_revision
@@ -33,12 +35,46 @@ class TaskStopped(Exception):
 
 
 def _check_stop(factory, job_id: str, stop: threading.Event | None) -> None:
+    if task_control.requested(job_id):
+        raise TaskStopped(True)
     with factory() as db:
         job = db.get(BackgroundJob, job_id)
         if job is None or job.cancel_requested:
             raise TaskStopped(True)
     if stop is not None and stop.is_set():
         raise TaskStopped(False)
+
+
+class StopCheck:
+    def __init__(self, factory, job_id, stop):
+        self.factory, self.job_id, self.stop = factory, job_id, stop
+        self.last_poll = float('-inf')
+
+    def __call__(self, *, force=False):
+        if task_control.local_requested(self.job_id):
+            raise TaskStopped(True)
+        if self.stop is not None and self.stop.is_set():
+            raise TaskStopped(False)
+        now = time.monotonic()
+        if force or now - self.last_poll >= 0.2:
+            _check_stop(self.factory, self.job_id, self.stop)
+            self.last_poll = now
+
+
+async def _scrape_interruptible(factory, job_id, stop, coroutine):
+    work = asyncio.create_task(coroutine)
+    try:
+        while not work.done():
+            _check_stop(factory, job_id, stop)
+            await asyncio.wait({work}, timeout=0.2)
+        return work.result()
+    finally:
+        if not work.done():
+            work.cancel()
+            try:
+                await work
+            except asyncio.CancelledError:
+                pass
 
 
 def _safe_error(exc: Exception) -> str:
@@ -53,6 +89,16 @@ def _safe_error(exc: Exception) -> str:
 
 def _manifest(factory, job_id: str, stop: threading.Event | None) -> None:
     with factory() as db:
+        check_stop = StopCheck(factory, job_id, stop)
+        last_commit = time.monotonic()
+        def checkpoint():
+            nonlocal last_commit
+            check_stop()
+            if time.monotonic() - last_commit >= 0.25:
+                db.commit()
+                last_commit = time.monotonic()
+                check_stop(force=True)
+        guard = TsGuard(checkpoint)
         job = db.get(BackgroundJob, job_id)
         if job.manifest_ready:
             return
@@ -68,14 +114,63 @@ def _manifest(factory, job_id: str, stop: threading.Event | None) -> None:
             root = resolve_library_path(lib)
             if not root.is_dir():
                 raise ValueError(f"媒体库目录不可访问：{root}")
-            paths = json.loads(job.params_json)["inputs"].get("paths")
+            raw_paths = json.loads(job.params_json)["inputs"].get("paths")
             settings = get_settings().model_copy(update=json.loads(job.params_json)["settings"])
+            deferred_dirs, deferred_paths = set(), set()
+            def deferred(path, reason):
+                if path.parent in deferred_dirs:
+                    return
+                deferred_dirs.add(path.parent)
+                row = db.query(FileObservation).filter_by(library_id=lib.id, path=str(path)).one_or_none()
+                if row is None:
+                    row = db.query(FileObservation).filter(FileObservation.library_id == lib.id,
+                        FileObservation.reason.like('同目录%TS 疑似分片%'),
+                        FileObservation.path.startswith(str(path.parent) + os.sep, autoescape=True)).first()
+                    if row and Path(row.path).parent != path.parent:
+                        row = None
+                if row is None:
+                    row = FileObservation(library_id=lib.id, path=str(path))
+                    db.add(row)
+                row.state, row.reason, row.next_check_at = 'waiting', reason, None
+                deferred_paths.add(row.path)
+                job.waiting += 1
+            paths = None
+            if raw_paths is not None:
+                paths, parents = [], {}
+                for raw in raw_paths:
+                    checkpoint()
+                    target = Path(os.path.abspath(raw))
+                    if ignored_reason(target, root, lib):
+                        continue
+                    if target.suffix.casefold() == '.ts':
+                        if target.parent not in parents:
+                            parents[target.parent] = target.parent.resolve()
+                        target = parents[target.parent] / target.name
+                        if not target.is_relative_to(root):
+                            continue
+                        if verdict := guard.classify(target, lib):
+                            if verdict[0] == 'waiting':
+                                deferred(target, verdict[1])
+                            continue
+                    paths.append(str(target))
+                # Filtering all event paths must never turn an empty batch into
+                # an unintended full-library scan.
+                if not paths:
+                    job.scan_manifest_json = json.dumps({'missing': [], 'root_dev': root.stat().st_dev, 'waiting': job.waiting})
+                    job.manifest_ready = True
+                    db.commit()
+                    return
             for scope in paths or []:
+                checkpoint()
                 target = Path(scope)
                 if not target.exists():
                     check_file(db, lib, target)
-            scopes = {Path(scope).resolve() for scope in paths or []}
-            query = db.query(MediaItem).filter_by(library_id=lib.id)
+            scopes = set()
+            for scope in paths or []:
+                checkpoint()
+                scopes.add(Path(scope).resolve())
+            query = db.query(MediaItem.id, MediaItem.path, MediaItem.filename, MediaItem.file_size,
+                MediaItem.file_mtime_ns, MediaItem.recognition_version, MediaItem.number, MediaItem.scraped_at).filter(MediaItem.library_id == lib.id)
             # Common file events fetch only their own index rows. Large bursts use
             # one query and bounded ancestor checks instead of huge SQLite OR trees.
             if scopes and root not in scopes and len(scopes) <= 100:
@@ -85,9 +180,13 @@ def _manifest(factory, job_id: str, stop: threading.Event | None) -> None:
                 ))))
             def in_scope(path):
                 return not scopes or path in scopes or any(parent in scopes for parent in path.parents)
-            known = {media.path: media for media in query if in_scope(Path(media.path))}
+            known = {}
+            for media in query.yield_per(128):
+                check_stop()
+                if in_scope(Path(media.path)):
+                    known[media.path] = media
             seen = set()
-            for idx, path in enumerate(iter_files(root, paths, lib)):
+            for idx, path in enumerate(iter_files(root, paths, lib, checkpoint=checkpoint, guard=guard, on_deferred=deferred)):
                 if idx % 128 == 0:
                     db.commit()
                     _check_stop(factory, job_id, stop)
@@ -96,7 +195,7 @@ def _manifest(factory, job_id: str, stop: threading.Event | None) -> None:
                 if ignored_reason(path, root, lib) or path.suffix.lower().lstrip(".") not in settings.extension_set:
                     continue
                 job.scanned += 1
-                check = check_file(db, lib, path)
+                check = check_file(db, lib, path, guard=guard)
                 if check.state != "ready":
                     job.waiting += check.state in {"waiting", "unreadable"}
                     continue
@@ -108,17 +207,37 @@ def _manifest(factory, job_id: str, stop: threading.Event | None) -> None:
                     store.add_item(db, job, "scrape", f"scrape:{media.id}", media.filename, media_id=media.id)
             missing = []
             for absolute, media in known.items():
+                checkpoint()
                 path = Path(absolute)
-                if ignored_reason(path, root, lib):
+                if ignored_reason(path, root, lib) or guard.classify(path, lib):
                     continue
                 if absolute not in seen or path.suffix.lower().lstrip(".") not in settings.extension_set:
                     missing.append({"id": media.id, "path": absolute})
             job.scan_manifest_json = json.dumps({"missing": missing, "root_dev": root.stat().st_dev, "waiting": job.waiting})
+            # Retire group warnings after files disappear or the user confirms
+            # complete recordings, instead of leaving a permanent waiting row.
+            for row in db.query(FileObservation).filter(FileObservation.library_id == lib.id,
+                    FileObservation.state == 'waiting', FileObservation.next_check_at.is_(None),
+                    FileObservation.reason.like('同目录%TS 疑似分片%')):
+                checkpoint()
+                if row.path in deferred_paths or not in_scope(Path(row.path)):
+                    continue
+                excluded = ignored_reason(Path(row.path), root, lib)
+                if excluded or Path(row.path).parent in deferred_dirs:
+                    row.state, row.reason, row.next_check_at = 'ignored', excluded or '同目录已有待确认记录', None
+                    continue
+                verdict = guard.classify(Path(row.path), lib)
+                if verdict and verdict[0] == 'waiting':
+                    continue
+                check = check_file(db, lib, Path(row.path), guard=guard)
+                if check.state in {'ignored', 'unsupported'}:
+                    row.state, row.reason, row.next_check_at = check.state, check.reason, None
         elif job.kind == "rescrape_pending":
             rows = db.query(MediaItem.id, MediaItem.filename).filter(
                 MediaItem.library_id == lib.id, MediaItem.number.isnot(None), MediaItem.scraped_at.is_(None),
             ).order_by(MediaItem.id).all()
             for idx, (media_id, filename) in enumerate(rows):
+                checkpoint()
                 if idx % 128 == 0:
                     db.commit()
                     _check_stop(factory, job_id, stop)
@@ -132,7 +251,7 @@ def _manifest(factory, job_id: str, stop: threading.Event | None) -> None:
         db.commit()
 
 
-def _followup(db, job: BackgroundJob) -> None:
+def _followup(db, job: BackgroundJob, checkpoint=None) -> None:
     if job.kind != "scan" or job.followup_ready:
         return
     index_pending = db.query(BackgroundJobItem.id).filter(
@@ -142,7 +261,12 @@ def _followup(db, job: BackgroundJob) -> None:
     if index_pending:
         return
     params = json.loads(job.params_json)
-    if not params.get("retry_only"):
+    keys = set()
+    for key, in db.query(BackgroundJobItem.item_key).filter_by(job_id=job.job_id).yield_per(128):
+        if checkpoint:
+            checkpoint()
+        keys.add(key)
+    if not params.get("retry_only") and 'prune' not in keys:
         store.add_item(db, job, "prune", "prune", "核对已移除的文件")
     if params["settings"]["auto_scrape"]:
         query = db.query(MediaItem).filter(MediaItem.library_id == job.library_id,
@@ -150,16 +274,22 @@ def _followup(db, job: BackgroundJob) -> None:
         successful_ids = db.query(BackgroundJobItem.media_id).filter_by(
             job_id=job.job_id, phase="index", status="succeeded")
         query = query.filter(MediaItem.id.in_(successful_ids))
-        keys = {key for key, in db.query(BackgroundJobItem.item_key).filter_by(job_id=job.job_id)}
-        for media in query.order_by(MediaItem.id):
+        for index, media in enumerate(query.with_entities(MediaItem.id, MediaItem.filename).order_by(MediaItem.id).yield_per(128)):
+            if checkpoint:
+                checkpoint()
             key = f"scrape:{media.id}"
             if key not in keys:
                 store.add_item(db, job, "scrape", key, media.filename, media_id=media.id)
+                keys.add(key)
+            if index % 128 == 127:
+                db.commit()
     job.followup_ready = True
     db.commit()
 
 
 def _prune(db, job, item, factory, stop) -> None:
+    check_stop = StopCheck(factory, job.job_id, stop)
+    guard = TsGuard(check_stop)
     lib = db.get(Library, job.library_id)
     if lib is None or not resolve_library_path(lib).is_dir():
         raise ValueError("媒体库目录不可访问，已保留索引")
@@ -172,13 +302,12 @@ def _prune(db, job, item, factory, stop) -> None:
         raise ValueError("媒体库挂载设备已改变，保留索引")
     removed = 0
     for idx, entry in enumerate(manifest.get("missing", [])):
-        if idx % 64 == 0:
-            _check_stop(factory, job.job_id, stop)
+        check_stop()
         media = db.get(MediaItem, entry["id"])
         if media is None or media.library_id != lib.id or media.path != entry["path"]:
             continue
         media_path = Path(media.path)
-        if ignored_reason(media_path, resolve_library_path(lib), lib):
+        if ignored_reason(media_path, resolve_library_path(lib), lib) or guard.classify(media_path, lib):
             continue
         try:
             missing = not media_path.exists()
@@ -229,7 +358,7 @@ def _step(factory, job_id: str, item_id: int, stop) -> None:
                     return
                 params = json.loads(job.params_json)
                 forced = job.kind == "rescrape"
-                readiness = check_file(db, lib, Path(media.path))
+                readiness = check_file(db, lib, Path(media.path), guard=TsGuard(StopCheck(factory, job_id, stop)))
                 if readiness.state != "ready":
                     store.finish_item(db, job, item, "skipped", {"waiting": int(readiness.state in {"waiting", "unreadable"})}, error=readiness.reason)
                     return
@@ -249,9 +378,9 @@ def _step(factory, job_id: str, item_id: int, stop) -> None:
                     media.recognition_version = None
                     db.commit()
                 settings = get_settings().model_copy(update=params["settings"])
-                ok = asyncio.run(scrape_media_item(db, media, force=forced,
+                ok = asyncio.run(_scrape_interruptible(factory, job_id, stop, scrape_media_item(db, media, force=forced,
                     provider_override=inputs.get("provider"), fallback_override=inputs.get("fallback"),
-                    url_override=inputs.get("url"), settings_override=settings))
+                    url_override=inputs.get("url"), settings_override=settings)))
                 # scrape_media_item may commit/rollback its own session; refresh job state.
                 db.refresh(job)
                 db.refresh(item)
@@ -277,26 +406,26 @@ def _step(factory, job_id: str, item_id: int, stop) -> None:
 def _index_batch(factory, job_id: str, stop) -> None:
     """Bounded index-only transaction; network scraping keeps per-item checkpoints."""
     with factory() as db:
+        check_stop = StopCheck(factory, job_id, stop)
+        guard = TsGuard(check_stop)
+        interruption = None
         job = db.get(BackgroundJob, job_id)
         lib = db.get(Library, job.library_id)
         if lib is None:
             raise ValueError("媒体库已不存在")
-        rows = db.query(BackgroundJobItem).filter_by(job_id=job_id, phase="index", status="pending").order_by(BackgroundJobItem.id).limit(50).all()
+        rows = db.query(BackgroundJobItem).filter_by(job_id=job_id, phase="index", status="pending").order_by(BackgroundJobItem.id).limit(32).all()
         for item in rows:
             item.status, item.started_at = "running", utcnow()
         job.phase, job.message = "index", "正在增量索引文件"
         db.commit()
         started = time.monotonic()
         for item in rows:
-            if stop and stop.is_set():
-                break
-            with factory() as control_db:
-                if control_db.get(BackgroundJob, job_id).cancel_requested:
-                    break
             stats, error, outcome = {}, None, "succeeded"
             try:
+                check_stop()
                 with db.begin_nested():
-                    check = check_file(db, lib, Path(item.path))
+                    check = check_file(db, lib, Path(item.path), guard=guard)
+                    check_stop()
                     if check.state != "ready":
                         outcome, error = "skipped", check.reason
                         stats = {"waiting": int(check.state in {"waiting", "unreadable"})}
@@ -307,18 +436,23 @@ def _index_batch(factory, job_id: str, stop) -> None:
                         stats = {"created": counts.created}
                         if json.loads(job.params_json).get("retry_only"):
                             stats["scanned"] = 1
+            except TaskStopped as exc:
+                interruption = exc
+                break
             except Exception as exc:
                 outcome, error = "failed", _safe_error(exc)
                 logger.exception("Index failed job=%s path=%s", job_id, item.path)
             store.finish_item(db, job, item, outcome, stats, error=error, commit=False)
             job.current = item.label
-            if time.monotonic() - started >= 1:
+            if time.monotonic() - started >= 0.25:
                 break
         for item in rows:
             if item.status == "running":
                 item.status = "pending"
         db.commit()
         bump_revision(lib.id)
+        if interruption:
+            raise interruption
 
 
 def execute_job(job_id: str, factory=None, stop: threading.Event | None = None) -> None:
@@ -329,6 +463,7 @@ def execute_job(job_id: str, factory=None, stop: threading.Event | None = None) 
         db.commit()
         if not claimed:
             return
+    task_control.register(job_id)
     try:
         _check_stop(factory, job_id, stop)
         _manifest(factory, job_id, stop)
@@ -336,7 +471,7 @@ def execute_job(job_id: str, factory=None, stop: threading.Event | None = None) 
             _check_stop(factory, job_id, stop)
             with factory() as db:
                 job = db.get(BackgroundJob, job_id)
-                _followup(db, job)
+                _followup(db, job, StopCheck(factory, job_id, stop))
                 next_id = db.query(BackgroundJobItem.id).filter_by(job_id=job_id, status="pending").order_by(BackgroundJobItem.id).first()
                 if next_id is None:
                     db.refresh(job)
@@ -357,6 +492,8 @@ def execute_job(job_id: str, factory=None, stop: threading.Event | None = None) 
         with factory() as db:
             job = db.get(BackgroundJob, job_id)
             job.status = "cancelled" if exc.cancelled else "interrupted"
+            if exc.cancelled:
+                job.cancel_requested = True
             job.active_key, job.current, job.finished_at = None, None, utcnow()
             job.message = "已取消，可继续未完成条目" if exc.cancelled else "服务已停止，可继续未完成条目"
             db.query(BackgroundJobItem).filter_by(job_id=job_id, status="running").update({"status": "pending"})
@@ -369,6 +506,9 @@ def execute_job(job_id: str, factory=None, stop: threading.Event | None = None) 
             db.query(BackgroundJobItem).filter_by(job_id=job_id, status="running").update({"status": "pending"})
             job.message = "执行失败：" + _safe_error(exc)
             db.commit()
+    finally:
+        task_control.unregister(job_id)
+        task_control.clear(job_id)
 
 
 def recover_interrupted(factory=None) -> None:
@@ -376,6 +516,8 @@ def recover_interrupted(factory=None) -> None:
     factory = factory or SessionLocal
     with factory() as db:
         for job in db.query(BackgroundJob).filter(BackgroundJob.status.in_(("running", "cancelling"))).all():
+            if task_control.requested(job.job_id):
+                job.cancel_requested = True
             for item in db.query(BackgroundJobItem).filter_by(job_id=job.job_id, status="running"):
                 media = db.get(MediaItem, item.media_id) if item.media_id else None
                 # Metadata may have committed immediately before the process stopped.

@@ -16,7 +16,7 @@ from app.db import Base, get_db
 from app.deps import require_auth
 from app.models import BackgroundJob, BackgroundJobItem, Library, MediaItem, utcnow
 from app.services import scanner, task_runner as runner, task_store as store
-from app.services import file_readiness, auto_scan
+from app.services import file_readiness, auto_scan, task_control
 
 
 @pytest.fixture
@@ -24,7 +24,7 @@ def workspace(tmp_path, monkeypatch):
     settings = config.Settings(_env_file=None, database_url=f"sqlite:///{tmp_path.as_posix()}/jobs.db",
         media_root=str(tmp_path), auto_translate=False, auto_scrape=True, scrape_source="stashscrapers",
         stashscrapers_token="test-secret-never-in-job", stashscrapers_scraper_priority='["A","B"]')
-    for module in (config, runner, store, scanner, file_readiness, auto_scan):
+    for module in (config, runner, store, scanner, file_readiness, auto_scan, task_control):
         monkeypatch.setattr(module, "get_settings", lambda: settings)
     monkeypatch.setattr(libraries, "reload_watches", lambda: None)
     engine = create_engine(settings.database_url, connect_args={"check_same_thread": False})
@@ -272,6 +272,24 @@ def test_single_rescrape_keeps_overrides_and_runs_as_background_job(workspace):
     assert api.get(f"/api/media/{media_id}").json()["number"] == "ABP-002"
 
 
+def test_single_rescrape_does_not_scan_library_or_touch_other_files(workspace, monkeypatch):
+    api, factory, _, root, calls, _ = workspace
+    media_id = add_media(workspace, scraped=True)
+    missing_id = add_media(workspace, 'ABP-002', exists=False)
+    unindexed = root / 'ABP-003.mp4'
+    unindexed.write_bytes(b'not scanned')
+    def unexpected_walk(*args, **kwargs):
+        raise AssertionError('Single-scene rescrape must not walk the media library')
+    monkeypatch.setattr(runner, 'iter_files', unexpected_walk)
+    result = run(workspace, api.post(f'/api/media/{media_id}/rescrape-task', json={}).json())
+    assert result['status'] == 'done' and result['total'] == result['scraped'] == 1
+    assert [item_id for item_id, _ in calls] == [media_id]
+    with factory() as db:
+        assert db.query(BackgroundJob).count() == 1
+        assert db.query(BackgroundJobItem).one().phase == 'scrape'
+        assert db.query(MediaItem).count() == 2 and db.get(MediaItem, missing_id) is not None
+
+
 def test_concurrent_duplicate_submission_creates_one_job(workspace):
     _, factory, lib_id, *_ = workspace
     barrier = threading.Barrier(4)
@@ -366,5 +384,6 @@ def test_task_history_and_controls_require_authentication(workspace, monkeypatch
     del api.app.dependency_overrides[require_auth]
     for method, url in (("GET", "/api/tasks"), ("GET", "/api/tasks/missing"),
                         ("GET", "/api/tasks/missing/items"), ("POST", "/api/tasks/missing/cancel"),
-                        ("POST", "/api/tasks/missing/resume"), ("POST", "/api/tasks/missing/retry")):
+                        ("POST", "/api/tasks/missing/resume"), ("POST", "/api/tasks/missing/retry"),
+                        ("DELETE", "/api/tasks/missing"), ("DELETE", "/api/tasks/history")):
         assert api.request(method, url).status_code == 401

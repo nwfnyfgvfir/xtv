@@ -86,7 +86,7 @@ def update_library(
     if not lib:
         raise HTTPException(404, "library not found")
     data = body.model_dump(exclude_unset=True)
-    for key in ("name", "path", "type", "enabled", "auto_scan_enabled", "scan_mode", "full_scan_interval_seconds"):
+    for key in ("name", "path", "type", "enabled", "auto_scan_enabled", "scan_mode", "ts_policy", "full_scan_interval_seconds"):
         if key in data and data[key] is None:
             raise HTTPException(422, f"{key} cannot be null")
     if "path" in data and data["path"] != lib.path and task_store.active_for_library(db, library_id):

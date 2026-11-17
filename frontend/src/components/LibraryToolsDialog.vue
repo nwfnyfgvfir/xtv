@@ -22,10 +22,11 @@ const visible = computed({
 })
 const tab = ref('policy')
 const busy = ref(false)
-const { acceptTask } = useTasks()
+const { acceptTask, panelOpen } = useTasks()
 const policy = ref({
   auto_scan_enabled: true,
   scan_mode: 'poll' as 'poll' | 'native',
+  ts_policy: 'auto' as 'auto' | 'complete',
   scan_interval_seconds: 120,
   full_hours: 24,
   file_settle_seconds: 60,
@@ -66,6 +67,7 @@ watch(
     policy.value = {
       auto_scan_enabled: lib.auto_scan_enabled,
       scan_mode: lib.scan_mode || 'poll',
+      ts_policy: lib.ts_policy || 'auto',
       scan_interval_seconds: lib.effective_poll_interval_seconds || 120,
       full_hours: (lib.full_scan_interval_seconds || 86400) / 3600,
       file_settle_seconds: lib.effective_settle_seconds ?? 60,
@@ -107,7 +109,8 @@ async function recheck() {
   await perform(async () => {
     if (!props.library) return
     acceptTask(await recheckWaiting(props.library.id))
-    ElMessage.success('已加入复查队列，就绪后自动入库')
+    visible.value = false
+    panelOpen.value = true
   })
 }
 async function inspect(reset = false) {
@@ -172,6 +175,16 @@ async function inspect(reset = false) {
                 aria-label="父目录兜底层数"
             /></el-form-item>
           </div>
+          <el-form-item label="TS 文件处理">
+            <el-select v-model="policy.ts_policy" aria-label="TS 文件处理">
+              <el-option label="自动区分完整影片与下载分片" value="auto" />
+              <el-option label="完整文件（允许成组编号的 TS）" value="complete" />
+            </el-select>
+          </el-form-item>
+          <p class="tool-hint">
+            自动模式会暂缓成组编号或哈希命名的疑似 TS
+            分片，只记录一个待确认项。若实际是完整录像，可选择“完整文件”后重新扫描。播放清单明确引用的分片及下载临时目录仍会跳过。
+          </p>
           <p class="tool-hint">
             轮询空闲时会退避，只对变化路径建任务。稳定时间为 0
             会关闭时间等待，过程文件和下载状态文件仍被拦截。父目录层数为 0 时只识别文件名。

@@ -13,7 +13,7 @@ from watchdog.observers import Observer
 from app.config import get_settings
 from app.db import SessionLocal
 from app.models import Library, FileObservation, utcnow
-from app.services.file_readiness import ignored_reason, ignored_dirs, iter_files, root_path, control_target
+from app.services.file_readiness import ignored_reason, ignored_directory, iter_files, root_path, control_target
 from app.services.task_store import enqueue, active_for_library, TaskConflict
 
 logger = logging.getLogger(__name__)
@@ -100,7 +100,7 @@ class AutoScanner:
         state = self.states.get(library_id)
         if state:
             root = root_path(state.library)
-            paths = [raw for raw in paths if not ignored_reason(Path(raw), root, state.library) and Path(raw).name.casefold() not in ignored_dirs(state.library)]
+            paths = [raw for raw in paths if not ignored_reason(Path(raw), root, state.library) and not ignored_directory(Path(raw).name, state.library)]
         if not paths:
             return
         with self.lock:
@@ -126,7 +126,7 @@ class AutoScanner:
                 self._unwatch(library_id)
         for library_id, lib in wanted.items():
             key = (lib.path, lib.scan_mode, lib.scan_interval_seconds, lib.ignore_dirs,
-                   lib.file_settle_seconds, lib.parent_fallback_depth, lib.full_scan_interval_seconds)
+                   lib.file_settle_seconds, lib.parent_fallback_depth, lib.full_scan_interval_seconds, lib.ts_policy)
             old = self.states.get(library_id)
             if old and old.fingerprint == key:
                 old.library = lib

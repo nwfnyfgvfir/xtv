@@ -7,11 +7,13 @@ import { listFailedItems } from '@/api/tasks'
 import { isActiveTask, taskStatus, taskTitle, useTasks } from '@/composables/useTasks'
 import { getErrorMessage } from '@/utils/errors'
 
-const props = defineProps<{ task: BackgroundTask }>()
-const { busy, control, panelOpen } = useTasks()
+const props = defineProps<{ task: BackgroundTask; history?: boolean }>()
+const { busy, control, panelOpen, removeRecord } = useTasks()
 const failures = ref<TaskItem[]>([])
 const expanded = ref(false)
 const loadingFailures = ref(false)
+const showDetails = ref(false)
+const compact = computed(() => Boolean(props.history && !isActiveTask(props.task)))
 const percentage = computed(() =>
   props.task.total ? Math.min(100, Math.round((props.task.processed / props.task.total) * 100)) : 0,
 )
@@ -31,13 +33,13 @@ const phase = computed(
 async function act(action: 'cancel' | 'resume' | 'retry') {
   try {
     await control(props.task, action)
-    ElMessage.success(
-      action === 'cancel'
-        ? '已请求取消，当前条目结束后停止'
-        : action === 'retry'
-          ? '失败条目已加入重试队列'
-          : '已加入继续执行队列',
-    )
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  }
+}
+async function remove() {
+  try {
+    await removeRecord(props.task)
   } catch (error) {
     ElMessage.error(getErrorMessage(error))
   }
@@ -67,7 +69,12 @@ watch(
 </script>
 
 <template>
-  <article class="task-card" :data-task-id="task.job_id" :aria-label="taskTitle(task)">
+  <article
+    class="task-card"
+    :class="{ compact, cancelled: task.status === 'cancelled' }"
+    :data-task-id="task.job_id"
+    :aria-label="taskTitle(task)"
+  >
     <div class="task-heading">
       <span class="task-kind"><AppIcon name="clock" :size="16" />{{ taskTitle(task) }}</span>
       <span
@@ -86,14 +93,18 @@ watch(
       @click="panelOpen = false"
       >{{ task.media_label }}</router-link
     >
-    <div class="task-counts" aria-live="polite">
-      <strong
+    <div v-if="!compact || showDetails" class="task-counts" aria-live="polite">
+      <strong v-if="task.total"
         >{{ task.processed
         }}<span> / {{ task.total }} {{ task.kind === 'scan' ? '步' : '部' }}</span></strong
       >
-      <span>成功 {{ task.succeeded }} · 失败 {{ task.failed }} · 跳过 {{ task.skipped }}</span>
+      <strong v-else>{{ isActiveTask(task) ? phase : '未处理任何文件' }}</strong>
+      <span v-if="task.total"
+        >成功 {{ task.succeeded }} · 失败 {{ task.failed }} · 跳过 {{ task.skipped }}</span
+      >
     </div>
     <div
+      v-if="task.total && (!compact || showDetails)"
       class="task-track"
       role="progressbar"
       aria-label="任务进度"
@@ -106,26 +117,41 @@ watch(
     <p v-if="isActiveTask(task) && task.current" class="task-current">
       {{ phase }} · {{ task.current }}
     </p>
-    <p class="task-message">{{ task.message || phase }}</p>
-    <p v-if="task.waiting" class="task-message">
-      {{ task.waiting }} 个文件等待就绪，后续复查后再入库或刮削。
+    <p v-if="!compact || showDetails" class="task-message">{{ task.message || phase }}</p>
+    <p v-if="compact && !showDetails" class="task-history-summary">
+      {{ task.processed ? `已处理 ${task.processed} 项 · 失败 ${task.failed}` : '未处理任何文件' }}
     </p>
-    <p v-if="task.kind === 'scan'" class="task-message">
+    <p v-if="task.waiting && (!compact || showDetails)" class="task-message">
+      待就绪或待确认 {{ task.waiting }} 项，可在媒体库“扫描与识别”中查看。
+    </p>
+    <p v-if="task.kind === 'scan' && (!compact || showDetails)" class="task-message">
       已扫描 {{ task.scanned }} · 新增 {{ task.created }} · 移除 {{ task.removed }} · 已刮削
       {{ task.scraped }}
     </p>
     <div class="task-actions">
+      <el-button v-if="compact" text size="small" :disabled="!!busy" @click="remove"
+        >删除记录</el-button
+      >
+      <el-button
+        v-if="compact"
+        text
+        size="small"
+        :aria-expanded="showDetails"
+        @click="showDetails = !showDetails"
+        >{{ showDetails ? '收起详情' : '查看详情' }}</el-button
+      >
       <el-button
         v-if="isActiveTask(task)"
         size="small"
         :loading="busy === task.job_id"
-        :disabled="task.cancel_requested"
+        :disabled="task.cancel_requested || !!busy"
         @click="act('cancel')"
-        >{{ task.cancel_requested ? '等待当前条目结束' : '取消任务' }}</el-button
+        >{{ task.cancel_requested ? '正在停止…' : '取消任务' }}</el-button
       >
       <el-button
         v-if="task.resumable"
         size="small"
+        :disabled="!!busy"
         :loading="busy === task.job_id"
         @click="act('resume')"
         >继续未完成</el-button
@@ -133,6 +159,7 @@ watch(
       <el-button
         v-if="task.retryable"
         size="small"
+        :disabled="!!busy"
         :loading="busy === task.job_id"
         @click="act('retry')"
         >重试失败（{{ task.failed }}）</el-button
@@ -162,6 +189,27 @@ watch(
 </template>
 
 <style scoped>
+.task-card.compact {
+  padding: 14px 0;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+}
+.compact .task-library {
+  margin: 7px 0;
+}
+.compact .task-actions {
+  margin-top: 8px;
+}
+.cancelled .task-status {
+  color: var(--muted);
+}
+.task-history-summary {
+  color: var(--muted);
+  font-size: 11px;
+  margin: 7px 0 0;
+}
 .task-target {
   display: block;
   margin: -8px 0 16px;

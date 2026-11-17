@@ -5,7 +5,6 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import VideoPlayer from '@/components/VideoPlayer.vue'
 import CoverPlaceholder from '@/components/CoverPlaceholder.vue'
 import AppIcon from '@/components/AppIcon.vue'
-import TaskProgress from '@/components/TaskProgress.vue'
 import { isActiveTask, useTasks } from '@/composables/useTasks'
 import ExternalPlayersBar from '@/components/ExternalPlayersBar.vue'
 import {
@@ -36,7 +35,7 @@ const playing = ref(false)
 const imgFailed = ref(false)
 const favLoading = ref(false)
 const playLoading = ref(false)
-const { tasks, acceptTask } = useTasks()
+const { tasks, acceptTask, panelOpen } = useTasks()
 const scrapeSubmitting = ref(false)
 const currentTask = computed(() =>
   tasks.value.find((task) => task.media_id === Number(props.id) && task.kind === 'rescrape'),
@@ -213,7 +212,7 @@ async function onRescrape() {
       url: url || undefined,
     })
     acceptTask(task)
-    ElMessage.info('重刮任务已加入后台队列，可以离开页面')
+    panelOpen.value = true
   } catch (e: unknown) {
     ElMessage.error(getErrorMessage(e, '刮削失败'))
   } finally {
@@ -568,7 +567,7 @@ watch(() => props.id, load)
                             : item?.number_source === 'manual'
                               ? '手动填写'
                               : '未记录'
-                    }}。锁定选择在保存或执行重刮后生效。</span
+                    }}。保存或执行重刮后生效。锁定后，扫描和重命名保留该番号，标题、海报等信息仍可更新。</span
                   >
                   <div v-if="recognitionResult" class="field-hint">
                     自动候选：{{ recognitionResult.number || '未识别到唯一番号' }}
@@ -605,7 +604,6 @@ watch(() => props.id, load)
                   active-text="失败时尝试其他源"
                   aria-label="刮削失败时尝试其他源"
                 />
-                <TaskProgress v-if="currentTask" :task="currentTask" />
                 <div class="maintenance-actions">
                   <el-button
                     :loading="scrapeLoading"

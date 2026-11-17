@@ -81,6 +81,7 @@ def init_db() -> None:
     _ensure_column("media_items", "title_original", "TEXT", None)
     _ensure_column("media_items", "plot_original", "TEXT", None)
     for column, ddl, default in (
+        ("ts_policy", "VARCHAR(16)", "'auto'"),
         ("full_scan_interval_seconds", "INTEGER", "86400"),
         ("next_full_scan_at", "DATETIME", None), ("file_settle_seconds", "INTEGER", None),
         ("parent_fallback_depth", "INTEGER", None), ("ignore_dirs", "TEXT", None),

@@ -1,5 +1,5 @@
 import { computed, ref } from 'vue'
-import { listTasks, taskAction } from '@/api/tasks'
+import { listTasks, taskAction, deleteTaskRecord, clearTaskHistory } from '@/api/tasks'
 import type { BackgroundTask } from '@/api/types'
 import { getErrorMessage } from '@/utils/errors'
 
@@ -110,8 +110,27 @@ export function acceptTask(task: BackgroundTask) {
 }
 
 export function useTasks() {
+  async function removeRecord(task?: BackgroundTask) {
+    if (busy.value) throw new Error('上一项操作尚未完成，请稍后重试')
+    busy.value = task?.job_id || '__history__'
+    const version = generation
+    try {
+      if (task) await deleteTaskRecord(task.job_id)
+      else await clearTaskHistory()
+      if (version !== generation) return
+      generation++
+      controller?.abort()
+      flight = null
+      tasks.value = task
+        ? tasks.value.filter((row) => row.job_id !== task.job_id)
+        : tasks.value.filter(isActiveTask)
+      await refreshTasks()
+    } finally {
+      busy.value = ''
+    }
+  }
   async function control(task: BackgroundTask, action: 'cancel' | 'resume' | 'retry') {
-    if (busy.value) return
+    if (busy.value) throw new Error('上一项操作尚未完成，请稍后重试')
     busy.value = task.job_id
     try {
       acceptTask(await taskAction(task.job_id, action))
@@ -127,6 +146,7 @@ export function useTasks() {
     connectionError,
     busy,
     control,
+    removeRecord,
     refreshTasks,
     acceptTask,
   }

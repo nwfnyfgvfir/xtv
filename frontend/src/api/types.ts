@@ -6,6 +6,7 @@ export interface Library {
   enabled: boolean
   auto_scan_enabled: boolean
   scan_mode: 'poll' | 'native'
+  ts_policy: 'auto' | 'complete'
   scan_interval_seconds: number | null
   full_scan_interval_seconds: number
   file_settle_seconds: number | null

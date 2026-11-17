@@ -149,11 +149,11 @@ function onLogout() {
           <button
             class="icon-button task-button"
             type="button"
-            aria-label="后台任务"
-            title="后台任务"
+            aria-label="消息"
+            title="消息与后台任务"
             @click="panelOpen = true"
           >
-            <AppIcon name="clock" :size="19" /><span v-if="activeTasks.length" class="task-badge">{{
+            <AppIcon name="bell" :size="19" /><span v-if="activeTasks.length" class="task-badge">{{
               activeTasks.length
             }}</span>
           </button>
