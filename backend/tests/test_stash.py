@@ -139,10 +139,12 @@ def test_stash_graphql_endpoint_and_auth(stash_settings, stash_http, base):
     assert "listScrapers(types: [SCENE])" in json.loads(request.content)["query"]
 
 
-def test_stash_name_search_expands_detail_saves_images_and_translates(stash_settings, stash_http, database, api, monkeypatch):
+@pytest.mark.parametrize('image_base', ['', 'https://images.example/tv'])
+def test_stash_name_search_expands_detail_saves_images_and_translates(stash_settings, stash_http, database, api, monkeypatch, image_base):
     requests, replies = stash_http
     db, _ = database
     item = seed_media(db)
+    stash_settings.image_site_base_url = image_base
     stash_settings.auto_translate = True
     monkeypatch.setattr("app.services.translate.translate_text", AsyncMock(side_effect=lambda value: "译：" + value))
     monkeypatch.setattr("app.services.translate.translate_tags", AsyncMock(side_effect=lambda values: values))
@@ -182,6 +184,11 @@ def test_stash_name_search_expands_detail_saves_images_and_translates(stash_sett
     assert image.status_code == 200
     assert image.headers["content-type"] == "image/png"
     assert image.content == PNG
+    detail = api.get(f'/api/media/{item.id}').json()
+    assert detail['cover_url'] == image_base + item.cover_url
+    assert detail['cover_local_url'] == detail['cover_url']
+    assert detail['actors'][0]['image_url'] == image_base + item.actors[0].image_url
+    assert detail['actors'][0]['image_local_url'] == detail['actors'][0]['image_url']
 
 
 def test_stash_fragment_and_unauthenticated_service(stash_settings, stash_http):

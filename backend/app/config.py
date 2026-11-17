@@ -4,6 +4,7 @@ import subprocess
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Project root: backend/app/config.py -> parents[2] = repo root
@@ -79,6 +80,7 @@ class Settings(BaseSettings):
     translate_ai_model: str = ""
     image_proxy_mode: str = "site"  # site | metatube | external
     image_external_proxy_url: str = ""  # template with {url}
+    image_site_base_url: str = ""  # browser-facing base for TV image resources
     image_local_cache: bool = False
     image_cache_max_mb: int = 2048  # 0 = no prune
     log_level: str = "INFO"
@@ -88,6 +90,13 @@ class Settings(BaseSettings):
     jwt_secret: str = "tv-dev-secret-change-me"
     jwt_expire_hours: int = 72
     auth_required: bool = True  # if admin_password empty, auth is effectively off
+
+    @field_validator('image_site_base_url')
+    @classmethod
+    def validate_image_site_base_url(cls, value: str) -> str:
+        from app.services.images import normalize_site_image_base_url
+
+        return normalize_site_image_base_url(value)
 
     @property
     def cors_origin_list(self) -> list[str]:

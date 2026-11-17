@@ -184,6 +184,7 @@ export interface Settings {
   translate_ai_model?: string
   image_proxy_mode?: ImageProxyMode
   image_external_proxy_url?: string
+  image_site_base_url?: string
   image_local_cache?: boolean
   scan_extensions: string
   cors_origins: string

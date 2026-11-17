@@ -1,0 +1,56 @@
+# Optional B hostname for images only. A keeps serving the TV UI, API and video.
+# Edit the hostname, TLS certificate paths and upstream address before enabling.
+# B must reach the SAME TV instance and its existing /data mount.
+# Settings -> Images: image_site_base_url = https://images.example.com
+# Reference: https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_pass
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name images.example.com;
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name images.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/images.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/images.example.com/privkey.pem;
+
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Connection "";
+    proxy_connect_timeout 10s;
+    proxy_read_timeout 60s;
+
+    location = /api/images/proxy {
+        proxy_pass http://127.0.0.1:8000;
+    }
+
+    location ^~ /api/images/scraped/ {
+        proxy_pass http://127.0.0.1:8000;
+    }
+
+    # Keep settings, backup status, video and every other API off this hostname.
+    location / {
+        return 404;
+    }
+
+    # If B includes a prefix (https://images.example.com/tv), replace the two
+    # image locations above with these. The URI in proxy_pass strips /tv while
+    # preserving the query string. Do not proxy the whole /tv/ namespace.
+    # location = /tv/api/images/proxy {
+    #     proxy_pass http://127.0.0.1:8000/api/images/proxy;
+    # }
+    # location ^~ /tv/api/images/scraped/ {
+    #     proxy_pass http://127.0.0.1:8000/api/images/scraped/;
+    # }
+}

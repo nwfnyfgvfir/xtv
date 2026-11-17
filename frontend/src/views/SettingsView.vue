@@ -42,6 +42,7 @@ const form = ref({
   translate_ai_model: '',
   image_proxy_mode: 'site' as ImageProxyMode,
   image_external_proxy_url: '',
+  image_site_base_url: '',
   image_local_cache: false,
   scan_extensions: '',
 })
@@ -103,6 +104,25 @@ watch(
 )
 
 const showExternalTpl = computed(() => form.value.image_proxy_mode === 'external')
+const imageSiteBaseError = computed(() => {
+  if (!form.value.image_site_base_url.trim()) return ''
+  const base = form.value.image_site_base_url.trim().replace(/\/+$/, '')
+  const error = '本站图片访问地址须为 HTTP(S) 基础地址，可包含部署子路径；不能包含账号、查询参数或片段'
+  try {
+    const url = new URL(base)
+    const path = decodeURIComponent(url.pathname)
+    if (!/^https?:\/\//i.test(base) || !url.hostname || url.username || url.password
+      || /^https?:\/\/[^/]*@/i.test(base)
+      || /[?#\s\\\x00-\x1f\x7f]/.test(base) || /[\s\\\x00-\x1f\x7f]/.test(path)) return error
+    // Check the raw path too: URL() normalizes dot segments before validation.
+    const rawPath = decodeURIComponent(base.replace(/^https?:\/\/[^/]+/i, ''))
+    if (rawPath.includes('//') || rawPath.split('/').some(part => part === '.' || part === '..')) return error
+    if (path.includes('/api/images')) return '请填写基础地址，不要填写 /api/images 图片接口路径'
+  } catch {
+    return error
+  }
+  return ''
+})
 const imageProxyError = computed(() => {
   if (!showExternalTpl.value) return ''
   const template = form.value.image_external_proxy_url.trim()
@@ -204,6 +224,7 @@ function applySettingsToForm(s: Settings) {
   form.value.translate_ai_model = s.translate_ai_model || ''
   form.value.image_proxy_mode = normalizeMode(s.image_proxy_mode)
   form.value.image_external_proxy_url = s.image_external_proxy_url || ''
+  form.value.image_site_base_url = s.image_site_base_url || ''
   form.value.image_local_cache = Boolean(s.image_local_cache)
   form.value.scan_extensions = s.scan_extensions
   form.value.metatube_provider_priority = [...(s.metatube_provider_priority || [])]
@@ -332,9 +353,9 @@ function removePriority(index: number) {
 }
 
 async function save() {
-  if (imageProxyError.value) {
+  if (imageProxyError.value || imageSiteBaseError.value) {
     activeSection.value = 'images'
-    ElMessage.warning(imageProxyError.value)
+    ElMessage.warning(imageSiteBaseError.value || imageProxyError.value)
     return
   }
   if (isStashScrapers.value && !form.value.stashscrapers_base_url.trim()) {
@@ -378,6 +399,7 @@ async function save() {
       translate_ai_model: form.value.translate_ai_model.trim(),
       image_proxy_mode: form.value.image_proxy_mode,
       image_external_proxy_url: form.value.image_external_proxy_url,
+      image_site_base_url: form.value.image_site_base_url.trim(),
       image_local_cache: form.value.image_local_cache,
       scan_extensions: form.value.scan_extensions,
       task_concurrency: form.value.task_concurrency,
@@ -795,11 +817,24 @@ onMounted(() => {
           <header class="panel-heading">
             <div>
               <h2 id="images-heading">图片与缓存</h2>
-              <p>选择封面加载方式，按需开启磁盘缓存。</p>
+              <p>设置图片加载方式、本站图片访问地址和磁盘缓存。</p>
             </div>
             <el-button text :loading="imageBackupsLoading" @click="refreshImageBackups">刷新备份状态</el-button>
           </header>
           <el-form class="settings-form" label-position="top" @submit.prevent="save">
+            <el-form-item class="span-full" label="本站图片访问地址" :error="imageSiteBaseError">
+              <el-input
+                v-model="form.image_site_base_url"
+                placeholder="https://images.example.com"
+                clearable
+              />
+              <span class="field-hint muted block">
+                用于 Stash 内嵌图、本地图片兜底及本站代理；留空使用当前访问地址。
+              </span>
+              <span class="field-hint muted block">
+                B 地址须反向代理到同一个 TV 服务；支持部署子路径，如 https://images.example.com/tv。HTTPS 页面请使用 HTTPS 地址，已有图片无需迁移或重刮。
+              </span>
+            </el-form-item>
             <el-form-item label="图片代理">
               <el-select v-model="form.image_proxy_mode" style="width: 100%">
                 <el-option label="本站代理（/api/images/proxy）" value="site" />

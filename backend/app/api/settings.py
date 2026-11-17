@@ -16,7 +16,7 @@ from app.schemas import SettingsOut, SettingsUpdate
 from app.services.metatube import MetaTubeClient, MetaTubeError, parse_movie_provider_names
 from app.services.stash import StashClient
 from app.services.stashscrapers import StashScrapersClient
-from app.services.images import external_proxy_template_error
+from app.services.images import external_proxy_template_error, normalize_site_image_base_url
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -62,6 +62,7 @@ OVERRIDE_KEYS = {
     "translate_ai_model",
     "image_proxy_mode",
     "image_external_proxy_url",
+    "image_site_base_url",
     "image_local_cache",
     "scan_extensions",
 }
@@ -191,6 +192,8 @@ def _apply_overrides_to_runtime(db_map: dict[str, str]) -> None:
             s.image_proxy_mode = mode
     if "image_external_proxy_url" in db_map:
         s.image_external_proxy_url = db_map["image_external_proxy_url"] or ""
+    if "image_site_base_url" in db_map:
+        s.image_site_base_url = normalize_site_image_base_url(db_map["image_site_base_url"] or "")
     if "image_local_cache" in db_map:
         s.image_local_cache = db_map["image_local_cache"].lower() in _BOOL_TRUE
     if "scan_extensions" in db_map and db_map["scan_extensions"]:
@@ -396,6 +399,7 @@ async def get_app_settings(
         image_proxy_mode=image_proxy_mode,  # type: ignore[arg-type]
         image_external_proxy_url=db_map.get("image_external_proxy_url", s.image_external_proxy_url)
         or "",
+        image_site_base_url=db_map.get("image_site_base_url", s.image_site_base_url) or "",
         image_local_cache=image_local_cache,
         scan_extensions=s.scan_extensions,
         cors_origins=s.cors_origins,
@@ -416,6 +420,13 @@ async def update_app_settings(
 ) -> SettingsOut:
     data = body.model_dump(exclude_unset=True)
     extra = data.pop("extra", None)
+    if extra and 'image_site_base_url' in extra:
+        data.setdefault('image_site_base_url', extra.pop('image_site_base_url'))
+    if data.get('image_site_base_url') is not None:
+        try:
+            data['image_site_base_url'] = normalize_site_image_base_url(data['image_site_base_url'])
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
     if {'image_proxy_mode', 'image_external_proxy_url'}.intersection(data):
         saved = _db_map(db)
         runtime = get_settings()

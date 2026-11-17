@@ -124,6 +124,71 @@ def first_scraped_image(values: list[Any]) -> str | None:
     return next((image for value in candidates if (image := store_scraped_image(value))), None)
 
 
+def normalize_site_image_base_url(value: str) -> str:
+    """Validate a browser-facing image origin, optionally with a proxy path prefix."""
+    if not value.strip():
+        return ''
+    base = value.strip().rstrip('/')
+    error = '本站图片访问地址须为 HTTP(S) 基础地址，可包含部署子路径；不能包含账号、查询参数或片段'
+    try:
+        parsed = urlsplit(base)
+        _ = parsed.port
+        if (parsed.scheme not in {'http', 'https'} or not parsed.hostname
+                or parsed.username is not None or parsed.password is not None
+                or '?' in base or '#' in base or re.search(r'[\x00-\x20\x7f\\]', base)):
+            raise ValueError(error)
+        path = unquote(parsed.path)
+        if ('\\' in path or '//' in path or any(part in {'.', '..'} for part in path.split('/'))
+                or re.search(r'[\x00-\x20\x7f]', path)):
+            raise ValueError(error)
+        if '/api/images' in path:
+            raise ValueError('本站图片访问地址请填写基础地址，不要填写 /api/images 图片接口路径')
+    except ValueError as exc:
+        if str(exc).startswith('本站图片访问地址'):
+            raise
+        raise ValueError(error) from exc
+    return base
+
+
+def site_image_path(url: str) -> str | None:
+    """Recognize only TV image resources, including URLs published on the image host."""
+    from app.config import get_settings
+
+    try:
+        parsed = urlsplit(url)
+        path = parsed.path
+        if parsed.scheme or parsed.netloc:
+            base = getattr(get_settings(), 'image_site_base_url', '').strip().rstrip('/')
+            if not base:
+                return None
+            origin = urlsplit(base)
+            if (parsed.scheme.lower(), parsed.hostname, parsed.port or (443 if parsed.scheme == 'https' else 80)) != (
+                    origin.scheme.lower(), origin.hostname, origin.port or (443 if origin.scheme == 'https' else 80)):
+                return None
+            prefix = origin.path.rstrip('/')
+            if not path.startswith(prefix + '/'):
+                return None
+            path = path[len(prefix):]
+        if path == '/api/images/proxy' or path.startswith('/api/images/scraped/'):
+            return path + ('?' + parsed.query if parsed.query else '')
+    except ValueError:
+        pass
+    return None
+
+
+def site_image_url(url: str | None) -> str | None:
+    """Publish canonical image paths without ever changing their stored location."""
+    if not url:
+        return url
+    path = site_image_path(url)
+    if path is None:
+        return url
+    from app.config import get_settings
+
+    base = getattr(get_settings(), 'image_site_base_url', '').strip().rstrip('/')
+    return base + path
+
+
 def original_image_url(url: str | None) -> str | None:
     """Unwrap known proxy URLs so a saved proxy choice never locks in an old route."""
     if not url:
@@ -134,6 +199,7 @@ def original_image_url(url: str | None) -> str | None:
     current = 'https:' + url if url.startswith('//') else url
     template = (getattr(settings, 'image_external_proxy_url', '') or '').strip()
     for _ in range(8):
+        current = site_image_path(current) or current
         try:
             parsed = urlsplit(current)
         except ValueError:
@@ -154,17 +220,17 @@ def original_image_url(url: str | None) -> str | None:
 
 
 def site_proxy_url(url: str | None) -> str | None:
-    """Rewrite absolute image URLs to same-origin proxy path."""
+    """Publish the site proxy on the configured image host, or the current origin."""
     if not url:
         return url
-    if url.startswith("/api/images/proxy"):
-        return url
+    if path := site_image_path(url):
+        return site_image_url(path)
     # Already relative site path
     if url.startswith("/") and not url.startswith("//"):
         return url
     if not (url.startswith("http://") or url.startswith("https://")):
         return url
-    return f"/api/images/proxy?url={quote(url, safe='')}"
+    return site_image_url(f"/api/images/proxy?url={quote(url, safe='')}")
 
 
 def external_proxy_template_error(template: str) -> str | None:
@@ -201,7 +267,7 @@ def rewrite_image_url(
         return url
     # Inline-only artwork has no remote URL to hand to another service.
     if url.startswith("/") and not url.startswith("//"):
-        return url
+        return site_image_url(url)
     if not (url.startswith("http://") or url.startswith("https://")):
         return url
 

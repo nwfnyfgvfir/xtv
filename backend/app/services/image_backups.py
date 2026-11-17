@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session, object_session
 
 from app.db import SessionLocal
 from app.models import Actor, ImageBackup, MediaItem, utcnow
-from app.services.images import original_image_url, rewrite_image_url, store_image_bytes, validate_proxy_url
+from app.services.images import original_image_url, rewrite_image_url, site_image_path, site_image_url, store_image_bytes, validate_proxy_url
 
 logger = logging.getLogger(__name__)
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
@@ -59,7 +59,7 @@ def local_image_urls(item, fields):
     if db is not None and keys:
         backups = {row.url_hash: '/api/images/scraped/' + row.local_name for row in
             db.query(ImageBackup).filter(ImageBackup.url_hash.in_(keys), ImageBackup.status == 'done', ImageBackup.local_name.isnot(None))}
-    return {field: (url if url and url.startswith('/api/images/scraped/') else backups.get(image_key(url)) if url else None)
+    return {field: site_image_url(url if url and url.startswith('/api/images/scraped/') else backups.get(image_key(url)) if url else None)
         for field, url in values.items()}
 
 
@@ -82,7 +82,7 @@ async def download_image(url, *, provider=None, provider_id=None):
     target = rewrite_image_url(original, provider=provider, provider_id=provider_id)
     if not target:
         raise ValueError('Image proxy configuration is invalid')
-    if target.startswith('/'):
+    if target.startswith('/') or site_image_path(target) is not None:
         target = original
     headers = {'User-Agent': 'Mozilla/5.0 TV-ImageBackup', 'Accept': 'image/*',
         'Referer': f'{urlsplit(original).scheme}://{urlsplit(original).netloc}/'}
