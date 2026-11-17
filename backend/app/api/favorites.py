@@ -10,8 +10,7 @@ from app.db import get_db
 from app.deps import require_auth
 from app.models import Actor, ActorFavorite, Favorite, MediaActor, MediaItem
 from app.schemas import ActorListItem, MediaListItem, PaginatedActors, PaginatedMedia
-from app.services.images import rewrite_image_url
-from app.services.image_backups import attach_media_backups, actor_backup_url
+from app.services.image_delivery import attach_media_images, actor_image_urls
 from app.services.sorting import media_order_by
 
 router = APIRouter(prefix="/favorites", tags=["favorites"])
@@ -19,16 +18,7 @@ router = APIRouter(prefix="/favorites", tags=["favorites"])
 
 def _to_item(item: MediaItem) -> MediaListItem:
     data = MediaListItem.model_validate(item)
-    data.cover_url = rewrite_image_url(
-        data.cover_url, provider=item.provider, provider_id=item.provider_id
-    )
-    data.thumb_url = rewrite_image_url(
-        data.thumb_url, provider=item.provider, provider_id=item.provider_id
-    )
-    data.backdrop_url = rewrite_image_url(
-        data.backdrop_url, provider=item.provider, provider_id=item.provider_id
-    )
-    attach_media_backups(data, item)
+    attach_media_images(data, item)
     data.favorited = True
     return data
 
@@ -39,8 +29,7 @@ def _to_actor_item(actor: Actor, media_count: int) -> ActorListItem:
         name=actor.name,
         provider=actor.provider,
         provider_id=actor.provider_id,
-        image_url=rewrite_image_url(actor.image_url),
-        image_local_url=actor_backup_url(actor),
+        **actor_image_urls(actor),
         media_count=media_count,
         favorited=True,
     )

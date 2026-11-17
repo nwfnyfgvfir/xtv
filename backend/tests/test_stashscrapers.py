@@ -296,7 +296,8 @@ def test_health_checks_readiness_and_authenticated_catalog(rest_settings, rest_h
 
 
 def test_standalone_provider_images_bypass_metatube(rest_settings):
-    rest_settings.image_proxy_mode = "metatube"
+    rest_settings.image_proxy_mode = "external"
+    rest_settings.image_external_proxy_url = 'https://mt.example/v1/images/primary/{provider}/{id}?url={url}&quality={quality}'
     assert images.rewrite_image_url("https://images.example/photo.jpg", provider="stashscrapers:Source", provider_id="id") == "https://images.example/photo.jpg"
 
 

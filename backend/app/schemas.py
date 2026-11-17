@@ -249,10 +249,9 @@ class SettingsOut(BaseModel):
     translate_ai_api_url: str = "https://api.openai.com/v1/chat/completions"
     translate_ai_api_key_set: bool = False
     translate_ai_model: str = ""
-    image_proxy_mode: Literal["site", "metatube", "external"] = "site"
+    image_proxy_mode: Literal["site", "external"] = "site"
     image_external_proxy_url: str = ""
     image_site_base_url: str = ""
-    image_local_cache: bool = False
     scan_extensions: str
     cors_origins: str
     auth_enabled: bool = False
@@ -294,10 +293,9 @@ class SettingsUpdate(BaseModel):
     translate_ai_api_url: str | None = None
     translate_ai_api_key: str | None = None
     translate_ai_model: str | None = None
-    image_proxy_mode: Literal["site", "metatube", "external"] | None = None
+    image_proxy_mode: Literal["site", "external"] | None = None
     image_external_proxy_url: str | None = None
     image_site_base_url: str | None = None
-    image_local_cache: bool | None = None
     scan_extensions: str | None = None
     extra: dict[str, str] | None = None
 

@@ -43,7 +43,6 @@ const form = ref({
   image_proxy_mode: 'site' as ImageProxyMode,
   image_external_proxy_url: '',
   image_site_base_url: '',
-  image_local_cache: false,
   scan_extensions: '',
 })
 const saving = ref(false)
@@ -72,7 +71,7 @@ const sections = [
   { id: 'libraries', label: '媒体库', icon: 'folder' },
   { id: 'metadata', label: '刮削来源', icon: 'server' },
   { id: 'translation', label: '自动翻译', icon: 'translate' },
-  { id: 'images', label: '图片与缓存', icon: 'image' },
+  { id: 'images', label: '图片设置', icon: 'image' },
   { id: 'system', label: '系统状态', icon: 'shield' },
 ] as const
 const isDirty = computed(
@@ -126,17 +125,31 @@ const imageSiteBaseError = computed(() => {
 const imageProxyError = computed(() => {
   if (!showExternalTpl.value) return ''
   const template = form.value.image_external_proxy_url.trim()
-  if (!template.includes('{url}')) return '外部图片代理模板必须包含 {url}'
+  if (!template.includes('{url}')) return '远程图片代理模板必须包含 {url}'
+  const fields = [...template.matchAll(/\{([^{}]*)\}/g)].map(match => match[1])
+  const rest = template.replace(/\{[^{}]*\}/g, '')
+  if (fields.some(field => !['url', 'provider', 'id', 'quality'].includes(field || '')) || /[{}]/.test(rest)) {
+    return '图片代理模板仅支持 {url}、{provider}、{id} 和 {quality}'
+  }
   try {
     const url = new URL(template)
-    if (!['http:', 'https:'].includes(url.protocol) || url.host.includes('{url}') || /\s/.test(template)) {
-      return '请填写有效的 HTTP(S) 外部代理模板'
+    if (!['http:', 'https:'].includes(url.protocol) || /[{}]/.test(url.host) || /\s/.test(template)) {
+      return '请填写有效的 HTTP(S) 远程代理模板，变量应位于路径或查询参数中'
     }
   } catch {
-    return '请填写有效的 HTTP(S) 外部代理模板'
+    return '请填写有效的 HTTP(S) 远程代理模板'
   }
   return ''
 })
+const needsMovieIdentity = computed(() => /\{(?:provider|id)\}/.test(form.value.image_external_proxy_url))
+function useMetaTubeImageTemplate() {
+  const base = form.value.metatube_base_url.trim().replace(/\/+$/, '')
+  if (!base) {
+    ElMessage.warning('请先在刮削来源中填写 MetaTube 服务地址')
+    return
+  }
+  form.value.image_external_proxy_url = `${base}/v1/images/primary/{provider}/{id}?url={url}&quality={quality}`
+}
 const showGoogleProxy = computed(() => form.value.translate_provider === 'google')
 const showGoogleProxyUrl = computed(
   () => showGoogleProxy.value && form.value.translate_google_proxy,
@@ -189,7 +202,7 @@ const allProviderOptions = computed(() => {
 })
 
 function normalizeMode(mode: string | undefined): ImageProxyMode {
-  if (mode === 'metatube' || mode === 'external') return mode
+  if (mode === 'external') return mode
   return 'site'
 }
 
@@ -225,7 +238,6 @@ function applySettingsToForm(s: Settings) {
   form.value.image_proxy_mode = normalizeMode(s.image_proxy_mode)
   form.value.image_external_proxy_url = s.image_external_proxy_url || ''
   form.value.image_site_base_url = s.image_site_base_url || ''
-  form.value.image_local_cache = Boolean(s.image_local_cache)
   form.value.scan_extensions = s.scan_extensions
   form.value.metatube_provider_priority = [...(s.metatube_provider_priority || [])]
   form.value.metatube_token = ''
@@ -400,7 +412,6 @@ async function save() {
       image_proxy_mode: form.value.image_proxy_mode,
       image_external_proxy_url: form.value.image_external_proxy_url,
       image_site_base_url: form.value.image_site_base_url.trim(),
-      image_local_cache: form.value.image_local_cache,
       scan_extensions: form.value.scan_extensions,
       task_concurrency: form.value.task_concurrency,
       metatube_provider_priority: form.value.metatube_provider_priority,
@@ -816,8 +827,8 @@ onMounted(() => {
         >
           <header class="panel-heading">
             <div>
-              <h2 id="images-heading">图片与缓存</h2>
-              <p>设置图片加载方式、本站图片访问地址和磁盘缓存。</p>
+              <h2 id="images-heading">图片设置</h2>
+              <p>管理图片加载方式、访问地址和永久备份。</p>
             </div>
             <el-button text :loading="imageBackupsLoading" @click="refreshImageBackups">刷新备份状态</el-button>
           </header>
@@ -835,36 +846,30 @@ onMounted(() => {
                 B 地址须反向代理到同一个 TV 服务；支持部署子路径，如 https://images.example.com/tv。HTTPS 页面请使用 HTTPS 地址，已有图片无需迁移或重刮。
               </span>
             </el-form-item>
-            <el-form-item label="图片代理">
+            <el-form-item label="图片加载方式">
               <el-select v-model="form.image_proxy_mode" style="width: 100%">
                 <el-option label="本站代理（/api/images/proxy）" value="site" />
-                <el-option label="MetaTube 图片代理" value="metatube" />
-                <el-option label="外部代理（模板 {url}）" value="external" />
+                <el-option label="远程代理（统一模板）" value="external" />
               </el-select>
             </el-form-item>
-            <el-form-item v-if="showExternalTpl" label="外部代理模板">
+            <el-form-item v-if="showExternalTpl" class="span-full" label="远程代理模板">
               <el-input
                 v-model="form.image_external_proxy_url"
                 placeholder="https://wsrv.nl/?url={url}"
               />
               <span class="field-hint muted block">
-                须包含 <code>{url}</code>，会替换为 URL-encode 后的原始图片地址
+                须包含 <code>{url}</code>，替换为编码后的原始图片地址。可选 <code>{provider}</code>、<code>{id}</code> 和 <code>{quality}</code>，用于 MetaTube 等需要影片来源标识的接口。
               </span>
+              <el-button text @click="useMetaTubeImageTemplate">填入 MetaTube 模板</el-button>
             </el-form-item>
             <p v-if="imageProxyError" class="section-note" role="alert">{{ imageProxyError }}；不会自动改用本站代理。</p>
-            <el-form-item label="图片本地缓存">
-              <el-switch v-model="form.image_local_cache" />
-              <span class="field-hint muted">
-                仅对本站代理生效；写入 data/image-cache，优先读本地
-              </span>
-            </el-form-item>
           </el-form>
           <p class="section-note">
-            远程图片优先按所选方式加载，并自动下载本地备份；远程失败后才使用本站备份。已有远程封面和头像会在后台补备份，无需重新刮削。来源仅提供内嵌图片时直接保存到本站。
+            本站代理优先复用永久备份，缺失时获取原图；远程代理按模板加载，失败后使用本地备份。来源仅提供内嵌图片时，直接使用本地图片。
           </p>
-          <p class="section-note">本地备份保存在 /data/scraped-images，与可清理的本站代理缓存分开保存；保留 /data 挂载即可跨容器升级保留。</p>
+          <p class="section-note">封面和头像统一自动备份到 /data/scraped-images，无需额外开启缓存；保留 /data 挂载即可跨容器升级保留。已有永久备份继续可用。</p>
           <p v-if="imageBackups" class="section-note" role="status">远程图片备份：已完成 {{ imageBackups.saved || 0 }} · 下载中 {{ imageBackups.running || 0 }} · 待下载或重试 {{ imageBackups.pending || 0 }}</p>
-          <p v-if="form.image_proxy_mode === 'metatube'" class="section-note">MetaTube 图片接口需要 MetaTube 来源标识；其他来源的远程图片直接连接原站，不自动切换到本站代理。</p>
+          <p v-if="showExternalTpl && needsMovieIdentity" class="section-note">此模板需要 MetaTube 影片来源标识；Stash 图片和无影片标识的头像将直连原图，失败后使用本地备份。只含 {url} 的模板可用于所有来源。</p>
         </section>
         <section
           v-show="activeSection === 'system'"

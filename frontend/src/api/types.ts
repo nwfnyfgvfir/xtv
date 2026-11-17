@@ -140,7 +140,7 @@ export interface Progress {
   updated_at?: string | null
 }
 
-export type ImageProxyMode = 'site' | 'metatube' | 'external'
+export type ImageProxyMode = 'site' | 'external'
 export type ScrapeSource = 'metatube' | 'stash' | 'stashscrapers'
 
 export type TranslateProvider = 'google' | 'bing' | 'deepl' | 'ai'
@@ -185,7 +185,6 @@ export interface Settings {
   image_proxy_mode?: ImageProxyMode
   image_external_proxy_url?: string
   image_site_base_url?: string
-  image_local_cache?: boolean
   scan_extensions: string
   cors_origins: string
   auth_enabled?: boolean

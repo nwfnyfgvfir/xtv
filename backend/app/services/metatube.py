@@ -120,19 +120,6 @@ class MetaTubeClient:
         data = await self._get(f"/v1/actors/{provider}/{actor_id}", auth=True)
         return data if isinstance(data, dict) else {}
 
-    def primary_image_url(self, provider: str, movie_id: str, url: str = "", quality: int = 90) -> str:
-        from urllib.parse import quote, urlencode
-
-        qs = urlencode({"url": url, "quality": quality}) if url else urlencode({"quality": quality})
-        path = f"{self.base}/v1/images/primary/{quote(provider, safe='')}/{quote(movie_id, safe='')}"
-        return f"{path}?{qs}" if qs else path
-
-    def proxied_image_url(self, provider: str | None, provider_id: str | None, url: str | None) -> str | None:
-        """Rewrite image URL using current IMAGE_PROXY_MODE."""
-        from app.services.images import rewrite_image_url
-
-        return rewrite_image_url(url, provider=provider, provider_id=provider_id)
-
 
 def parse_movie_provider_names(data: Any) -> list[str]:
     """Extract sorted unique movie provider names from MetaTube /v1/providers payload."""

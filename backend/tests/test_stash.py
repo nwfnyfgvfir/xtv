@@ -400,7 +400,8 @@ def test_stash_health_only_checks_selected_source(stash_settings, stash_http, ap
 
 
 def test_stash_images_bypass_metatube_proxy(stash_settings):
-    stash_settings.image_proxy_mode = "metatube"
+    stash_settings.image_proxy_mode = "external"
+    stash_settings.image_external_proxy_url = 'https://mt.example/v1/images/primary/{provider}/{id}?url={url}&quality={quality}'
     url = images.rewrite_image_url("https://images.example/image.jpg", provider="stash:JavBus", provider_id="1")
     assert url == "https://images.example/image.jpg"
 

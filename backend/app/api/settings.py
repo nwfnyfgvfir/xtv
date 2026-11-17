@@ -16,7 +16,7 @@ from app.schemas import SettingsOut, SettingsUpdate
 from app.services.metatube import MetaTubeClient, MetaTubeError, parse_movie_provider_names
 from app.services.stash import StashClient
 from app.services.stashscrapers import StashScrapersClient
-from app.services.images import external_proxy_template_error, normalize_site_image_base_url
+from app.services.images import remote_proxy_template_error, normalize_site_image_base_url
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -63,18 +63,18 @@ OVERRIDE_KEYS = {
     "image_proxy_mode",
     "image_external_proxy_url",
     "image_site_base_url",
-    "image_local_cache",
     "scan_extensions",
 }
 
 _BOOL_TRUE = ("1", "true", "yes", "on")
-_IMAGE_PROXY_MODES = frozenset({"site", "metatube", "external"})
+_IMAGE_PROXY_MODES = frozenset({"site", "external"})
+_RETIRED_IMAGE_SETTINGS = frozenset({'image_local_cache', 'image_cache_max_mb'})
 _TRANSLATE_PROVIDERS = frozenset({"google", "bing", "deepl", "ai"})
 
 
 def _db_map(db: Session) -> dict[str, str]:
     rows = db.query(AppSetting).all()
-    return {r.key: r.value for r in rows}
+    return {r.key: r.value for r in rows if r.key not in _RETIRED_IMAGE_SETTINGS}
 
 
 def parse_priority_list(raw: str | list[str] | None, *, max_name_len: int = _MAX_PROVIDER_NAME_LEN) -> list[str]:
@@ -188,14 +188,11 @@ def _apply_overrides_to_runtime(db_map: dict[str, str]) -> None:
         s.translate_ai_model = db_map["translate_ai_model"] or ""
     if "image_proxy_mode" in db_map:
         mode = (db_map["image_proxy_mode"] or "").strip().lower()
-        if mode in _IMAGE_PROXY_MODES:
-            s.image_proxy_mode = mode
+        s.image_proxy_mode = mode if mode in _IMAGE_PROXY_MODES else 'site'
     if "image_external_proxy_url" in db_map:
         s.image_external_proxy_url = db_map["image_external_proxy_url"] or ""
     if "image_site_base_url" in db_map:
         s.image_site_base_url = normalize_site_image_base_url(db_map["image_site_base_url"] or "")
-    if "image_local_cache" in db_map:
-        s.image_local_cache = db_map["image_local_cache"].lower() in _BOOL_TRUE
     if "scan_extensions" in db_map and db_map["scan_extensions"]:
         s.scan_extensions = db_map["scan_extensions"]
 
@@ -350,12 +347,6 @@ async def get_app_settings(
     )
     mode_raw = (db_map.get("image_proxy_mode") or s.image_proxy_mode or "site").strip().lower()
     image_proxy_mode = mode_raw if mode_raw in _IMAGE_PROXY_MODES else "site"
-    local_cache_raw = db_map.get("image_local_cache")
-    image_local_cache = (
-        local_cache_raw.lower() in _BOOL_TRUE
-        if local_cache_raw is not None
-        else bool(s.image_local_cache)
-    )
     labels: dict[str, str] = {}
     source = s.scrape_source if s.scrape_source in {"stash", "stashscrapers"} else "metatube"
     if source == "stash":
@@ -400,7 +391,6 @@ async def get_app_settings(
         image_external_proxy_url=db_map.get("image_external_proxy_url", s.image_external_proxy_url)
         or "",
         image_site_base_url=db_map.get("image_site_base_url", s.image_site_base_url) or "",
-        image_local_cache=image_local_cache,
         scan_extensions=s.scan_extensions,
         cors_origins=s.cors_origins,
         auth_enabled=s.auth_enabled,
@@ -434,7 +424,7 @@ async def update_app_settings(
         template = data.get('image_external_proxy_url')
         if template is None:
             template = saved.get('image_external_proxy_url', runtime.image_external_proxy_url)
-        if mode == 'external' and (error := external_proxy_template_error(template)):
+        if mode == 'external' and (error := remote_proxy_template_error(template)):
             raise HTTPException(422, error)
     for key, value in data.items():
         if value is None:
@@ -459,7 +449,7 @@ async def update_app_settings(
         db.add(row)
     if extra:
         for k, v in extra.items():
-            if k == _PROVIDERS_CACHE_KEY or k.startswith(_SCRAPER_CACHE_PREFIXES):
+            if k in _RETIRED_IMAGE_SETTINGS or k == _PROVIDERS_CACHE_KEY or k.startswith(_SCRAPER_CACHE_PREFIXES):
                 continue
             row = db.get(AppSetting, k)
             if row is None:

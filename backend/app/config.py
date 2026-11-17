@@ -78,11 +78,9 @@ class Settings(BaseSettings):
     translate_ai_api_url: str = "https://api.openai.com/v1/chat/completions"
     translate_ai_api_key: str = ""
     translate_ai_model: str = ""
-    image_proxy_mode: str = "site"  # site | metatube | external
-    image_external_proxy_url: str = ""  # template with {url}
+    image_proxy_mode: str = "site"  # site | external (shared remote template)
+    image_external_proxy_url: str = ""  # {url}, optional {provider}, {id}, {quality}
     image_site_base_url: str = ""  # browser-facing base for TV image resources
-    image_local_cache: bool = False
-    image_cache_max_mb: int = 2048  # 0 = no prune
     log_level: str = "INFO"
     debug: bool = False
     app_version: str = ""  # injected via APP_VERSION (Docker/CI); empty → auto-detect
@@ -139,10 +137,6 @@ class Settings(BaseSettings):
             except OSError:
                 return p.parent
         return (ROOT_DIR / "data").resolve()
-
-    @property
-    def image_cache_path(self) -> Path:
-        return self.data_dir_path / "image-cache"
 
     @property
     def extension_set(self) -> set[str]:

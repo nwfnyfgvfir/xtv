@@ -28,7 +28,7 @@ TEMPLATE = 'https://proxy.example/image?url={url}'
 def workspace(tmp_path, monkeypatch):
     settings = config.Settings(_env_file=None, database_url=f'sqlite:///{tmp_path.as_posix()}/backup.db',
         media_root=str(tmp_path), image_proxy_mode='external', image_external_proxy_url=TEMPLATE,
-        image_local_cache=False, auto_translate=False)
+        auto_translate=False)
     monkeypatch.setattr(config, 'get_settings', lambda: settings)
     monkeypatch.setattr(settings_api, 'get_settings', lambda: settings)
     engine = create_engine(settings.database_url, connect_args={'check_same_thread': False})
@@ -126,8 +126,7 @@ def test_backup_uses_external_proxy_and_is_exposed_as_a_separate_local_fallback(
         backups.queue_images(db, [REMOTE])
         db.commit()
         assert db.get(ImageBackup, backups.image_key(REMOTE)).status == 'done'
-    # Permanent backups are independent of the optional proxy disk cache.
-    assert not settings.image_cache_path.exists()
+    assert not (settings.data_dir_path / 'image-cache').exists()
 
 
 def test_failed_backup_is_retryable_without_blocking_other_images(workspace, transport):
@@ -190,7 +189,8 @@ def test_settings_reject_invalid_external_templates_before_persisting(workspace)
     app.dependency_overrides[get_db] = session
     app.dependency_overrides[require_auth] = lambda: {}
     with TestClient(app) as api:
-        for template in ('', 'https://proxy.example/no-placeholder', 'file:///tmp/{url}', 'https://{url}/image'):
+        for template in ('', 'https://proxy.example/no-placeholder', 'file:///tmp/{url}', 'https://{url}/image',
+                'https://proxy.example/?url={url}&extra={unknown}'):
             response = api.put('/api/settings', json={'image_proxy_mode': 'external', 'image_external_proxy_url': template})
             assert response.status_code == 422
     with factory() as db:
@@ -235,7 +235,7 @@ def test_site_image_host_applies_to_inline_images_and_proxy_without_nesting(work
     settings.image_site_base_url = base
     local = images.store_scraped_image(INLINE)
     assert local.startswith('/api/images/scraped/')
-    for mode in ('site', 'external', 'metatube'):
+    for mode in ('site', 'external'):
         settings.image_proxy_mode = mode
         assert images.rewrite_image_url(local) == base + local
         assert images.rewrite_image_url(base + local) == base + local
@@ -319,11 +319,10 @@ def test_site_mode_backup_fetches_original_without_calling_the_browser_image_hos
         assert row.status == 'done' and row.url == REMOTE
 
 
-def test_metatube_remote_route_is_unchanged_by_the_site_image_host(workspace):
+def test_metatube_template_route_is_unchanged_by_the_site_image_host(workspace):
     _, settings = workspace
-    settings.image_proxy_mode = 'metatube'
-    settings.metatube_base_url = 'https://metatube.example'
-    settings.metatube_token = ''
+    settings.image_proxy_mode = 'external'
+    settings.image_external_proxy_url = 'https://metatube.example/v1/images/primary/{provider}/{id}?url={url}&quality={quality}'
     before = images.rewrite_image_url(REMOTE, provider='JavBus', provider_id='Fixture')
     settings.image_site_base_url = 'https://b.example/tv'
     assert images.rewrite_image_url(REMOTE, provider='JavBus', provider_id='Fixture') == before
@@ -389,3 +388,61 @@ def test_invalid_site_image_hosts_do_not_change_saved_settings(settings_client, 
         assert db.query(AppSetting).count() == 0
     with pytest.raises(ValueError):
         config.Settings(_env_file=None, image_site_base_url=value)
+
+
+def test_retired_image_settings_are_not_exposed_or_accepted_as_extra_options(settings_client, workspace):
+    factory, settings = workspace
+    with factory() as db:
+        db.add_all([AppSetting(key='image_local_cache', value='true'), AppSetting(key='image_cache_max_mb', value='128')])
+        db.commit()
+    result = settings_client.put('/api/settings', json={'extra': {'image_local_cache': 'false', 'image_cache_max_mb': '256'}})
+    assert result.status_code == 200
+    for key in ('image_local_cache', 'image_cache_max_mb'):
+        assert key not in result.json() and key not in result.json()['extra']
+        assert not hasattr(settings, key)
+    assert settings_client.put('/api/settings', json={'image_proxy_mode': 'metatube'}).status_code == 422
+
+
+def test_metatube_uses_the_shared_remote_template_in_settings(settings_client, workspace):
+    factory, settings = workspace
+    template = 'https://mt.example/v1/images/primary/{provider}/{id}?url={url}&quality={quality}'
+    response = settings_client.put('/api/settings', json={'image_proxy_mode': 'external', 'image_external_proxy_url': template})
+    assert response.status_code == 200 and response.json()['image_proxy_mode'] == 'external'
+    assert response.json()['image_external_proxy_url'] == template
+    output = images.rewrite_image_url(REMOTE, provider='JavBus', provider_id='IPX-1')
+    assert output.startswith('https://mt.example/v1/images/primary/JavBus/IPX-1?')
+    assert images.original_image_url(output) == REMOTE
+    assert images.rewrite_image_url(output, provider='JavBus', provider_id='IPX-1') == output
+
+
+def test_proxy_saved_backup_is_not_downgraded_by_a_failing_inflight_worker(workspace, transport):
+    factory, _ = workspace
+    _, replies = transport
+    with factory() as db:
+        backups.queue_images(db, [REMOTE])
+        db.commit()
+    worker = backups.ImageBackupWorker(factory)
+    entry = worker.claim()
+    with factory() as db:
+        backups.save_queued_image(db, REMOTE, PNG)
+    replies.append(httpx.Response(404))
+    asyncio.run(worker.process(entry))
+    with factory() as db:
+        row = db.query(ImageBackup).one()
+        assert row.status == 'done' and row.attempts == 0
+        assert backups.read_saved_image(db, REMOTE) == ('image/png', PNG)
+
+
+def test_background_backup_uses_the_same_metatube_template_as_the_browser(workspace, transport):
+    factory, settings = workspace
+    settings.image_external_proxy_url = 'https://mt.example/v1/images/primary/{provider}/{id}?url={url}&quality={quality}'
+    requests, replies = transport
+    with factory() as db:
+        backups.queue_images(db, [REMOTE], provider='Source Name', provider_id='A/B')
+        db.commit()
+    worker = backups.ImageBackupWorker(factory)
+    replies.append(httpx.Response(200, content=PNG))
+    asyncio.run(worker.process(worker.claim()))
+    assert str(requests[0].url) == images.rewrite_image_url(REMOTE, provider='Source Name', provider_id='A/B')
+    with factory() as db:
+        assert db.query(ImageBackup).one().status == 'done'

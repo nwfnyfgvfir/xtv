@@ -40,7 +40,7 @@ cd backend
 .venv\Scripts\python -m pytest tests/test_naming.py::test_fc2 -q
 ```
 
-Notable test modules: `test_naming`, `test_strm`, `test_scanner_prune`, `test_path_refresh`, `test_sorting`, `test_metatube`, `test_translate`, `test_image_cache`, `test_actors_merge`, `test_actor_favorites`.
+Notable test modules: `test_naming`, `test_strm`, `test_scanner_prune`, `test_path_refresh`, `test_sorting`, `test_translate`, `test_image_templates`, `test_image_proxy`, `test_image_backups`, `test_actors_merge`, `test_actor_favorites`.
 
 `pytest` is used by tests but not listed in `requirements.txt` — install into the venv if missing: `pip install pytest`.
 
@@ -107,7 +107,7 @@ Container paths (compose injects): `MEDIA_ROOT=/media`, `DATABASE_URL=sqlite:///
 | `frontend/src/components/VideoPlayer.vue` | Artplayer + custom gestures/lock |
 | `frontend/src/api/` | Axios client (`baseURL: /api`) + typed helpers |
 | `media/local`, `media/strm` | Dev media roots (container: `/media`) |
-| `data/` | Dev SQLite / logs / optional image-cache (container: `/data`) |
+| `data/` | Dev SQLite / logs / permanent scraped-images (container: `/data`) |
 
 ### Domain model (SQLite)
 
@@ -131,7 +131,7 @@ Container paths (compose injects): `MEDIA_ROOT=/media`, `DATABASE_URL=sqlite:///
 5. **Actors / favorites**: list/detail, favorite toggles, actor media list; image URLs rewritten through image proxy.
 6. **Settings**: env defaults + `app_settings` table; UI can update MetaTube/image proxy/translate without restart for many keys.
    - Translate: `google` (free gtx) | `bing` (free Edge).
-   - Image proxy modes: `site` (`/api/images/proxy`) | `metatube` | `external` (template with `{url}`); optional disk cache under data when `IMAGE_LOCAL_CACHE`.
+   - Image modes: `site` (`/api/images/proxy`) or `external` (one remote template, also used for MetaTube). Template fields: `{url}`, optional `{provider}`, `{id}`, `{quality}`. The site proxy and browser fallbacks share permanent `scraped-images` backups; the separate disk cache is retired with no migration. Use `image_delivery` for consistent media and actor API URLs. The configured site image base applies to inline files, local fallbacks and the site proxy.
 7. **Background**: watchdog filesystem watcher on enabled libraries (realtime ingest/remove); manual full scan via API/UI.
 
 ### Frontend flow

@@ -4,15 +4,17 @@ import base64
 import binascii
 import hashlib
 import ipaddress
-import json
 import logging
 import re
 from collections import OrderedDict
+from functools import lru_cache
 from pathlib import Path
 from threading import Lock
 from time import time
 from typing import Any
-from urllib.parse import parse_qs, quote, unquote, urlparse, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urljoin, urlparse, urlsplit
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -22,11 +24,12 @@ _CACHE_LOCK = Lock()
 _CACHE_MAX = 256
 _CACHE_TTL = 3600.0
 _DISK_LOCK = Lock()
-_MAX_BODY = 5 * 1024 * 1024
+MAX_IMAGE_BYTES = 5 * 1024 * 1024
 _SCRAPED_IMAGE_EXTENSIONS = {
     "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
     "image/gif": "gif", "image/avif": "avif",
 }
+_PROXY_TEMPLATE_FIELDS = frozenset({'url', 'provider', 'id', 'quality'})
 
 
 def image_content_type(body: bytes) -> str | None:
@@ -78,20 +81,20 @@ def store_scraped_image(value: str | None) -> str | None:
     if not separator or not header.startswith("data:") or not header.endswith(";base64"):
         return None
     extension = _SCRAPED_IMAGE_EXTENSIONS.get(header[5:-7].lower())
-    if not extension or len(encoded) > ((_MAX_BODY + 2) // 3) * 4:
+    if not extension or len(encoded) > ((MAX_IMAGE_BYTES + 2) // 3) * 4:
         return None
     try:
         body = base64.b64decode(encoded, validate=True)
     except (ValueError, binascii.Error):
         return None
-    if not body or len(body) > _MAX_BODY:
+    if not body or len(body) > MAX_IMAGE_BYTES:
         return None
     return store_image_bytes(body)
 
 
 def store_image_bytes(body: bytes) -> str | None:
-    """Store a bounded raster image independently of optional proxy-cache pruning."""
-    if not body or len(body) > _MAX_BODY:
+    """Store inline artwork and remote backups in the same content-addressed store."""
+    if not body or len(body) > MAX_IMAGE_BYTES:
         return None
     extension = _SCRAPED_IMAGE_EXTENSIONS.get(image_content_type(body) or '')
     if not extension:
@@ -102,7 +105,7 @@ def store_image_bytes(body: bytes) -> str | None:
         return None
     try:
         with _DISK_LOCK:
-            if not path.is_file():
+            if not path.is_file() or path.stat().st_size != len(body) or path.read_bytes() != body:
                 path.parent.mkdir(parents=True, exist_ok=True)
                 temporary = path.with_suffix(".tmp")
                 temporary.write_bytes(body)
@@ -207,12 +210,10 @@ def original_image_url(url: str | None) -> str | None:
         inner = None
         if not parsed.scheme and not parsed.netloc and parsed.path == '/api/images/proxy':
             inner = next(iter(parse_qs(parsed.query).get('url', [])), None)
-        elif getattr(settings, 'metatube_base_url', '') and current.startswith(settings.metatube_base_url.rstrip('/') + '/v1/images/primary/'):
-            inner = next(iter(parse_qs(parsed.query).get('url', [])), None)
-        elif template.count('{url}') == 1:
-            prefix, suffix = template.split('{url}')
-            if prefix and current.startswith(prefix) and (not suffix or current.endswith(suffix)):
-                inner = unquote(current[len(prefix):len(current) - len(suffix) if suffix else None])
+        elif template and not remote_proxy_template_error(template):
+            match = _proxy_template_pattern(template).fullmatch(current)
+            if match:
+                inner = unquote(match.group('url'))
         if not inner or not inner.startswith(('http://', 'https://', '/api/images/proxy?')) or inner == current:
             return current
         current = inner
@@ -233,25 +234,53 @@ def site_proxy_url(url: str | None) -> str | None:
     return site_image_url(f"/api/images/proxy?url={quote(url, safe='')}")
 
 
-def external_proxy_template_error(template: str) -> str | None:
+def remote_proxy_template_error(template: str) -> str | None:
     tpl = (template or "").strip()
     if not tpl or "{url}" not in tpl:
-        return '外部图片代理模板必须包含 {url}'
+        return '远程图片代理模板必须包含 {url}'
+    fields = re.findall(r'\{([^{}]*)\}', tpl)
+    remainder = re.sub(r'\{[^{}]*\}', '', tpl)
+    if set(fields) - _PROXY_TEMPLATE_FIELDS or '{' in remainder or '}' in remainder:
+        return '图片代理模板仅支持 {url}、{provider}、{id} 和 {quality}'
     try:
         parsed = urlsplit(tpl)
         _ = parsed.port
-        if parsed.scheme not in {'http', 'https'} or not parsed.hostname or '{url}' in parsed.netloc or re.search(r'[\x00-\x20]', tpl):
-            return '外部图片代理模板必须是有效的 HTTP(S) 地址，{url} 应位于路径或查询参数中'
+        if parsed.scheme not in {'http', 'https'} or not parsed.hostname or '{' in parsed.netloc or '}' in parsed.netloc or re.search(r'[\x00-\x20]', tpl):
+            return '远程图片代理模板必须是有效的 HTTP(S) 地址，变量应位于路径或查询参数中'
     except ValueError:
-        return '外部图片代理模板不是有效的 HTTP(S) 地址'
+        return '远程图片代理模板不是有效的 HTTP(S) 地址'
     return None
 
 
-def external_proxy_url(url: str, template: str) -> str | None:
-    """Build external proxy URL from a valid HTTP(S) template containing {url}."""
-    if external_proxy_template_error(template):
+@lru_cache(maxsize=32)
+def _proxy_template_pattern(template: str) -> re.Pattern:
+    """Recognize the original URL in the same template used to render the proxy URL."""
+    parts, seen_url = [], False
+    for part in re.split(r'(\{(?:url|provider|id|quality)\})', template):
+        if part == '{url}':
+            parts.append('(?P=url)' if seen_url else '(?P<url>.+?)')
+            seen_url = True
+        elif part in {'{provider}', '{id}'}:
+            parts.append('[^/?&#]+')
+        elif part == '{quality}':
+            parts.append('[0-9]+')
+        else:
+            parts.append(re.escape(part))
+    return re.compile(''.join(parts))
+
+
+def remote_proxy_url(url: str, template: str, *, provider: str | None = None,
+    provider_id: str | None = None, quality: int = 90) -> str | None:
+    """Render all remote proxies, including MetaTube, using one template policy."""
+    if remote_proxy_template_error(template):
         return None
-    return template.strip().replace("{url}", quote(url, safe=""))
+    tpl = template.strip()
+    if (('{provider}' in tpl and not provider) or ('{id}' in tpl and not provider_id)
+            or (provider and provider.startswith(('stash:', 'stashscrapers:')) and ('{provider}' in tpl or '{id}' in tpl))):
+        return url
+    values = {'url': url, 'provider': provider or '', 'id': provider_id or '', 'quality': str(quality)}
+    return re.sub(r'\{(url|provider|id|quality)\}',
+        lambda match: quote(str(values[match.group(1)]), safe=''), tpl)
 
 
 def rewrite_image_url(
@@ -261,7 +290,7 @@ def rewrite_image_url(
     provider_id: str | None = None,
     quality: int = 90,
 ) -> str | None:
-    """Rewrite image URL according to IMAGE_PROXY_MODE (site | metatube | external)."""
+    """Select the site proxy or the shared remote template, preserving local artwork."""
     url = original_image_url(url)
     if not url:
         return url
@@ -277,20 +306,13 @@ def rewrite_image_url(
     mode = (s.image_proxy_mode or "site").strip().lower()
 
     if mode == "external":
-        out = external_proxy_url(url, s.image_external_proxy_url)
+        out = remote_proxy_url(url, s.image_external_proxy_url,
+            provider=provider, provider_id=provider_id, quality=quality)
         if out:
             return out
-        logger.warning("External image proxy configuration is invalid; no site proxy fallback is used")
+        logger.warning("Remote image proxy configuration is invalid; no site proxy fallback is used")
         return None
 
-    if mode == "metatube":
-        if provider and provider_id and not provider.startswith(("stash:", "stashscrapers:")):
-            from app.services.metatube import MetaTubeClient
-
-            return MetaTubeClient().primary_image_url(
-                str(provider), str(provider_id), url=url, quality=quality,
-            )
-        return url
     return site_proxy_url(url)
 
 
@@ -329,6 +351,35 @@ def validate_proxy_url(url: str) -> str:
     return url
 
 
+async def fetch_image(url: str, *, referer_url: str | None = None) -> tuple[str, bytes]:
+    """Fetch bounded image bytes with identical validation for proxying and backups."""
+    source = urlsplit(referer_url or url)
+    headers = {'User-Agent': 'Mozilla/5.0 TV-Images', 'Accept': 'image/*',
+        'Referer': f'{source.scheme}://{source.netloc}/'}
+    async with httpx.AsyncClient(timeout=httpx.Timeout(20, connect=10), follow_redirects=False) as client:
+        for _ in range(6):
+            validate_proxy_url(url)
+            async with client.stream('GET', url, headers=headers) as response:
+                if response.is_redirect:
+                    location = response.headers.get('location')
+                    if not location:
+                        raise ValueError('Image redirect has no location')
+                    url = urljoin(url, location)
+                    continue
+                response.raise_for_status()
+                body = bytearray()
+                async for chunk in response.aiter_bytes():
+                    body.extend(chunk)
+                    if len(body) > MAX_IMAGE_BYTES:
+                        raise ValueError('Image exceeds the size limit')
+                content = bytes(body)
+                content_type = image_content_type(content)
+                if not content_type:
+                    raise ValueError('Response is not a supported image')
+                return content_type, content
+    raise ValueError('Too many image redirects')
+
+
 def cache_get(url: str) -> tuple[str, bytes] | None:
     with _CACHE_LOCK:
         item = _CACHE.get(url)
@@ -348,151 +399,3 @@ def cache_set(url: str, content_type: str, body: bytes) -> None:
         _CACHE.move_to_end(url)
         while len(_CACHE) > _CACHE_MAX:
             _CACHE.popitem(last=False)
-
-
-def proxy_cache_stats() -> dict[str, Any]:
-    with _CACHE_LOCK:
-        return {"entries": len(_CACHE), "max": _CACHE_MAX, "ttl": _CACHE_TTL}
-
-
-# ---------- disk cache (site proxy only) ----------
-
-
-def ensure_image_cache_dir() -> Path:
-    from app.config import get_settings
-
-    path = get_settings().image_cache_path
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
-def disk_cache_key(url: str) -> str:
-    return hashlib.sha256(url.encode("utf-8")).hexdigest()
-
-
-def disk_cache_paths(url: str) -> tuple[Path, Path]:
-    from app.config import get_settings
-
-    key = disk_cache_key(url)
-    root = get_settings().image_cache_path
-    sub = root / key[:2]
-    return sub / key, sub / f"{key}.meta"
-
-
-def disk_cache_get(url: str) -> tuple[str, bytes] | None:
-    body_path, meta_path = disk_cache_paths(url)
-    try:
-        if not body_path.is_file() or not meta_path.is_file():
-            return None
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        ctype = str(meta.get("content_type") or "image/jpeg")
-        body = body_path.read_bytes()
-        if not body:
-            return None
-        return ctype, body
-    except Exception:  # noqa: BLE001
-        logger.debug("disk_cache_get failed for %s", url[:80], exc_info=True)
-        return None
-
-
-def disk_cache_set(url: str, content_type: str, body: bytes) -> None:
-    if len(body) > _MAX_BODY:
-        return
-    with _DISK_LOCK:
-        try:
-            body_path, meta_path = disk_cache_paths(url)
-            body_path.parent.mkdir(parents=True, exist_ok=True)
-            tmp_body = Path(str(body_path) + ".tmp")
-            tmp_meta = Path(str(meta_path) + ".tmp")
-            tmp_body.write_bytes(body)
-            tmp_meta.write_text(
-                json.dumps(
-                    {
-                        "content_type": content_type or "image/jpeg",
-                        "url": url,
-                        "saved_at": time(),
-                    },
-                    ensure_ascii=False,
-                ),
-                encoding="utf-8",
-            )
-            tmp_body.replace(body_path)
-            tmp_meta.replace(meta_path)
-            _disk_cache_prune_if_needed()
-        except Exception:  # noqa: BLE001
-            logger.warning("disk_cache_set failed for %s", url[:80], exc_info=True)
-
-
-def _disk_cache_prune_if_needed() -> None:
-    from app.config import get_settings
-
-    s = get_settings()
-    max_mb = int(s.image_cache_max_mb or 0)
-    if max_mb <= 0:
-        return
-    root = s.image_cache_path
-    if not root.is_dir():
-        return
-    files: list[tuple[float, Path, int]] = []
-    total = 0
-    for p in root.rglob("*"):
-        if not p.is_file():
-            continue
-        if p.suffix in {".tmp"}:
-            continue
-        try:
-            st = p.stat()
-        except OSError:
-            continue
-        files.append((st.st_mtime, p, st.st_size))
-        total += st.st_size
-    limit = max_mb * 1024 * 1024
-    if total <= limit:
-        return
-    target = int(limit * 0.9)
-    files.sort(key=lambda x: x[0])  # oldest first
-    for _mtime, path, size in files:
-        if total <= target:
-            break
-        try:
-            path.unlink(missing_ok=True)
-            # drop paired meta/body if present
-            if path.suffix == ".meta":
-                sibling = path.with_suffix("")
-                if sibling.is_file():
-                    sz = sibling.stat().st_size
-                    sibling.unlink(missing_ok=True)
-                    total -= sz
-            else:
-                meta = Path(str(path) + ".meta")
-                if meta.is_file():
-                    sz = meta.stat().st_size
-                    meta.unlink(missing_ok=True)
-                    total -= sz
-            total -= size
-        except OSError:
-            continue
-
-
-def disk_cache_stats() -> dict[str, Any]:
-    from app.config import get_settings
-
-    s = get_settings()
-    root = s.image_cache_path
-    entries = 0
-    nbytes = 0
-    if root.is_dir():
-        for p in root.rglob("*"):
-            if p.is_file() and p.suffix != ".meta" and p.suffix != ".tmp":
-                entries += 1
-                try:
-                    nbytes += p.stat().st_size
-                except OSError:
-                    pass
-    return {
-        "enabled": bool(s.image_local_cache),
-        "dir": str(root),
-        "entries": entries,
-        "bytes": nbytes,
-        "max_mb": s.image_cache_max_mb,
-    }

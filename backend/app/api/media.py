@@ -27,8 +27,7 @@ from app.schemas import (
     TaskOut,
 )
 from app.services.duplicates import list_duplicate_groups
-from app.services.images import rewrite_image_url
-from app.services.image_backups import attach_media_backups, actor_backup_url
+from app.services.image_delivery import attach_media_images, actor_image_urls
 from app.services.media_delete import delete_media_item
 from app.services.naming import source_name
 from app.services.file_readiness import check_file
@@ -48,21 +47,11 @@ def _with_proxied_images(
     model = MediaDetail if detail else MediaListItem
     data = model.model_validate(item)
     data.number = source_name(item.filename)
-    data.cover_url = rewrite_image_url(
-        data.cover_url, provider=item.provider, provider_id=item.provider_id
-    )
-    data.thumb_url = rewrite_image_url(
-        data.thumb_url, provider=item.provider, provider_id=item.provider_id
-    )
-    data.backdrop_url = rewrite_image_url(
-        data.backdrop_url, provider=item.provider, provider_id=item.provider_id
-    )
-    attach_media_backups(data, item)
+    attach_media_images(data, item)
     if detail and isinstance(data, MediaDetail):
         original_actors = {actor.id: actor for actor in item.actors}
         data.actors = [
-            a.model_copy(update={"image_url": rewrite_image_url(a.image_url),
-                "image_local_url": actor_backup_url(original_actors[a.id])}) for a in data.actors
+            a.model_copy(update=actor_image_urls(original_actors[a.id])) for a in data.actors
         ]
     if favorited is None:
         favorited = item.favorite is not None

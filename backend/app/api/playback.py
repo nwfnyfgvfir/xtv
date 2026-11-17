@@ -236,24 +236,24 @@ def scraped_image(name: str):
 
 
 @router.get("/images/proxy")
-async def proxy_image(url: str = Query(..., min_length=8)):
-    """Same-origin image proxy with SSRF guards, memory LRU and optional disk cache (no auth — for <img>)."""
+async def proxy_image(url: str = Query(..., min_length=8), db: Session = Depends(get_db)):
+    """Site image proxy sharing permanent library backups (no auth — for <img>)."""
     import httpx
     from fastapi.responses import Response
 
-    from app.config import get_settings
+    from app.services.image_backups import read_saved_image, save_queued_image
     from app.services.images import (
         cache_get,
         cache_remove,
         cache_set,
-        disk_cache_get,
-        disk_cache_set,
+        fetch_image,
         image_content_type,
+        original_image_url,
         validate_proxy_url,
     )
 
     try:
-        url = validate_proxy_url(url)
+        url = validate_proxy_url(original_image_url(url) or '')
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -267,40 +267,20 @@ async def proxy_image(url: str = Query(..., min_length=8)):
             return Response(content=body, media_type=ctype, headers=headers)
         cache_remove(url)
 
-    settings = get_settings()
-    if settings.image_local_cache:
-        disk = disk_cache_get(url)
-        if disk:
-            _, body = disk
-            ctype = image_content_type(body)
-            if ctype:
-                if len(body) <= 5 * 1024 * 1024:
-                    cache_set(url, ctype, body)
-                return Response(
-                    content=body,
-                    media_type=ctype,
-                    headers={**headers, "Cache-Control": "public, max-age=604800"},
-                )
+    saved = read_saved_image(db, url)
+    if saved:
+        content_type, body = saved
+        cache_set(url, content_type, body)
+        return Response(content=body, media_type=content_type, headers=headers)
 
     try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            resp = await client.get(
-                url,
-                headers={
-                    "User-Agent": "TV-App/0.2",
-                    "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
-                },
-            )
+        content_type, body = await fetch_image(url)
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(exc.response.status_code if exc.response.status_code >= 400 else 502, "upstream image error") from exc
     except httpx.HTTPError as exc:
-        raise HTTPException(502, f"upstream fetch failed: {exc}") from exc
-    if resp.status_code >= 400:
-        raise HTTPException(resp.status_code, "upstream image error")
-    body = resp.content
-    content_type = image_content_type(body)
-    if not content_type:
-        raise HTTPException(502, "upstream did not return a supported image")
-    if len(body) <= 5 * 1024 * 1024:
-        cache_set(url, content_type, body)
-        if settings.image_local_cache:
-            disk_cache_set(url, content_type, body)
+        raise HTTPException(502, "upstream image fetch failed") from exc
+    except ValueError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    cache_set(url, content_type, body)
+    save_queued_image(db, url, body)
     return Response(content=body, media_type=content_type, headers=headers)

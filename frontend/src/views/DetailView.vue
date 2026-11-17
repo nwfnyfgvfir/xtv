@@ -25,6 +25,7 @@ import { getErrorMessage } from '@/utils/errors'
 import { formatFileSize } from '@/utils/format'
 import { monogramChar, monogramStyle } from '@/utils/monogram'
 import { useCoverImage } from '@/composables/useCoverImage'
+import { mediaImageCandidates } from '@/utils/imageCandidates'
 
 const props = defineProps<{ id: string }>()
 const router = useRouter()
@@ -88,11 +89,7 @@ const tags = computed(() => {
   }
 })
 
-const { src: cover, showImage, failed: coverFailed, onError: onCoverError, reset: resetCover } = useCoverImage(() => [
-  item.value?.cover_url, item.value?.cover_local_url,
-  item.value?.thumb_url, item.value?.thumb_local_url,
-  item.value?.backdrop_url, item.value?.backdrop_local_url,
-])
+const { src: cover, showImage, failed: coverFailed, onError: onCoverError, reset: resetCover } = useCoverImage(() => mediaImageCandidates(item.value))
 const isChineseSub = computed(
   () => item.value?.subtitle_flag === 'C' || tags.value.includes('中文字幕'),
 )

@@ -4,10 +4,12 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import AppPagination from '@/components/AppPagination.vue'
 import CoverPlaceholder from '@/components/CoverPlaceholder.vue'
+import FallbackImage from '@/components/FallbackImage.vue'
 import { batchDeleteMedia, listDuplicates } from '@/api/media'
 import type { DuplicateGroup, DuplicateMediaItem } from '@/api/types'
 import { getErrorMessage } from '@/utils/errors'
 import { formatFileSize } from '@/utils/format'
+import { mediaImageCandidates } from '@/utils/imageCandidates'
 
 const router = useRouter()
 const groups = ref<DuplicateGroup[]>([])
@@ -17,7 +19,7 @@ const pageSize = 20
 const q = ref('')
 const loading = ref(false)
 const deleteLoading = ref(false)
-const failedCovers = ref<Record<number, string[]>>({})
+const imageVersion = ref(0)
 const selected = ref<Set<number>>(new Set())
 
 const selectedCount = computed(() => selected.value.size)
@@ -31,7 +33,7 @@ async function load() {
       page_size: pageSize,
     })
     groups.value = data.items
-    failedCovers.value = {}
+    imageVersion.value += 1
     total.value = data.total
     // Drop selections that are no longer on this page
     const visible = new Set(data.items.flatMap((g) => g.items.map((i) => i.id)))
@@ -101,18 +103,6 @@ function keepLargest(group: DuplicateGroup) {
     else next.add(item.id)
   }
   selected.value = next
-}
-
-function coverOf(item: DuplicateMediaItem) {
-  return [item.cover_url, item.cover_local_url, item.thumb_url, item.thumb_local_url,
-    item.backdrop_url, item.backdrop_local_url].find(
-    (url) => url && !failedCovers.value[item.id]?.includes(url),
-  ) || ''
-}
-
-function onCoverError(item: DuplicateMediaItem, event: Event) {
-  const url = (event.target as HTMLImageElement).getAttribute('src')
-  if (url) failedCovers.value[item.id] = [...(failedCovers.value[item.id] || []), url]
 }
 
 function openDetail(id: number) {
@@ -237,20 +227,18 @@ onMounted(() => {
             @change="(v: boolean | string | number) => toggle(item.id, Boolean(v))"
           />
           <button type="button" class="thumb" @click="openDetail(item.id)">
-            <img
-              v-if="coverOf(item)"
-              :src="coverOf(item)"
+            <FallbackImage
+              :key="`${imageVersion}:${item.id}`"
+              :urls="mediaImageCandidates(item)"
               alt=""
-              loading="lazy"
-              @error="onCoverError(item, $event)"
-            />
-            <CoverPlaceholder
-              v-else
-              size="xs"
-              :number="item.number"
-              :title="item.title"
-              :filename="item.filename"
-            />
+            >
+              <CoverPlaceholder
+                size="xs"
+                :number="item.number"
+                :title="item.title"
+                :filename="item.filename"
+              />
+            </FallbackImage>
           </button>
           <div class="meta" @click="openDetail(item.id)">
             <div class="line1">

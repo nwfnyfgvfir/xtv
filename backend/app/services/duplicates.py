@@ -7,8 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.models import MediaItem
 from app.schemas import DuplicateGroup, DuplicateMediaItem, PaginatedDuplicateGroups
-from app.services.images import rewrite_image_url
-from app.services.image_backups import local_image_urls
+from app.services.image_delivery import media_image_urls
 
 
 def _number_key_expr():
@@ -91,23 +90,13 @@ def list_duplicate_groups(
 
 def _to_duplicate_item(item: MediaItem) -> DuplicateMediaItem:
     lib_name = item.library.name if item.library else ""
-    backups = local_image_urls(item, ('cover_url', 'thumb_url', 'backdrop_url'))
     return DuplicateMediaItem(
         id=item.id,
         library_id=item.library_id,
         filename=item.filename,
         number=item.number,
         title=item.title,
-        cover_url=rewrite_image_url(
-            item.cover_url, provider=item.provider, provider_id=item.provider_id
-        ),
-        thumb_url=rewrite_image_url(
-            item.thumb_url, provider=item.provider, provider_id=item.provider_id
-        ),
-        backdrop_url=rewrite_image_url(item.backdrop_url, provider=item.provider, provider_id=item.provider_id),
-        cover_local_url=backups['cover_url'],
-        thumb_local_url=backups['thumb_url'],
-        backdrop_local_url=backups['backdrop_url'],
+        **media_image_urls(item),
         source_type=item.source_type,
         provider=item.provider,
         release_date=item.release_date,

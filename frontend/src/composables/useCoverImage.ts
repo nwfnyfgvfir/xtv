@@ -14,6 +14,8 @@ export function useCoverImage(getCandidates: () => (string | null | undefined)[]
   function onError() {
     attempt.value += 1
   }
-  watch(candidates, reset, { flush: 'sync' })
+  watch(candidates, (next, previous) => {
+    if (next.length !== previous.length || next.some((url, index) => url !== previous[index])) reset()
+  }, { flush: 'sync' })
   return { src, showImage, failed, onError, reset }
 }

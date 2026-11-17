@@ -5,19 +5,21 @@ import hashlib
 import logging
 import threading
 from datetime import timedelta
-from urllib.parse import urljoin, urlsplit
 
 import httpx
 from sqlalchemy import event, func
 from sqlalchemy.dialects.sqlite import insert
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, object_session
 
 from app.db import SessionLocal
 from app.models import Actor, ImageBackup, MediaItem, utcnow
-from app.services.images import original_image_url, rewrite_image_url, site_image_path, site_image_url, store_image_bytes, validate_proxy_url
+from app.services.images import (
+    MAX_IMAGE_BYTES, fetch_image, image_content_type, original_image_url, rewrite_image_url,
+    scraped_image_path, site_image_path, site_image_url, store_image_bytes, validate_proxy_url,
+)
 
 logger = logging.getLogger(__name__)
-MAX_IMAGE_BYTES = 5 * 1024 * 1024
 
 
 def image_key(url: str) -> str:
@@ -63,13 +65,43 @@ def local_image_urls(item, fields):
         for field, url in values.items()}
 
 
-def attach_media_backups(data, item):
-    for field, url in local_image_urls(item, ('cover_url', 'thumb_url', 'backdrop_url')).items():
-        setattr(data, field.removesuffix('_url') + '_local_url', url)
+def read_saved_image(db: Session, url: str) -> tuple[str, bytes] | None:
+    """Let the site proxy reuse the same permanent backup as the browser fallback."""
+    try:
+        row = db.get(ImageBackup, image_key(url))
+        if not row or row.status != 'done' or not row.local_name:
+            return None
+        path = scraped_image_path(row.local_name)
+        if path is None:
+            return None
+        with path.open('rb') as file:
+            body = file.read(MAX_IMAGE_BYTES + 1)
+        content_type = image_content_type(body)
+        if content_type and len(body) <= MAX_IMAGE_BYTES:
+            return content_type, body
+    except OSError:
+        pass
+    except SQLAlchemyError:
+        db.rollback()
+        logger.warning('Could not read the image backup record')
+    return None
 
 
-def actor_backup_url(actor):
-    return local_image_urls(actor, ('image_url',))['image_url']
+def save_queued_image(db: Session, url: str, body: bytes) -> None:
+    """Persist proxy responses for known library artwork, never arbitrary proxy URLs."""
+    try:
+        row = db.get(ImageBackup, image_key(url))
+        if row is None:
+            return
+        local = store_image_bytes(body)
+        if not local:
+            return
+        row.status, row.local_name = 'done', local.rsplit('/', 1)[-1]
+        row.updated_at = utcnow()
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        logger.warning('Could not record the image backup')
 
 
 def backup_status(db):
@@ -84,29 +116,11 @@ async def download_image(url, *, provider=None, provider_id=None):
         raise ValueError('Image proxy configuration is invalid')
     if target.startswith('/') or site_image_path(target) is not None:
         target = original
-    headers = {'User-Agent': 'Mozilla/5.0 TV-ImageBackup', 'Accept': 'image/*',
-        'Referer': f'{urlsplit(original).scheme}://{urlsplit(original).netloc}/'}
-    async with httpx.AsyncClient(timeout=httpx.Timeout(20, connect=10), follow_redirects=False) as client:
-        for _ in range(6):
-            validate_proxy_url(target)
-            async with client.stream('GET', target, headers=headers) as response:
-                if response.is_redirect:
-                    location = response.headers.get('location')
-                    if not location:
-                        raise ValueError('Image redirect has no location')
-                    target = urljoin(target, location)
-                    continue
-                response.raise_for_status()
-                body = bytearray()
-                async for chunk in response.aiter_bytes():
-                    body.extend(chunk)
-                    if len(body) > MAX_IMAGE_BYTES:
-                        raise ValueError('Image exceeds the backup size limit')
-                local = store_image_bytes(bytes(body))
-                if not local:
-                    raise ValueError('Response is not a supported raster image')
-                return local.rsplit('/', 1)[-1]
-    raise ValueError('Too many image redirects')
+    _, body = await fetch_image(target, referer_url=original)
+    local = store_image_bytes(body)
+    if not local:
+        raise ValueError('Response is not a supported raster image')
+    return local.rsplit('/', 1)[-1]
 
 
 class ImageBackupWorker:
@@ -183,7 +197,7 @@ class ImageBackupWorker:
             if isinstance(exc, httpx.HTTPStatusError):
                 reason = f'HTTP {exc.response.status_code}'
             elif isinstance(exc, ValueError) and str(exc) in {
-                'Image exceeds the backup size limit', 'Response is not a supported raster image',
+                'Image exceeds the size limit', 'Response is not a supported raster image', 'Response is not a supported image',
                 'Image proxy configuration is invalid', 'Too many image redirects',
                 'blocked ip', 'blocked host',
             }:
@@ -192,7 +206,8 @@ class ImageBackupWorker:
         finally:
             with self.factory() as db:
                 row = db.get(ImageBackup, key)
-                if row:
+                # A simultaneous site-proxy request may already have saved a valid copy.
+                if row and (local or row.status != 'done'):
                     row.status = 'done' if local else 'pending'
                     if local:
                         row.local_name = local
