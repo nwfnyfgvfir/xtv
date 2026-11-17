@@ -297,7 +297,7 @@ def test_health_checks_readiness_and_authenticated_catalog(rest_settings, rest_h
 
 def test_standalone_provider_images_bypass_metatube(rest_settings):
     rest_settings.image_proxy_mode = "metatube"
-    assert images.rewrite_image_url("https://images.example/photo.jpg", provider="stashscrapers:Source", provider_id="id").startswith("/api/images/proxy?")
+    assert images.rewrite_image_url("https://images.example/photo.jpg", provider="stashscrapers:Source", provider_id="id") == "https://images.example/photo.jpg"
 
 
 def test_priority_chain_continues_after_failed_scraper(rest_settings, rest_http, database):

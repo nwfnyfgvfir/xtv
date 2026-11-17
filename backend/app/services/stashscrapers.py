@@ -8,7 +8,7 @@ from urllib.parse import urlsplit, urlunsplit
 import httpx
 
 from app.config import Settings, get_settings
-from app.services.images import store_scraped_image
+from app.services.images import first_scraped_image, store_scraped_image
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +158,7 @@ class StashScrapersClient:
         movie_id = _identity(str((urls[0] if urls else None) or result.get("code") or query))
         raw = result.get("raw") if isinstance(result.get("raw"), dict) else {}
         images = result.get("images") or raw.get("images") or [raw.get("image")]
-        cover = next((store_scraped_image(v) for v in images if isinstance(v, str) and v), None) if isinstance(images, list) else None
+        cover = first_scraped_image(images) if isinstance(images, list) else None
         actors = []
         for person in result.get("performers") or []:
             if not isinstance(person, dict) or not person.get("name"):
@@ -166,7 +166,7 @@ class StashScrapersClient:
             person_urls = _urls(person.get("urls") or person.get("url"))
             actor_id = _identity(str((person_urls[0] if person_urls else None) or person["name"]))
             portraits = person.get("images") or [person.get("image")]
-            portrait = next((store_scraped_image(v) for v in portraits if isinstance(v, str) and v), None) if isinstance(portraits, list) else None
+            portrait = first_scraped_image(portraits) if isinstance(portraits, list) else None
             actor = {"name": person["name"], "provider": provider, "id": actor_id, "image_url": portrait}
             self._actors[provider, actor_id] = actor
             actors.append(actor)
@@ -337,6 +337,6 @@ class StashScrapersClient:
                 if results:
                     result = results[0]
                     images = result.get("images") or []
-                    image = next((store_scraped_image(v) for v in images if isinstance(v, str) and v), None)
+                    image = first_scraped_image(images)
                     return {"name": result.get("name"), "provider": provider, "id": actor_id, "image_url": image}
         return actor or {}

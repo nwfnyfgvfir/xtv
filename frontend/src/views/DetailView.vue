@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import VideoPlayer from '@/components/VideoPlayer.vue'
 import CoverPlaceholder from '@/components/CoverPlaceholder.vue'
+import FallbackImage from '@/components/FallbackImage.vue'
 import AppIcon from '@/components/AppIcon.vue'
 import { isActiveTask, useTasks } from '@/composables/useTasks'
 import ExternalPlayersBar from '@/components/ExternalPlayersBar.vue'
@@ -88,7 +89,9 @@ const tags = computed(() => {
 })
 
 const { src: cover, showImage, failed: coverFailed, onError: onCoverError, reset: resetCover } = useCoverImage(() => [
-  item.value?.cover_url, item.value?.thumb_url, item.value?.backdrop_url,
+  item.value?.cover_url, item.value?.cover_local_url,
+  item.value?.thumb_url, item.value?.thumb_local_url,
+  item.value?.backdrop_url, item.value?.backdrop_local_url,
 ])
 const isChineseSub = computed(
   () => item.value?.subtitle_flag === 'C' || tags.value.includes('中文字幕'),
@@ -431,15 +434,14 @@ watch(() => props.id, load)
                 class="actor"
                 @click="router.push(`/actors/${actor.id}`)"
               >
-                <img
-                  v-if="actor.image_url"
-                  :src="actor.image_url"
+                <FallbackImage
+                  :urls="[actor.image_url, actor.image_local_url]"
                   :alt="actor.name"
-                  loading="lazy"
-                />
-                <span v-else class="a-mono" :style="monogramStyle(actor.name)">{{
+                >
+                <span class="a-mono" :style="monogramStyle(actor.name)">{{
                   monogramChar({ title: actor.name })
                 }}</span>
+                </FallbackImage>
                 <span>{{ actor.name }}</span>
               </button>
             </div>

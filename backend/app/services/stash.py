@@ -10,7 +10,7 @@ from uuid import UUID
 import httpx
 
 from app.config import Settings, get_settings
-from app.services.images import store_scraped_image
+from app.services.images import first_scraped_image, store_scraped_image
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,11 @@ def _urls(data: dict[str, Any]) -> list[str]:
 def _image(data: dict[str, Any]) -> str | None:
     images = data.get("images")
     candidates = images if isinstance(images, list) else []
-    for value in [*candidates, data.get("image")]:
+    values = [*candidates, data.get("image")]
+    for value in values:
+        if isinstance(value, str) and value.startswith(("http://", "https://")):
+            return value
+    for value in values:
         if isinstance(value, str) and value.startswith(("http://", "https://", "data:image/")):
             return value
     return None
@@ -371,7 +375,7 @@ class StashClient:
                 scene = detail
             else:
                 logger.warning("Could not expand a Stash search result; keeping available metadata")
-        scene["cover_url"] = store_scraped_image(scene.get("cover_url"))
+        scene["cover_url"] = first_scraped_image([scene.get("cover_url")])
         for actor in scene["actors"]:
             actor["image_url"] = store_scraped_image(actor.get("image_url"))
         self._movies[provider, movie_id] = scene

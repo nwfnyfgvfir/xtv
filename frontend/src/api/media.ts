@@ -22,6 +22,9 @@ import type {
 
 export const getHealth = () => client.get<Health>('/health').then((r) => r.data)
 
+export const getImageBackupStatus = () =>
+  client.get<{ saved: number; pending: number; running: number }>('/images/backups').then((r) => r.data)
+
 export const getAuthStatus = () => client.get<AuthStatus>('/auth/status').then((r) => r.data)
 
 export const login = (password: string) =>

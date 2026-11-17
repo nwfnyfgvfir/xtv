@@ -80,6 +80,21 @@ class BackgroundJobItem(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class ImageBackup(Base):
+    __tablename__ = "image_backups"
+    __table_args__ = (Index('ix_image_backup_due', 'status', 'retry_at'),)
+
+    url_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    provider: Mapped[str | None] = mapped_column(String(64))
+    provider_id: Mapped[str | None] = mapped_column(String(128))
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    local_name: Mapped[str | None] = mapped_column(String(80))
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    retry_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
 class Library(Base):
     __tablename__ = "libraries"
 

@@ -28,6 +28,7 @@ from app.schemas import (
 )
 from app.services.duplicates import list_duplicate_groups
 from app.services.images import rewrite_image_url
+from app.services.image_backups import attach_media_backups, actor_backup_url
 from app.services.media_delete import delete_media_item
 from app.services.naming import source_name
 from app.services.file_readiness import check_file
@@ -56,9 +57,12 @@ def _with_proxied_images(
     data.backdrop_url = rewrite_image_url(
         data.backdrop_url, provider=item.provider, provider_id=item.provider_id
     )
+    attach_media_backups(data, item)
     if detail and isinstance(data, MediaDetail):
+        original_actors = {actor.id: actor for actor in item.actors}
         data.actors = [
-            a.model_copy(update={"image_url": rewrite_image_url(a.image_url)}) for a in data.actors
+            a.model_copy(update={"image_url": rewrite_image_url(a.image_url),
+                "image_local_url": actor_backup_url(original_actors[a.id])}) for a in data.actors
         ]
     if favorited is None:
         favorited = item.favorite is not None

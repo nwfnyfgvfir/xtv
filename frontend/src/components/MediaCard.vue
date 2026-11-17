@@ -17,7 +17,9 @@ const favorited = ref(Boolean(props.item.favorited))
 const title = computed(() => props.item.title || props.item.number || props.item.filename)
 // Prefer the complete landscape cover, retaining other artwork as recovery candidates.
 const { src: cover, showImage, failed: coverFailed, onError: onImgError } = useCoverImage(() => [
-  props.item.cover_url, props.item.thumb_url, props.item.backdrop_url,
+  props.item.cover_url, props.item.cover_local_url,
+  props.item.thumb_url, props.item.thumb_local_url,
+  props.item.backdrop_url, props.item.backdrop_local_url,
 ])
 const isChineseSub = computed(() => props.item.subtitle_flag === 'C')
 const score = computed(() =>

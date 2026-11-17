@@ -104,7 +104,8 @@ function keepLargest(group: DuplicateGroup) {
 }
 
 function coverOf(item: DuplicateMediaItem) {
-  return [item.cover_url, item.thumb_url].find(
+  return [item.cover_url, item.cover_local_url, item.thumb_url, item.thumb_local_url,
+    item.backdrop_url, item.backdrop_local_url].find(
     (url) => url && !failedCovers.value[item.id]?.includes(url),
   ) || ''
 }

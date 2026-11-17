@@ -75,6 +75,7 @@ class ActorOut(BaseModel):
     provider: str | None = None
     provider_id: str | None = None
     image_url: str | None = None
+    image_local_url: str | None = None
     favorited: bool = False
 
 
@@ -97,6 +98,9 @@ class MediaListItem(BaseModel):
     cover_url: str | None = None
     thumb_url: str | None = None
     backdrop_url: str | None = None
+    cover_local_url: str | None = None
+    thumb_local_url: str | None = None
+    backdrop_local_url: str | None = None
     source_type: str
     provider: str | None = None
     release_date: str | None = None

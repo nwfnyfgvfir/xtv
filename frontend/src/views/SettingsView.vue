@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { getHealth, getMovieProviders, getSettings, updateSettings } from '@/api/media'
+import { getHealth, getImageBackupStatus, getMovieProviders, getSettings, updateSettings } from '@/api/media'
 import type { Health, ImageProxyMode, ScrapeSource, Settings, TranslateProvider } from '@/api/types'
 import { getErrorMessage } from '@/utils/errors'
 import { APP_VERSION } from '@/utils/version'
@@ -52,6 +52,21 @@ const healthChecking = ref(true)
 const initialSnapshot = ref('')
 const lastSavedAt = ref('')
 const activeSection = ref('metadata')
+const imageBackups = ref<Awaited<ReturnType<typeof getImageBackupStatus>> | null>(null)
+const imageBackupsLoading = ref(false)
+async function refreshImageBackups() {
+  imageBackupsLoading.value = true
+  try {
+    imageBackups.value = await getImageBackupStatus()
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '获取图片备份状态失败'))
+  } finally {
+    imageBackupsLoading.value = false
+  }
+}
+watch(activeSection, (section) => {
+  if (section === 'images') void refreshImageBackups()
+})
 const sections = [
   { id: 'libraries', label: '媒体库', icon: 'folder' },
   { id: 'metadata', label: '刮削来源', icon: 'server' },
@@ -88,6 +103,20 @@ watch(
 )
 
 const showExternalTpl = computed(() => form.value.image_proxy_mode === 'external')
+const imageProxyError = computed(() => {
+  if (!showExternalTpl.value) return ''
+  const template = form.value.image_external_proxy_url.trim()
+  if (!template.includes('{url}')) return '外部图片代理模板必须包含 {url}'
+  try {
+    const url = new URL(template)
+    if (!['http:', 'https:'].includes(url.protocol) || url.host.includes('{url}') || /\s/.test(template)) {
+      return '请填写有效的 HTTP(S) 外部代理模板'
+    }
+  } catch {
+    return '请填写有效的 HTTP(S) 外部代理模板'
+  }
+  return ''
+})
 const showGoogleProxy = computed(() => form.value.translate_provider === 'google')
 const showGoogleProxyUrl = computed(
   () => showGoogleProxy.value && form.value.translate_google_proxy,
@@ -303,6 +332,11 @@ function removePriority(index: number) {
 }
 
 async function save() {
+  if (imageProxyError.value) {
+    activeSection.value = 'images'
+    ElMessage.warning(imageProxyError.value)
+    return
+  }
   if (isStashScrapers.value && !form.value.stashscrapers_base_url.trim()) {
     activeSection.value = 'metadata'
     ElMessage.warning('请填写 StashScrapers 服务地址')
@@ -763,6 +797,7 @@ onMounted(() => {
               <h2 id="images-heading">图片与缓存</h2>
               <p>选择封面加载方式，按需开启磁盘缓存。</p>
             </div>
+            <el-button text :loading="imageBackupsLoading" @click="refreshImageBackups">刷新备份状态</el-button>
           </header>
           <el-form class="settings-form" label-position="top" @submit.prevent="save">
             <el-form-item label="图片代理">
@@ -781,6 +816,7 @@ onMounted(() => {
                 须包含 <code>{url}</code>，会替换为 URL-encode 后的原始图片地址
               </span>
             </el-form-item>
+            <p v-if="imageProxyError" class="section-note" role="alert">{{ imageProxyError }}；不会自动改用本站代理。</p>
             <el-form-item label="图片本地缓存">
               <el-switch v-model="form.image_local_cache" />
               <span class="field-hint muted">
@@ -789,8 +825,11 @@ onMounted(() => {
             </el-form-item>
           </el-form>
           <p class="section-note">
-            通过 Stash 刮削并保存的封面与头像由本站直接提供，不依赖 MetaTube 图片接口。
+            远程图片优先按所选方式加载，并自动下载本地备份；远程失败后才使用本站备份。已有远程封面和头像会在后台补备份，无需重新刮削。来源仅提供内嵌图片时直接保存到本站。
           </p>
+          <p class="section-note">本地备份保存在 /data/scraped-images，与可清理的本站代理缓存分开保存；保留 /data 挂载即可跨容器升级保留。</p>
+          <p v-if="imageBackups" class="section-note" role="status">远程图片备份：已完成 {{ imageBackups.saved || 0 }} · 下载中 {{ imageBackups.running || 0 }} · 待下载或重试 {{ imageBackups.pending || 0 }}</p>
+          <p v-if="form.image_proxy_mode === 'metatube'" class="section-note">MetaTube 图片接口需要 MetaTube 来源标识；其他来源的远程图片直接连接原站，不自动切换到本站代理。</p>
         </section>
         <section
           v-show="activeSection === 'system'"

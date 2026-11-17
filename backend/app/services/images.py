@@ -12,7 +12,7 @@ from pathlib import Path
 from threading import Lock
 from time import time
 from typing import Any
-from urllib.parse import quote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse, urlsplit
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,9 @@ def store_scraped_image(value: str | None) -> str | None:
     """Persist Stash's inline raster images without embedding them in API payloads."""
     if not value:
         return None
-    if value.startswith(("http://", "https://", "/api/images/scraped/")):
+    if value.startswith(("http://", "https://", "//", "/api/images/proxy")):
+        return original_image_url(value)
+    if value.startswith("/api/images/scraped/"):
         return value
     header, separator, encoded = value.partition(",")
     if not separator or not header.startswith("data:") or not header.endswith(";base64"):
@@ -82,6 +84,13 @@ def store_scraped_image(value: str | None) -> str | None:
         body = base64.b64decode(encoded, validate=True)
     except (ValueError, binascii.Error):
         return None
+    if not body or len(body) > _MAX_BODY:
+        return None
+    return store_image_bytes(body)
+
+
+def store_image_bytes(body: bytes) -> str | None:
+    """Store a bounded raster image independently of optional proxy-cache pruning."""
     if not body or len(body) > _MAX_BODY:
         return None
     extension = _SCRAPED_IMAGE_EXTENSIONS.get(image_content_type(body) or '')
@@ -104,6 +113,46 @@ def store_scraped_image(value: str | None) -> str | None:
     return f"/api/images/scraped/{name}"
 
 
+def first_scraped_image(values: list[Any]) -> str | None:
+    """Keep remote artwork when available; persist inline bytes only as a fallback."""
+    candidates = [value for value in values if isinstance(value, str) and value]
+    for value in candidates:
+        if value.startswith(("http://", "https://", "//", "/api/images/proxy")):
+            original = original_image_url(value)
+            if original:
+                return original
+    return next((image for value in candidates if (image := store_scraped_image(value))), None)
+
+
+def original_image_url(url: str | None) -> str | None:
+    """Unwrap known proxy URLs so a saved proxy choice never locks in an old route."""
+    if not url:
+        return url
+    from app.config import get_settings
+
+    settings = get_settings()
+    current = 'https:' + url if url.startswith('//') else url
+    template = (getattr(settings, 'image_external_proxy_url', '') or '').strip()
+    for _ in range(8):
+        try:
+            parsed = urlsplit(current)
+        except ValueError:
+            return current
+        inner = None
+        if not parsed.scheme and not parsed.netloc and parsed.path == '/api/images/proxy':
+            inner = next(iter(parse_qs(parsed.query).get('url', [])), None)
+        elif getattr(settings, 'metatube_base_url', '') and current.startswith(settings.metatube_base_url.rstrip('/') + '/v1/images/primary/'):
+            inner = next(iter(parse_qs(parsed.query).get('url', [])), None)
+        elif template.count('{url}') == 1:
+            prefix, suffix = template.split('{url}')
+            if prefix and current.startswith(prefix) and (not suffix or current.endswith(suffix)):
+                inner = unquote(current[len(prefix):len(current) - len(suffix) if suffix else None])
+        if not inner or not inner.startswith(('http://', 'https://', '/api/images/proxy?')) or inner == current:
+            return current
+        current = inner
+    return None
+
+
 def site_proxy_url(url: str | None) -> str | None:
     """Rewrite absolute image URLs to same-origin proxy path."""
     if not url:
@@ -118,12 +167,25 @@ def site_proxy_url(url: str | None) -> str | None:
     return f"/api/images/proxy?url={quote(url, safe='')}"
 
 
-def external_proxy_url(url: str, template: str) -> str | None:
-    """Build external proxy URL from template containing {url}."""
+def external_proxy_template_error(template: str) -> str | None:
     tpl = (template or "").strip()
     if not tpl or "{url}" not in tpl:
+        return '外部图片代理模板必须包含 {url}'
+    try:
+        parsed = urlsplit(tpl)
+        _ = parsed.port
+        if parsed.scheme not in {'http', 'https'} or not parsed.hostname or '{url}' in parsed.netloc or re.search(r'[\x00-\x20]', tpl):
+            return '外部图片代理模板必须是有效的 HTTP(S) 地址，{url} 应位于路径或查询参数中'
+    except ValueError:
+        return '外部图片代理模板不是有效的 HTTP(S) 地址'
+    return None
+
+
+def external_proxy_url(url: str, template: str) -> str | None:
+    """Build external proxy URL from a valid HTTP(S) template containing {url}."""
+    if external_proxy_template_error(template):
         return None
-    return tpl.replace("{url}", quote(url, safe=""))
+    return template.strip().replace("{url}", quote(url, safe=""))
 
 
 def rewrite_image_url(
@@ -134,11 +196,10 @@ def rewrite_image_url(
     quality: int = 90,
 ) -> str | None:
     """Rewrite image URL according to IMAGE_PROXY_MODE (site | metatube | external)."""
+    url = original_image_url(url)
     if not url:
         return url
-    # Already proxied / relative — leave as-is
-    if url.startswith("/api/images/proxy"):
-        return url
+    # Inline-only artwork has no remote URL to hand to another service.
     if url.startswith("/") and not url.startswith("//"):
         return url
     if not (url.startswith("http://") or url.startswith("https://")):
@@ -153,20 +214,17 @@ def rewrite_image_url(
         out = external_proxy_url(url, s.image_external_proxy_url)
         if out:
             return out
-        logger.warning(
-            "IMAGE_PROXY_MODE=external but IMAGE_EXTERNAL_PROXY_URL missing {url}; fallback site"
-        )
-        return site_proxy_url(url)
+        logger.warning("External image proxy configuration is invalid; no site proxy fallback is used")
+        return None
 
-    if mode == "metatube" and provider and provider_id and not provider.startswith(("stash:", "stashscrapers:")):
-        from app.services.metatube import MetaTubeClient
+    if mode == "metatube":
+        if provider and provider_id and not provider.startswith(("stash:", "stashscrapers:")):
+            from app.services.metatube import MetaTubeClient
 
-        return MetaTubeClient().primary_image_url(
-            str(provider),
-            str(provider_id),
-            url=url,
-            quality=quality,
-        )
+            return MetaTubeClient().primary_image_url(
+                str(provider), str(provider_id), url=url, quality=quality,
+            )
+        return url
     return site_proxy_url(url)
 
 

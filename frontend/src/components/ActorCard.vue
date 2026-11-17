@@ -7,11 +7,11 @@ import { favoriteActor, unfavoriteActor } from '@/api/media'
 import { getErrorMessage } from '@/utils/errors'
 import { rememberListAnchor } from '@/utils/listScrollAnchor'
 import { monogramChar, monogramStyle } from '@/utils/monogram'
+import FallbackImage from './FallbackImage.vue'
 
 const props = defineProps<{ actor: Actor }>()
 const emit = defineEmits<{ refreshed: [Actor] }>()
 const router = useRouter()
-const imgFailed = ref(false)
 const favLoading = ref(false)
 const favorited = ref(Boolean(props.actor.favorited))
 
@@ -21,21 +21,12 @@ watch(
     favorited.value = Boolean(v)
   },
 )
-watch(
-  () => props.actor.image_url,
-  () => {
-    imgFailed.value = false
-  },
-)
 
 function open() {
   rememberListAnchor('actor', props.actor.id)
   router.push(`/actors/${props.actor.id}`)
 }
 
-function onImgError() {
-  imgFailed.value = true
-}
 
 async function toggleFav(e: Event) {
   e.stopPropagation()
@@ -64,19 +55,16 @@ async function toggleFav(e: Event) {
     @keyup.enter="open"
   >
     <div class="portrait">
-      <img
-        v-if="actor.image_url && !imgFailed"
-        :src="actor.image_url"
+      <FallbackImage
+        :urls="[actor.image_url, actor.image_local_url]"
         :alt="actor.name"
         width="200"
         height="200"
-        loading="lazy"
-        decoding="async"
-        @error="onImgError"
-      />
-      <div v-else class="mono" :style="monogramStyle(actor.name)">
+      >
+      <div class="mono" :style="monogramStyle(actor.name)">
         {{ monogramChar({ title: actor.name }) }}
       </div>
+      </FallbackImage>
       <button
         class="fav"
         type="button"

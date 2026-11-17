@@ -15,6 +15,7 @@ from app.db import init_db
 from app.logging_setup import configure_logging
 from app.services.watcher import start_watcher, stop_watcher
 from app.services.task_runner import runner as task_runner
+from app.services.image_backups import worker as image_backup_worker
 
 configure_logging()
 logger = logging.getLogger(__name__)
@@ -44,11 +45,13 @@ async def lifespan(_app: FastAPI):
     if not settings.auth_enabled:
         logger.warning("ADMIN_PASSWORD empty — API auth is DISABLED (dev mode)")
     task_runner.start()
+    image_backup_worker.start()
     try:
         start_watcher()
     except Exception:  # noqa: BLE001
         logger.exception("Failed to start filesystem watcher")
     yield
+    image_backup_worker.stop()
     task_runner.stop()
     try:
         stop_watcher()

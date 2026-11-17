@@ -55,12 +55,12 @@ def test_rewrite_image_url_metatube_mode(monkeypatch):
     assert out and out.startswith("https://mt.example/v1/images/primary/JavBus/IPX-1?")
 
 
-def test_rewrite_image_url_metatube_fallback_without_provider(monkeypatch):
+def test_rewrite_image_url_metatube_without_provider_keeps_the_remote_url(monkeypatch):
     s = get_settings()
     monkeypatch.setattr(s, "image_proxy_mode", "metatube")
     raw = "https://cdn.example.com/a.jpg"
     out = rewrite_image_url(raw)
-    assert out and out.startswith("/api/images/proxy?url=")
+    assert out == raw
 
 
 def test_validate_proxy_blocks_localhost():

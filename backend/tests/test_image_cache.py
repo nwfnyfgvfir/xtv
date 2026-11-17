@@ -33,13 +33,13 @@ def test_rewrite_image_url_external_mode(monkeypatch):
     assert out == f"https://img.example.com/p?u={quote(raw, safe='')}"
 
 
-def test_rewrite_image_url_external_fallback_without_template(monkeypatch):
+def test_rewrite_image_url_invalid_external_template_never_silently_uses_site(monkeypatch):
     s = get_settings()
     monkeypatch.setattr(s, "image_proxy_mode", "external")
     monkeypatch.setattr(s, "image_external_proxy_url", "")
     raw = "https://cdn.example.com/cover.jpg"
     out = rewrite_image_url(raw)
-    assert out == site_proxy_url(raw)
+    assert out is None
 
 
 def test_rewrite_image_url_local_cache_does_not_force_site(monkeypatch):

@@ -15,6 +15,7 @@ from app.services.metatube import MetaTubeClient, MetaTubeError, parse_movie_pro
 from app.services.stash import StashClient, StashError
 from app.services.stashscrapers import StashScrapersClient, StashScrapersError
 from app.services.naming import source_name
+from app.services.image_backups import queue_images
 
 logger = logging.getLogger(__name__)
 _metadata_write_lock = threading.Lock()
@@ -288,6 +289,8 @@ async def scrape_media_item(
                     item.actors.append(actor)
             item.scraped_at = datetime.now(timezone.utc)
             db.add(item)
+            queue_images(db, [item.cover_url, item.thumb_url, item.backdrop_url],
+                provider=item.provider, provider_id=item.provider_id)
             db.commit()
             db.refresh(item)
         return True
@@ -407,6 +410,7 @@ async def enrich_actor_image(db: Session | None, actor: Actor, client: MetaTubeC
         db.add(actor)
         # Flush only — caller owns the outer transaction/commit.
         try:
+            queue_images(db, [actor.image_url])
             db.flush()
         except Exception:  # noqa: BLE001
             logger.debug("actor image flush failed %s", actor.name, exc_info=True)
@@ -495,6 +499,8 @@ async def _upsert_actor(db: Session, client: MetaTubeClient | StashClient | Stas
 
     if enrich and not actor.image_url:
         await enrich_actor_image(db, actor, client)
+    if actor.image_url:
+        queue_images(db, [actor.image_url])
     return actor
 
 

@@ -16,6 +16,7 @@ from app.schemas import SettingsOut, SettingsUpdate
 from app.services.metatube import MetaTubeClient, MetaTubeError, parse_movie_provider_names
 from app.services.stash import StashClient
 from app.services.stashscrapers import StashScrapersClient
+from app.services.images import external_proxy_template_error
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -415,6 +416,15 @@ async def update_app_settings(
 ) -> SettingsOut:
     data = body.model_dump(exclude_unset=True)
     extra = data.pop("extra", None)
+    if {'image_proxy_mode', 'image_external_proxy_url'}.intersection(data):
+        saved = _db_map(db)
+        runtime = get_settings()
+        mode = data.get('image_proxy_mode') or saved.get('image_proxy_mode') or runtime.image_proxy_mode
+        template = data.get('image_external_proxy_url')
+        if template is None:
+            template = saved.get('image_external_proxy_url', runtime.image_external_proxy_url)
+        if mode == 'external' and (error := external_proxy_template_error(template)):
+            raise HTTPException(422, error)
     for key, value in data.items():
         if value is None:
             continue
@@ -448,6 +458,12 @@ async def update_app_settings(
             db.add(row)
     db.commit()
     _apply_overrides_to_runtime(_db_map(db))
+    if {'image_proxy_mode', 'image_external_proxy_url'}.intersection(data):
+        from app.models import ImageBackup, utcnow
+        from app.services.image_backups import worker
+        db.query(ImageBackup).filter_by(status='pending').update({'retry_at': utcnow()})
+        db.commit()
+        worker.notify()
     if 'task_concurrency' in data:
         from app.services.task_store import wakeup
         wakeup.set()

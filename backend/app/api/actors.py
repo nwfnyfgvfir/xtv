@@ -11,6 +11,7 @@ from app.deps import require_auth
 from app.models import Actor, ActorFavorite, MediaActor, MediaItem
 from app.schemas import ActorDetail, ActorListItem, MediaListItem, PaginatedActors, PaginatedMedia
 from app.services.images import rewrite_image_url
+from app.services.image_backups import attach_media_backups, actor_backup_url
 from app.services.scrape import enrich_actor_image
 from app.services.sorting import actor_order_by, media_order_by
 
@@ -28,6 +29,7 @@ def _proxy_media(item: MediaItem, favorited_ids: set[int]) -> MediaListItem:
     data.backdrop_url = rewrite_image_url(
         data.backdrop_url, provider=item.provider, provider_id=item.provider_id
     )
+    attach_media_backups(data, item)
     data.favorited = item.id in favorited_ids
     return data
 
@@ -38,8 +40,9 @@ def _actor_item(actor: Actor, media_count: int = 0, favorited: bool = False) -> 
         name=actor.name,
         provider=actor.provider,
         provider_id=actor.provider_id,
-        # Actor portraits use site proxy (MetaTube primary is movie-oriented).
+        # Actor portraits follow the selected route; MetaTube primary is movie-oriented.
         image_url=rewrite_image_url(actor.image_url),
+        image_local_url=actor_backup_url(actor),
         media_count=media_count,
         favorited=favorited,
     )

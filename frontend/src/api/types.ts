@@ -41,6 +41,9 @@ export interface MediaListItem {
   cover_url?: string | null
   thumb_url?: string | null
   backdrop_url?: string | null
+  cover_local_url?: string | null
+  thumb_local_url?: string | null
+  backdrop_local_url?: string | null
   source_type: string
   provider?: string | null
   release_date?: string | null
@@ -57,6 +60,7 @@ export interface Actor {
   provider?: string | null
   provider_id?: string | null
   image_url?: string | null
+  image_local_url?: string | null
   media_count?: number
   favorited?: boolean
 }

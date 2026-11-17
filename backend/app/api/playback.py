@@ -217,6 +217,14 @@ def put_progress(
     )
 
 
+@router.get("/images/backups")
+def image_backups_status(
+    _: Annotated[dict, Depends(require_auth)], db: Session = Depends(get_db),
+):
+    from app.services.image_backups import backup_status
+    return backup_status(db)
+
+
 @router.get("/images/scraped/{name}")
 def scraped_image(name: str):
     from app.services.images import scraped_image_path

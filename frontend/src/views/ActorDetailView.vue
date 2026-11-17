@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 import AppPagination from '@/components/AppPagination.vue'
 import MediaGrid from '@/components/MediaGrid.vue'
 import SkeletonGrid from '@/components/SkeletonGrid.vue'
+import FallbackImage from '@/components/FallbackImage.vue'
 import {
   favoriteActor,
   getActor,
@@ -33,7 +34,6 @@ const page = ref(parsePage(route.query))
 const sort = ref<MediaSort>(loadMediaSort())
 const loading = ref(false)
 const imgLoading = ref(false)
-const imgFailed = ref(false)
 const favLoading = ref(false)
 const PAGE_SIZE = DEFAULT_PAGE_SIZE
 
@@ -49,7 +49,6 @@ function syncPageQuery(nextPage: number) {
 
 async function load() {
   loading.value = true
-  imgFailed.value = false
   try {
     actor.value = await getActor(Number(props.id))
     const data = await listActorMedia(Number(props.id), {
@@ -85,7 +84,6 @@ async function onRescrapeImage() {
   imgLoading.value = true
   try {
     actor.value = await rescrapeActorImage(actor.value.id)
-    imgFailed.value = false
     ElMessage.success('头像已更新')
   } catch (e: unknown) {
     ElMessage.error(getErrorMessage(e, '头像刮削失败'))
@@ -136,16 +134,15 @@ onMounted(() => {
 <template>
   <div class="page">
     <div v-if="actor" class="hero">
-      <img
-        v-if="actor.image_url && !imgFailed"
+      <FallbackImage
         class="avatar"
-        :src="actor.image_url"
+        :urls="[actor.image_url, actor.image_local_url]"
         :alt="actor.name"
-        @error="imgFailed = true"
-      />
-      <div v-else class="avatar mono" :style="monogramStyle(actor.name)">
+      >
+      <div class="avatar mono" :style="monogramStyle(actor.name)">
         {{ monogramChar({ title: actor.name }) }}
       </div>
+      </FallbackImage>
       <div class="info">
         <h1 class="page-title">{{ actor.name }}</h1>
         <p class="muted">{{ actor.media_count ?? total }} 部作品</p>

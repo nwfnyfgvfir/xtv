@@ -395,7 +395,7 @@ def test_stash_health_only_checks_selected_source(stash_settings, stash_http, ap
 def test_stash_images_bypass_metatube_proxy(stash_settings):
     stash_settings.image_proxy_mode = "metatube"
     url = images.rewrite_image_url("https://images.example/image.jpg", provider="stash:JavBus", provider_id="1")
-    assert url.startswith("/api/images/proxy?")
+    assert url == "https://images.example/image.jpg"
 
 
 def test_media_list_and_actor_media_expose_proxied_backup_artwork(stash_settings, database, api):
