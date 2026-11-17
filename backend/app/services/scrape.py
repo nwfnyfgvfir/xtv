@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-import re
+import threading
 from datetime import datetime, timezone
 from typing import Any
 
@@ -11,12 +11,13 @@ from sqlalchemy.orm import Session
 from app.config import Settings, get_settings
 from app.models import Actor, MediaItem
 from app.services.actors import merge_actors, normalize_actor_name, pick_canonical
-from app.services.metatube import MetaTubeClient, MetaTubeError
+from app.services.metatube import MetaTubeClient, MetaTubeError, parse_movie_provider_names
 from app.services.stash import StashClient, StashError
 from app.services.stashscrapers import StashScrapersClient, StashScrapersError
-from app.services.naming import normalize_number
+from app.services.naming import source_name
 
 logger = logging.getLogger(__name__)
+_metadata_write_lock = threading.Lock()
 
 
 def _pick_best(results: list[dict[str, Any]], number: str) -> dict[str, Any] | None:
@@ -25,23 +26,14 @@ def _pick_best(results: list[dict[str, Any]], number: str) -> dict[str, Any] | N
     if not number:
         return results[0]
     def key(value: Any) -> str:
-        return re.sub(r"[^A-Z0-9]", "", (normalize_number(str(value or "")) or "").upper())
+        return str(value or "").casefold()
     n = key(number)
     for r in results:
         rn = key(r.get("number") or r.get("code"))
         if rn == n:
             return r
-    # A conflicting explicit code must not be rescued by its ID or list position.
-    unknown = [r for r in results if not key(r.get("number") or r.get("code"))]
-    for r in unknown:
-        if key(r.get("_matched_number")) == n:
-            return r
-    for r in unknown:
-        rid = str(r.get("id") or "").upper().replace("_", "-")
-        if key(rid) == n:
-            return r
-    # Preserve legacy MetaTube responses that expose only an opaque provider ID.
-    return unknown[0] if unknown else None
+    # Providers own filename matching and result ranking; TV does not infer codes.
+    return results[0]
 
 
 def _priority_list_from_settings(settings: Settings | Any) -> list[str]:
@@ -74,56 +66,46 @@ def _priority_list_from_settings(settings: Settings | Any) -> list[str]:
 
 async def _search_with_chain(
     client: MetaTubeClient | StashClient | StashScrapersClient,
-    number: str,
+    query: str,
     *,
     chain: list[str],
-    use_fallback: bool,
-    force_auto: bool,
     filename: str | None = None,
+    selected_only: bool = False,
 ) -> list[dict[str, Any]]:
-    """
-    Search the selected metadata backend using an ordered provider chain.
-
-    force_auto=True → single search provider="" with fallback=use_fallback.
-    Else try each chain entry with fallback=False; stop on first _pick_best hit.
-    If no hit and (not chain or use_fallback): final search provider="" fallback=True
-    (or use_fallback when chain empty and not force_auto).
-    """
-    async def search(provider: str, fallback: bool) -> list[dict[str, Any]]:
+    async def search(provider: str):
         if isinstance(client, StashScrapersClient):
-            return await client.search_movie(number, provider=provider, fallback=fallback, filename=filename)
-        return await client.search_movie(number, provider=provider, fallback=fallback)
+            return await client.search_movie(query, provider=provider, fallback=not provider, filename=filename)
+        return await client.search_movie(query, provider=provider, fallback=not provider)
 
-    if force_auto:
-        logger.info("scrape try %s provider=auto fallback=%s", number, use_fallback)
-        return await search("", use_fallback)
-
-    results: list[dict[str, Any]] = []
-    for p in chain:
-        logger.info("scrape try %s provider=%s", number, p)
+    if not chain:
+        return await search("")
+    for provider in chain:
+        logger.info("scrape filename=%s source=%s", query, provider)
         try:
-            results = await search(p, False)
+            results = await search(provider)
         except (MetaTubeError, StashError, StashScrapersError) as exc:
             if isinstance(exc, StashScrapersError) and StashScrapersClient._fatal(exc):
                 raise
-            # A provider that errors (rate limit, 5xx, network) must not abort
-            # the rest of the chain — otherwise a priority list silently
-            # degrades into "try only the first provider".
-            logger.warning("scrape provider=%s failed for %s: %s", p, number, exc)
-            results = []
+            logger.warning("scrape source=%s failed: %s", provider, exc)
             continue
-        if _pick_best(results, number):
+        if results:
             return results
-
-    if not chain:
-        logger.info("scrape try %s provider=auto fallback=%s", number, use_fallback)
-        return await search("", use_fallback)
-
-    if use_fallback:
-        logger.info("scrape try %s provider=auto fallback=true (after chain)", number)
-        return await search("", True)
-
-    return results
+    if selected_only:
+        return []
+    if isinstance(client, MetaTubeClient):
+        remaining = parse_movie_provider_names(await client.list_providers())
+        for provider in remaining:
+            if provider in chain:
+                continue
+            try:
+                results = await search(provider)
+            except MetaTubeError:
+                continue
+            if results:
+                return results
+        return []
+    # Stash adapters track attempts and skip sources already tried for this query.
+    return await search("")
 
 
 def _first_image(v: Any) -> str | None:
@@ -173,12 +155,12 @@ async def scrape_media_item(
     item: MediaItem,
     force: bool = False,
     provider_override: str | None = None,
-    fallback_override: bool | None = None,
     url_override: str | None = None,
     settings_override: Settings | None = None,
 ) -> bool:
     """Scrape metadata for a media item. Returns True if updated."""
-    if not item.number and not url_override:
+    query = source_name(item.filename)
+    if not query and not url_override:
         return False
     if item.scraped_at and not force:
         return False
@@ -189,44 +171,18 @@ async def scrape_media_item(
         use_standalone = settings.scrape_source == "stashscrapers"
         if use_standalone:
             client = StashScrapersClient(settings)
-            default_provider = settings.stashscrapers_scraper
-            source_fallback = settings.stashscrapers_fallback
         elif use_stash:
             client = StashClient(settings)
-            default_provider = settings.stash_scraper
-            source_fallback = settings.stash_fallback
         else:
             client = MetaTubeClient(settings)
-            default_provider = settings.metatube_provider
-            source_fallback = settings.metatube_fallback
         if isinstance(client, MetaTubeClient) and not client.token:
             logger.warning("MetaTube token empty; skip scrape for %s", item.number)
             return False
         priority = _priority_list_from_settings(settings)
-        default_fallback = (
-            fallback_override if fallback_override is not None else source_fallback
-        )
-
-        if provider_override is not None:
-            if provider_override == "":
-                force_auto = True
-                chain: list[str] = []
-            else:
-                force_auto = False
-                chain = [provider_override]
-            use_fallback = default_fallback
-        elif priority:
-            force_auto = False
+        if provider_override is None:
             chain = priority
-            use_fallback = default_fallback
-        elif default_provider:
-            force_auto = False
-            chain = [default_provider]
-            use_fallback = default_fallback
         else:
-            force_auto = False
-            chain = []
-            use_fallback = True if fallback_override is None else bool(fallback_override)
+            chain = [provider_override] if provider_override else []
 
         if isinstance(client, StashScrapersClient) and url_override:
             results = []
@@ -234,11 +190,11 @@ async def scrape_media_item(
                 try:
                     results = await client.scrape_url(url_override, provider=selected, fallback=False)
                 except StashScrapersError as exc:
-                    if client._fatal(exc) or not use_fallback and len(chain) <= 1:
+                    if client._fatal(exc):
                         raise
                 if results:
                     break
-            if not results and use_fallback and chain:
+            if not results and chain and not provider_override:
                 results = await client.scrape_url(url_override)
         elif isinstance(client, StashClient) and url_override:
             if provider_override and provider_override.startswith('stash-box:'):
@@ -248,13 +204,12 @@ async def scrape_media_item(
         else:
             results = await _search_with_chain(
                 client,
-                item.number or "",
+                query,
                 chain=chain,
-                use_fallback=use_fallback,
-                force_auto=force_auto,
                 filename=item.filename,
+                selected_only=bool(provider_override),
             )
-        best = _pick_best(results, item.number or "")
+        best = _pick_best(results, query)
         if not best:
             logger.info("No %s result for %s", settings.scrape_source, item.number)
             return False
@@ -271,6 +226,18 @@ async def scrape_media_item(
         else:
             detail = best
 
+        actors_data = _actor_list(detail)
+        for data in actors_data:
+            if data.get('image_url'):
+                continue
+            existing = db.query(Actor).filter(Actor.name == data['name'], Actor.image_url.isnot(None)).first()
+            if existing:
+                data['image_url'] = existing.image_url
+                continue
+            draft = Actor(name=data['name'], provider=data.get('provider'), provider_id=data.get('provider_id'))
+            if await enrich_actor_image(None, draft, client):
+                data.update(image_url=draft.image_url, provider=draft.provider, provider_id=draft.provider_id)
+
         src_title = detail.get("title") or best.get("title") or item.title
         src_plot = (
             detail.get("summary")
@@ -280,8 +247,7 @@ async def scrape_media_item(
         )
         item.title = src_title
         item.plot = src_plot
-        if not item.number and detail.get("number"):
-            item.number = normalize_number(str(detail["number"])) or None
+        item.number = query
         item.provider = provider or item.provider
         item.provider_id = provider_id or item.provider_id
 
@@ -310,19 +276,20 @@ async def scrape_media_item(
             tags = ["中文字幕"]
             item.tags_json = json.dumps(tags, ensure_ascii=False)
 
-        item.actors.clear()
-        for a in _actor_list(detail):
-            actor = await _upsert_actor(db, client, a)
-            if actor is not None and actor not in item.actors:
-                item.actors.append(actor)
-
         if settings.auto_translate:
             await apply_translations(db, item, src_title=src_title, src_plot=src_plot, tags=tags)
 
-        item.scraped_at = datetime.now(timezone.utc)
-        db.add(item)
-        db.commit()
-        db.refresh(item)
+        # Network requests and translations finish before the short write section.
+        with _metadata_write_lock:
+            item.actors.clear()
+            for data in actors_data:
+                actor = await _upsert_actor(db, client, data, enrich=False)
+                if actor is not None and actor not in item.actors:
+                    item.actors.append(actor)
+            item.scraped_at = datetime.now(timezone.utc)
+            db.add(item)
+            db.commit()
+            db.refresh(item)
         return True
     except (MetaTubeError, StashError, StashScrapersError) as exc:
         logger.warning("scrape failed for %s: %s", item.number, exc)
@@ -403,7 +370,7 @@ def _set_actor_provider_safe(
     return actor
 
 
-async def enrich_actor_image(db: Session, actor: Actor, client: MetaTubeClient | StashClient | StashScrapersClient | None = None) -> bool:
+async def enrich_actor_image(db: Session | None, actor: Actor, client: MetaTubeClient | StashClient | StashScrapersClient | None = None) -> bool:
     """Fetch a missing portrait from the actor's metadata source."""
     if actor.image_url:
         return False
@@ -427,6 +394,10 @@ async def enrich_actor_image(db: Session, actor: Actor, client: MetaTubeClient |
         if not img:
             return False
         actor.image_url = img
+        if db is None:
+            actor.provider = str(best.get('provider') or 'Gfriends')
+            actor.provider_id = str(best.get('id') or actor.name)
+            return True
         actor = _set_actor_provider_safe(
             db,
             actor,
@@ -450,7 +421,7 @@ async def enrich_actor_image(db: Session, actor: Actor, client: MetaTubeClient |
         return False
 
 
-async def _upsert_actor(db: Session, client: MetaTubeClient | StashClient | StashScrapersClient, data: dict[str, Any]) -> Actor | None:
+async def _upsert_actor(db: Session, client: MetaTubeClient | StashClient | StashScrapersClient, data: dict[str, Any], *, enrich=True) -> Actor | None:
     name = normalize_actor_name(str(data.get("name") or ""))
     if not name:
         return None
@@ -522,7 +493,7 @@ async def _upsert_actor(db: Session, client: MetaTubeClient | StashClient | Stas
         if first:
             actor.image_url = first
 
-    if not actor.image_url:
+    if enrich and not actor.image_url:
         await enrich_actor_image(db, actor, client)
     return actor
 

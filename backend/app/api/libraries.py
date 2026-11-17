@@ -17,7 +17,7 @@ from app.services import task_store
 from app.api.tasks import conflict
 from app.services.library_revision import get_revision
 from app.services.watcher import reload_watches
-from app.services.file_readiness import settle_seconds, parent_depth, ignored_dirs
+from app.services.file_readiness import settle_seconds, ignored_dirs
 
 router = APIRouter()
 
@@ -29,7 +29,6 @@ def _library_out(db: Session, lib: Library) -> LibraryOut:
     data.content_revision = get_revision(lib.id)
     data.effective_settle_seconds = settle_seconds(lib)
     data.effective_poll_interval_seconds = max(30, lib.scan_interval_seconds or get_settings().scan_poll_interval_seconds)
-    data.effective_parent_depth = parent_depth(lib)
     data.effective_ignore_dirs = ",".join(sorted(ignored_dirs(lib)))
     data.waiting_files = db.query(func.count(FileObservation.id)).filter(FileObservation.library_id == lib.id, FileObservation.state.in_(("waiting", "unreadable"))).scalar() or 0
     return data

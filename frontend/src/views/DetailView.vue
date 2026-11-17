@@ -15,12 +15,10 @@ import {
   playMedia,
   renameMedia,
   rescrapeMedia,
-  updateMediaNumber,
-  getRecognition,
   translateMedia,
   unfavoriteMedia,
 } from '@/api/media'
-import type { MediaDetail, PlayInfo, ScrapeSource, RecognitionResult } from '@/api/types'
+import type { MediaDetail, PlayInfo, ScrapeSource } from '@/api/types'
 import { normalizeScrapeSource, scrapeSources } from '@/utils/scrapeSources'
 import { getErrorMessage } from '@/utils/errors'
 import { formatFileSize } from '@/utils/format'
@@ -48,11 +46,6 @@ const deleteLoading = ref(false)
 const providers = ref<string[]>([])
 const FOLLOW_GLOBAL_SOURCE = '__follow_global_source__'
 const scrapeProvider = ref(FOLLOW_GLOBAL_SOURCE)
-const scrapeFallback = ref(true)
-const scrapeNumber = ref('')
-const numberLocked = ref(false)
-const savingNumber = ref(false)
-const recognitionResult = ref<RecognitionResult | null>(null)
 const scrapeUrl = ref('')
 const scrapeSource = ref<ScrapeSource>('metatube')
 const useStash = computed(() => scrapeSource.value === 'stash')
@@ -65,10 +58,10 @@ const sourceModeHint = computed(() =>
   useStash.value && scrapeUrl.value.trim()
     ? 'Stash-box 场景链接可选择对应的 Stash-box；其他站点链接由 Stash 匹配刮削器。'
     : followsGlobalSource.value
-      ? '使用设置页的完整优先级和回退策略；未指定源时自动遍历适用源。'
+      ? '先按设置页的优先级尝试，全部未命中后继续其余可用源。'
       : scrapeProvider.value === ''
-        ? '自动遍历适用源，命中后停止；仅 URL 的源需填写来源地址。'
-        : '使用所选刮削器；失败后是否尝试其他源由下方开关决定。',
+        ? '自动尝试适用源，命中后停止；仅 URL 的源需填写来源地址。'
+        : '仅本次使用所选来源，文件名原样交给来源查询。',
 )
 const providerLabels = ref<Record<string, string>>({})
 const mediaProviderLabel = computed(() => {
@@ -98,12 +91,7 @@ const showImage = computed(() => Boolean(cover.value) && !imgFailed.value)
 const isChineseSub = computed(
   () => item.value?.subtitle_flag === 'C' || tags.value.includes('中文字幕'),
 )
-const canRescrape = computed(() =>
-  Boolean(
-    (scrapeNumber.value || item.value?.number || '').trim() ||
-    (supportsSourceUrl.value && scrapeUrl.value.trim()),
-  ),
-)
+const canRescrape = computed(() => Boolean(item.value?.filename || scrapeUrl.value.trim()))
 const isLocal = computed(() => item.value?.source_type === 'local')
 const canDelete = computed(() => Boolean(item.value))
 const deleteButtonLabel = computed(() => (isLocal.value ? '删除' : '删除索引'))
@@ -114,38 +102,6 @@ const canTranslate = computed(() => {
   return tags.value.length > 0
 })
 
-function syncScrapeNumber() {
-  scrapeNumber.value = item.value?.number || ''
-  numberLocked.value = Boolean(item.value?.number_locked)
-  recognitionResult.value = null
-}
-
-async function saveNumber() {
-  savingNumber.value = true
-  try {
-    item.value = await updateMediaNumber(
-      Number(props.id),
-      scrapeNumber.value.trim(),
-      numberLocked.value,
-    )
-    syncScrapeNumber()
-    ElMessage.success(
-      numberLocked.value ? '番号已保存并锁定，扫描时保留' : '番号已保存，后续扫描可重新识别',
-    )
-  } catch (error) {
-    ElMessage.error(getErrorMessage(error))
-  } finally {
-    savingNumber.value = false
-  }
-}
-async function previewNumber() {
-  try {
-    recognitionResult.value = await getRecognition(Number(props.id))
-  } catch (error) {
-    ElMessage.error(getErrorMessage(error))
-  }
-}
-
 async function load() {
   loading.value = true
   imgFailed.value = false
@@ -153,7 +109,6 @@ async function load() {
   play.value = null
   try {
     item.value = await getMedia(Number(props.id))
-    syncScrapeNumber()
   } catch (e: unknown) {
     ElMessage.error(getErrorMessage(e, '加载详情失败'))
   } finally {
@@ -169,16 +124,11 @@ async function loadProviders() {
     providerLabels.value = s.movie_provider_labels || {}
     const list = [...(s.movie_providers || [])]
     const pri = s[fields.priority] || []
-    const preferred = s[fields.provider] || ''
     for (const p of pri) {
       if (p && !list.includes(p)) list.push(p)
     }
-    if (preferred && !list.includes(preferred)) {
-      list.push(preferred)
-    }
     providers.value = list
     scrapeProvider.value = FOLLOW_GLOBAL_SOURCE
-    scrapeFallback.value = s[fields.fallback] !== false
   } catch {
     /* ignore */
   }
@@ -199,24 +149,12 @@ async function onPlay() {
 }
 
 async function onRescrape() {
-  const number = (scrapeNumber.value || item.value?.number || '').trim()
   const url = supportsSourceUrl.value ? scrapeUrl.value.trim() : ''
-  if (!number && !url) {
-    ElMessage.warning(supportsSourceUrl.value ? '请填写番号或来源 URL' : '请先填写番号')
-    return
-  }
   scrapeSubmitting.value = true
   try {
     const task = await rescrapeMedia(Number(props.id), {
       // Omission follows global priorities; explicit "" requests full automatic mode.
       provider: followsGlobalSource.value ? undefined : scrapeProvider.value,
-      fallback: followsGlobalSource.value
-        ? undefined
-        : scrapeProvider.value === ''
-          ? true
-          : scrapeFallback.value,
-      number,
-      number_locked: numberLocked.value,
       url: url || undefined,
     })
     acceptTask(task)
@@ -241,8 +179,7 @@ watch(
       const updated = await getMedia(Number(id))
       if (props.id === id) {
         item.value = updated
-        syncScrapeNumber()
-        imgFailed.value = false
+            imgFailed.value = false
       }
     } catch {
       /* Normal page loading still reports errors. */
@@ -543,46 +480,9 @@ watch(() => props.id, load)
                     aria-label="刮削来源 URL"
                     :disabled="scrapeLoading"
                 /></label>
-                <label class="management-field"
-                  >影片番号<el-input
-                    v-model="scrapeNumber"
-                    clearable
-                    maxlength="64"
-                    placeholder="填写或修改番号"
-                    aria-label="影片番号"
-                    :disabled="scrapeLoading"
-                /></label>
-                <div class="number-tools">
-                  <el-checkbox
-                    v-model="numberLocked"
-                    :disabled="scrapeLoading || savingNumber"
-                    aria-label="锁定番号"
-                    >锁定番号，扫描时保留</el-checkbox
-                  >
-                  <div>
-                    <el-button :disabled="scrapeLoading" :loading="savingNumber" @click="saveNumber"
-                      >保存番号</el-button
-                    ><el-button text @click="previewNumber">识别预览</el-button>
-                  </div>
-                  <span class="field-hint muted"
-                    >来源：{{
-                      item?.number_locked
-                        ? '手动锁定'
-                        : item?.number_source === 'parent'
-                          ? '父目录'
-                          : item?.number_source === 'filename'
-                            ? '文件名'
-                            : item?.number_source === 'manual'
-                              ? '手动填写'
-                              : '未记录'
-                    }}。保存或执行重刮后生效。锁定后，扫描和重命名保留该番号，标题、海报等信息仍可更新。</span
-                  >
-                  <div v-if="recognitionResult" class="field-hint">
-                    自动候选：{{ recognitionResult.number || '未识别到唯一番号' }}
-                    <p v-for="note in recognitionResult.notes" :key="note">
-                      {{ note }}
-                    </p>
-                  </div>
+                <div class="management-field">
+                  <span>查询文件名</span><code class="source-filename">{{ item.filename }}</code>
+                  <span class="field-hint muted">直接使用原文件名去掉扩展名后的文本查询，由刮削源匹配。</span>
                 </div>
                 <div class="management-field">
                   <span>刮削器</span
@@ -604,14 +504,6 @@ watch(() => props.id, load)
                   /></el-select>
                   <span class="field-hint muted">{{ sourceModeHint }}</span>
                 </div>
-                <el-switch
-                  v-model="scrapeFallback"
-                  :disabled="
-                    followsGlobalSource || scrapeProvider === '' || (useStash && !!scrapeUrl.trim())
-                  "
-                  active-text="失败时尝试其他源"
-                  aria-label="刮削失败时尝试其他源"
-                />
                 <div class="maintenance-actions">
                   <el-button
                     :loading="scrapeLoading"
@@ -670,15 +562,6 @@ watch(() => props.id, load)
   </div>
 </template>
 <style scoped>
-.number-tools {
-  display: grid;
-  gap: 8px;
-  margin: 14px 0;
-}
-.number-tools p {
-  line-height: 1.7;
-  overflow-wrap: anywhere;
-}
 .top-actions {
   display: flex;
   justify-content: space-between;
@@ -736,6 +619,10 @@ watch(() => props.id, load)
   height: 100%;
   object-fit: contain;
 }
+.source-filename {
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
 .sub-badge {
   position: absolute;
   top: 12px;
@@ -757,6 +644,8 @@ watch(() => props.id, load)
   color: var(--accent);
 }
 .number {
+  min-width: 0;
+  overflow-wrap: anywhere;
   font-family: var(--font-mono);
   font-size: 13px;
   font-weight: 600;

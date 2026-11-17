@@ -10,11 +10,9 @@ export interface Library {
   scan_interval_seconds: number | null
   full_scan_interval_seconds: number
   file_settle_seconds: number | null
-  parent_fallback_depth: number | null
   ignore_dirs: string | null
   effective_settle_seconds: number
   effective_poll_interval_seconds: number
-  effective_parent_depth: number
   effective_ignore_dirs: string
   waiting_files: number
   media_count?: number
@@ -65,9 +63,6 @@ export interface Actor {
 
 export interface MediaDetail extends MediaListItem {
   path: string
-  number_locked: boolean
-  number_source: string | null
-  recognition_notes: string | null
   plot?: string | null
   provider_id?: string | null
   runtime?: number | null
@@ -152,6 +147,7 @@ export type MediaSort =
 export type ActorSort = 'media_count_desc' | 'debut_asc' | 'debut_desc'
 
 export interface Settings {
+  task_concurrency?: number
   scrape_source?: ScrapeSource
   stashscrapers_base_url?: string
   stashscrapers_token_set?: boolean
@@ -208,6 +204,7 @@ export interface ScanJob {
 }
 
 export interface BackgroundTask extends ScanJob {
+  running_items?: number
   kind: 'scan' | 'rescrape_pending' | 'rescrape'
   waiting: number
   media_id: number | null
@@ -227,15 +224,6 @@ export interface BackgroundTask extends ScanJob {
   created_at: string
   updated_at: string
   finished_at: string | null
-}
-
-export interface RecognitionResult {
-  number: string | null
-  candidates: string[]
-  source: string | null
-  notes: string[]
-  locked?: boolean
-  effective_number?: string | null
 }
 
 export interface WaitingFile {

@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import type { Library, RecognitionResult, WaitingFile, CleanupItem } from '@/api/types'
+import type { Library, WaitingFile, CleanupItem } from '@/api/types'
 import {
   updateLibrary,
-  previewRecognition,
   getWaitingFiles,
   recheckWaiting,
   cleanupPreview,
@@ -30,12 +29,8 @@ const policy = ref({
   scan_interval_seconds: 120,
   full_hours: 24,
   file_settle_seconds: 60,
-  parent_fallback_depth: 2,
   ignore_dirs: '',
 })
-const filename = ref(''),
-  directory = ref('')
-const result = ref<RecognitionResult | null>(null)
 const waiting = ref<WaitingFile[]>([]),
   waitingTotal = ref(0)
 const suspects = ref<CleanupItem[]>([]),
@@ -71,11 +66,9 @@ watch(
       scan_interval_seconds: lib.effective_poll_interval_seconds || 120,
       full_hours: (lib.full_scan_interval_seconds || 86400) / 3600,
       file_settle_seconds: lib.effective_settle_seconds ?? 60,
-      parent_fallback_depth: lib.effective_parent_depth ?? 2,
       ignore_dirs: lib.effective_ignore_dirs || '',
     }
     tab.value = 'policy'
-    result.value = null
     suspects.value = []
     scanned.value = 0
     cursor.value = 0
@@ -92,17 +85,7 @@ async function save() {
       full_scan_interval_seconds: Math.round(full_hours * 3600),
     })
     emit('saved')
-    ElMessage.success('扫描与识别策略已保存')
-  })
-}
-async function recognize() {
-  await perform(async () => {
-    if (props.library)
-      result.value = await previewRecognition(
-        props.library.id,
-        filename.value.trim(),
-        directory.value.trim(),
-      )
+    ElMessage.success('扫描设置策略已保存')
   })
 }
 async function recheck() {
@@ -127,7 +110,7 @@ async function inspect(reset = false) {
 </script>
 
 <template>
-  <el-dialog v-model="visible" title="扫描与识别" width="720px">
+  <el-dialog v-model="visible" title="扫描设置" width="720px">
     <p class="tool-intro">{{ library?.name }} · {{ library?.path }}</p>
     <el-tabs v-model="tab">
       <el-tab-pane label="扫描策略" name="policy">
@@ -167,13 +150,6 @@ async function inspect(reset = false) {
                 :max="3600"
                 aria-label="文件连续稳定时间"
             /></el-form-item>
-            <el-form-item label="父目录兜底层数"
-              ><el-input-number
-                v-model="policy.parent_fallback_depth"
-                :min="0"
-                :max="3"
-                aria-label="父目录兜底层数"
-            /></el-form-item>
           </div>
           <el-form-item label="TS 文件处理">
             <el-select v-model="policy.ts_policy" aria-label="TS 文件处理">
@@ -187,7 +163,7 @@ async function inspect(reset = false) {
           </p>
           <p class="tool-hint">
             轮询空闲时会退避，只对变化路径建任务。稳定时间为 0
-            会关闭时间等待，过程文件和下载状态文件仍被拦截。父目录层数为 0 时只识别文件名。
+            会关闭时间等待，过程文件和下载状态文件仍被拦截。刮削查询直接使用原文件名，不做番号识别。
           </p>
           <el-form-item label="排除的子目录名（逗号分隔）"
             ><el-input
@@ -198,40 +174,6 @@ async function inspect(reset = false) {
           /></el-form-item>
           <el-button type="primary" :loading="busy" @click="save">保存扫描策略</el-button>
         </el-form>
-      </el-tab-pane>
-      <el-tab-pane label="识别预览" name="recognition">
-        <el-form label-position="top" @submit.prevent="recognize">
-          <el-form-item label="文件名"
-            ><el-input
-              v-model="filename"
-              placeholder="例如：SSIS.001中文字幕.mp4"
-              aria-label="预览文件名"
-          /></el-form-item>
-          <el-form-item label="所在子目录（相对媒体库，可留空）"
-            ><el-input
-              v-model="directory"
-              placeholder="例如：分类/SSIS-001"
-              aria-label="预览子目录"
-          /></el-form-item>
-          <el-button :loading="busy" :disabled="!filename.trim()" @click="recognize"
-            >预览识别结果</el-button
-          >
-        </el-form>
-        <div v-if="result" class="recognition-result" role="status">
-          <strong>{{ result.number || '未识别到唯一番号' }}</strong><span
-            >来源：{{
-              result.source === 'parent'
-                ? '父目录'
-                : result.source === 'filename'
-                  ? '文件名'
-                  : '待确认'
-            }}</span
-          ><span v-if="result.candidates.length">候选：{{ result.candidates.join('、') }}</span>
-          <p v-for="note in result.notes" :key="note">{{ note }}</p>
-        </div>
-        <p class="tool-hint">
-          只预览已保存策略的识别结果，不修改文件和索引。多个候选需要人工确认。
-        </p>
       </el-tab-pane>
       <el-tab-pane label="等待与清理" name="review">
         <div class="review-header">
@@ -330,24 +272,6 @@ h3 {
 .tool-list small {
   color: var(--muted);
   line-height: 1.7;
-}
-.recognition-result {
-  display: grid;
-  gap: 10px;
-  padding: 20px;
-  margin-top: 20px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  font-size: 12px;
-}
-.recognition-result strong {
-  color: var(--accent);
-  font-size: 20px;
-}
-.recognition-result p {
-  margin: 0;
-  color: var(--muted);
 }
 @media (max-width: 640px) {
   .policy-grid {

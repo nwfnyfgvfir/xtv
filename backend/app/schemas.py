@@ -17,7 +17,6 @@ class LibraryCreate(BaseModel):
     scan_interval_seconds: int | None = Field(default=None, ge=30, le=86400)
     full_scan_interval_seconds: int = Field(default=86400, ge=900, le=2592000)
     file_settle_seconds: int | None = Field(default=None, ge=0, le=3600)
-    parent_fallback_depth: int | None = Field(default=None, ge=0, le=3)
     ignore_dirs: str | None = Field(default=None, max_length=2048)
 
 
@@ -32,7 +31,6 @@ class LibraryUpdate(BaseModel):
     scan_interval_seconds: int | None = Field(default=None, ge=30, le=86400)
     full_scan_interval_seconds: int | None = Field(default=None, ge=900, le=2592000)
     file_settle_seconds: int | None = Field(default=None, ge=0, le=3600)
-    parent_fallback_depth: int | None = Field(default=None, ge=0, le=3)
     ignore_dirs: str | None = Field(default=None, max_length=2048)
 
 
@@ -50,12 +48,10 @@ class LibraryOut(BaseModel):
     scan_interval_seconds: int | None = None
     full_scan_interval_seconds: int = 86400
     file_settle_seconds: int | None = None
-    parent_fallback_depth: int | None = None
     ignore_dirs: str | None = None
     waiting_files: int = 0
     effective_settle_seconds: int = 60
     effective_poll_interval_seconds: int = 120
-    effective_parent_depth: int = 2
     effective_ignore_dirs: str = ""
     media_count: int = 0
     # In-process LibraryChanged generation (bumped on ingest/remove/scrape).
@@ -115,9 +111,6 @@ class MediaListItem(BaseModel):
 
 class MediaDetail(MediaListItem):
     path: str
-    number_locked: bool = False
-    number_source: str | None = None
-    recognition_notes: str | None = None
     plot: str | None = None
     provider_id: str | None = None
     runtime: int | None = None
@@ -144,15 +137,7 @@ class MediaListQuery(BaseModel):
 
 class RescrapeIn(BaseModel):
     provider: str | None = None
-    fallback: bool | None = None
-    number: str | None = None  # optional override / fill-in 番号
-    number_locked: bool | None = None
     url: str | None = Field(default=None, max_length=2048)
-
-
-class NumberUpdate(BaseModel):
-    number: str | None = Field(default=None, max_length=512)
-    locked: bool = True
 
 
 class PaginatedMedia(BaseModel):
@@ -232,6 +217,7 @@ class ProgressOut(BaseModel):
 
 
 class SettingsOut(BaseModel):
+    task_concurrency: int = 3
     scrape_source: Literal["metatube", "stash", "stashscrapers"] = "metatube"
     stashscrapers_base_url: str = ""
     stashscrapers_token_set: bool = False
@@ -276,6 +262,7 @@ class SettingsOut(BaseModel):
 
 
 class SettingsUpdate(BaseModel):
+    task_concurrency: int | None = Field(default=None, ge=1, le=8)
     scrape_source: Literal["metatube", "stash", "stashscrapers"] | None = None
     stashscrapers_base_url: str | None = None
     stashscrapers_token: str | None = None
@@ -329,6 +316,7 @@ class ScanJobOut(BaseModel):
 
 
 class TaskOut(ScanJobOut):
+    running_items: int = 0
     kind: str
     waiting: int = 0
 

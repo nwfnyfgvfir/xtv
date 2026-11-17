@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import re
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -10,7 +9,6 @@ import httpx
 
 from app.config import Settings, get_settings
 from app.services.images import store_scraped_image
-from app.services.naming import extract_number, normalize_number
 
 logger = logging.getLogger(__name__)
 
@@ -61,18 +59,6 @@ def _matches_url(url: str, pattern: Any) -> bool:
     except ValueError:
         return False
     return bool(expected) and (host == expected or host.endswith("." + expected))
-
-
-def _matches(scene: dict[str, Any], query: str) -> bool:
-    expected = re.sub(r"[^a-z0-9]", "", query.lower())
-    code = re.sub(r"[^a-z0-9]", "", (normalize_number(str(scene.get("code") or "")) or "").lower())
-    if not expected:
-        return False
-    if code:
-        return code == expected
-    tokens = re.findall(r"[a-z]+|[0-9]+", query.lower())
-    pattern = r"(?<![a-z0-9])" + r"[-_\s]*".join(map(re.escape, tokens)) + r"(?![a-z0-9])"
-    return any(re.search(pattern, str(v).lower()) for v in [scene.get("title"), *_urls(scene.get("urls"))] if v)
 
 
 class StashScrapersClient:
@@ -207,7 +193,7 @@ class StashScrapersClient:
     def _fatal(exc: StashScrapersError) -> bool:
         return exc.code in {"version_conflict", "unauthorized"} or exc.status_code in {401, 403, 503}
 
-    async def _number(self, entry: dict[str, Any], query: str, filename: str | None = None) -> list[dict[str, Any]]:
+    async def _filename(self, entry: dict[str, Any], query: str, filename: str | None = None) -> list[dict[str, Any]]:
         operations = {op.get("operation") for op in self._operations(entry)}
         scraper_id = entry["id"]
         last_error: StashScrapersError | None = None
@@ -215,8 +201,8 @@ class StashScrapersClient:
         def accept(row: dict[str, Any]) -> list[dict[str, Any]]:
             # A targeted fragment may legitimately omit Code (e.g. 1Pondo).
             # Keep the source's Code empty; do not fabricate a returned number.
-            if row.get("code") and not _matches(row, query) or not self._has_metadata(row):
-                logger.info("StashScrapers rejected scraper=%s reason=number_mismatch_or_empty_metadata", scraper_id)
+            if not self._has_metadata(row):
+                logger.info("StashScrapers rejected scraper=%s reason=empty_metadata", scraper_id)
                 return []
             scene = self._normalize(row, scraper_id, query)
             scene["_matched_number"] = query
@@ -236,9 +222,6 @@ class StashScrapersClient:
                 failed(exc, "name")
                 results, version = [], ""
             for result in results:
-                if not _matches(result, query):
-                    logger.info("StashScrapers rejected search candidate scraper=%s reason=number_mismatch", scraper_id)
-                    continue
                 common: dict[str, Any] = {"scraper_id": scraper_id, "object": "scene", "rules_version": version}
                 detail_requests = []
                 if "query_fragment" in operations and isinstance(result.get("raw"), dict) and result["raw"]:
@@ -261,8 +244,7 @@ class StashScrapersClient:
                         if accepted:
                             return accepted
         if "fragment" in operations:
-            parsed_filename = extract_number(filename).number if filename else None
-            filename_hint = filename if parsed_filename and _matches({"code": parsed_filename}, query) else query + ".mp4"
+            filename_hint = filename or query + ".mp4"
             try:
                 results, _ = await self._results("detail", {
                     "scraper_id": scraper_id, "object": "scene", "operation": "fragment",
@@ -299,7 +281,7 @@ class StashScrapersClient:
                     raise StashScrapersError("The selected StashScrapers scraper is unavailable for this operation")
                 attempted = self._attempted.setdefault(attempt_key, set())
                 candidates = selected + [row for row in usable if row not in selected and row["id"] not in attempted] if fallback or not provider else selected
-                logger.info("StashScrapers plan mode=%s selected=%s eligible=%d scheduled=%d skipped=%d", "url" if by_url else "number", provider or "auto", len(usable), len(candidates), len(entries) - len(usable))
+                logger.info("StashScrapers plan mode=%s selected=%s eligible=%d scheduled=%d skipped=%d", "url" if by_url else "filename", provider or "auto", len(usable), len(candidates), len(entries) - len(usable))
                 last_error: StashScrapersError | None = None
                 for entry in candidates:
                     attempted.add(entry["id"])
@@ -308,7 +290,7 @@ class StashScrapersClient:
                             results, _ = await self._results("detail", {"scraper_id": entry["id"], "object": "scene", "url": query, "rules_version": entry.get("version") or ""})
                             scenes = [self._normalize(row, entry["id"], query) for row in results if self._has_metadata(row)]
                         else:
-                            scenes = await self._number(entry, query, filename)
+                            scenes = await self._filename(entry, query, filename)
                         if scenes:
                             logger.info("StashScrapers matched scraper=%s; stop remaining scrapers", entry["id"])
                             return scenes

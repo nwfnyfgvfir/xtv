@@ -15,22 +15,17 @@ const appVersion = APP_VERSION
 const settings = ref<Settings | null>(null)
 const health = ref<Health | null>(null)
 const form = ref({
+  task_concurrency: 3,
   scrape_source: 'metatube' as ScrapeSource,
   stashscrapers_base_url: '',
   stashscrapers_token: '',
-  stashscrapers_scraper: '',
   stashscrapers_scraper_priority: [] as string[],
-  stashscrapers_fallback: true,
   stash_base_url: '',
   stash_api_key: '',
-  stash_scraper: '',
   stash_scraper_priority: [] as string[],
-  stash_fallback: true,
   metatube_base_url: '',
   metatube_token: '',
-  metatube_provider: '',
   metatube_provider_priority: [] as string[],
-  metatube_fallback: true,
   auto_scrape: true,
   auto_translate: true,
   translate_provider: 'google' as TranslateProvider,
@@ -76,18 +71,6 @@ const activePriority = computed({
     form.value[activeSourceFields.value.priority] = value
   },
 })
-const activeProvider = computed({
-  get: () => form.value[activeSourceFields.value.provider],
-  set: (value: string) => {
-    form.value[activeSourceFields.value.provider] = value
-  },
-})
-const activeFallback = computed({
-  get: () => form.value[activeSourceFields.value.fallback],
-  set: (value: boolean) => {
-    form.value[activeSourceFields.value.fallback] = value
-  },
-})
 const savedSource = computed(() => normalizeScrapeSource(settings.value?.scrape_source))
 const connectedSource = computed(() => scrapeSources[savedSource.value].label)
 const sourceHealth = computed(() => health.value?.[savedSource.value])
@@ -116,8 +99,6 @@ const movieProviders = computed(() =>
     : [],
 )
 const providerCount = computed(() => movieProviders.value.length)
-const hasPriority = computed(() => activePriority.value.length > 0)
-const usesAutomaticSource = computed(() => !hasPriority.value && !activeProvider.value)
 
 function providerLabel(id: string): string {
   return settings.value?.scrape_source === form.value.scrape_source
@@ -153,7 +134,6 @@ const allProviderOptions = computed(() => {
   for (const p of activePriority.value) {
     if (p) set.add(p)
   }
-  if (activeProvider.value) set.add(activeProvider.value)
   return Array.from(set).sort((a, b) => a.localeCompare(b))
 })
 
@@ -170,17 +150,14 @@ function normalizeProvider(mode: string | undefined): TranslateProvider {
 }
 
 function applySettingsToForm(s: Settings) {
+  form.value.task_concurrency = s.task_concurrency ?? 3
   form.value.scrape_source = normalizeScrapeSource(s.scrape_source)
   form.value.stashscrapers_base_url = s.stashscrapers_base_url || ''
   form.value.stashscrapers_token = ''
-  form.value.stashscrapers_scraper = s.stashscrapers_scraper || ''
   form.value.stashscrapers_scraper_priority = [...(s.stashscrapers_scraper_priority || [])]
-  form.value.stashscrapers_fallback = s.stashscrapers_fallback !== false
   form.value.stash_base_url = s.stash_base_url || ''
   form.value.stash_api_key = ''
-  form.value.stash_scraper = s.stash_scraper || ''
   form.value.stash_scraper_priority = [...(s.stash_scraper_priority || [])]
-  form.value.stash_fallback = s.stash_fallback !== false
   form.value.metatube_base_url = s.metatube_base_url
   form.value.auto_scrape = s.auto_scrape
   form.value.auto_translate = s.auto_translate !== false
@@ -198,9 +175,7 @@ function applySettingsToForm(s: Settings) {
   form.value.image_external_proxy_url = s.image_external_proxy_url || ''
   form.value.image_local_cache = Boolean(s.image_local_cache)
   form.value.scan_extensions = s.scan_extensions
-  form.value.metatube_provider = s.metatube_provider || ''
   form.value.metatube_provider_priority = [...(s.metatube_provider_priority || [])]
-  form.value.metatube_fallback = s.metatube_fallback !== false
   form.value.metatube_token = ''
   form.value.translate_deepl_api_key = ''
   form.value.translate_ai_api_key = ''
@@ -282,6 +257,43 @@ function movePriority(index: number, dir: -1 | 1) {
   priorityPick.value = [...list]
 }
 
+const priorityList = ref<HTMLUListElement | null>(null)
+const draggingProvider = ref<string | null>(null)
+let priorityDrag: { pointer: number; source: ScrapeSource; original: string[] } | null = null
+
+function startPriorityDrag(event: PointerEvent, provider: string) {
+  if (event.button !== 0 || activePriority.value.length < 2) return
+  priorityDrag = { pointer: event.pointerId, source: form.value.scrape_source, original: [...activePriority.value] }
+  draggingProvider.value = provider
+  priorityList.value?.setPointerCapture(event.pointerId)
+  event.preventDefault()
+}
+
+function movePriorityDrag(event: PointerEvent) {
+  if (!priorityDrag || event.pointerId !== priorityDrag.pointer || !priorityList.value) return
+  const rows = [...priorityList.value.querySelectorAll<HTMLLIElement>('li')]
+  const index = rows.findIndex((row) => {
+    const rect = row.getBoundingClientRect()
+    return event.clientY >= rect.top && event.clientY <= rect.bottom
+  })
+  const from = activePriority.value.indexOf(draggingProvider.value || '')
+  if (index < 0 || from < 0 || from === index) return
+  const list = [...activePriority.value]
+  list.splice(index, 0, ...list.splice(from, 1))
+  activePriority.value = list
+  priorityPick.value = [...list]
+}
+
+function endPriorityDrag(event: PointerEvent) {
+  if (!priorityDrag || event.pointerId !== priorityDrag.pointer) return
+  if (event.type === 'pointercancel' || event.type === 'lostpointercapture') {
+    form.value[scrapeSources[priorityDrag.source].priority] = priorityDrag.original
+    priorityPick.value = [...activePriority.value]
+  }
+  priorityDrag = null
+  draggingProvider.value = null
+}
+
 function removePriority(index: number) {
   const list = activePriority.value.filter((_, i) => i !== index)
   activePriority.value = list
@@ -313,13 +325,9 @@ async function save() {
     const body: Record<string, unknown> = {
       scrape_source: form.value.scrape_source,
       stashscrapers_base_url: form.value.stashscrapers_base_url.trim(),
-      stashscrapers_scraper: form.value.stashscrapers_scraper,
       stashscrapers_scraper_priority: form.value.stashscrapers_scraper_priority,
-      stashscrapers_fallback: form.value.stashscrapers_fallback,
       stash_base_url: form.value.stash_base_url.trim(),
-      stash_scraper: form.value.stash_scraper,
       stash_scraper_priority: form.value.stash_scraper_priority,
-      stash_fallback: form.value.stash_fallback,
       metatube_base_url: form.value.metatube_base_url,
       auto_scrape: form.value.auto_scrape,
       auto_translate: form.value.auto_translate,
@@ -336,9 +344,8 @@ async function save() {
       image_external_proxy_url: form.value.image_external_proxy_url,
       image_local_cache: form.value.image_local_cache,
       scan_extensions: form.value.scan_extensions,
-      metatube_provider: form.value.metatube_provider,
+      task_concurrency: form.value.task_concurrency,
       metatube_provider_priority: form.value.metatube_provider_priority,
-      metatube_fallback: form.value.metatube_fallback,
     }
     if (form.value.metatube_token) body.metatube_token = form.value.metatube_token
     if (form.value.stashscrapers_token.trim())
@@ -544,67 +551,45 @@ onMounted(() => {
                     :value="p"
                   />
                 </el-select>
-                <ul v-if="activePriority.length" class="priority-list">
-                  <li v-for="(p, i) in activePriority" :key="`${p}-${i}`">
+                <ul v-if="activePriority.length" ref="priorityList" class="priority-list"
+                  @pointermove="movePriorityDrag" @pointerup="endPriorityDrag"
+                  @pointercancel="endPriorityDrag" @lostpointercapture="endPriorityDrag">
+                  <li v-for="(p, i) in activePriority" :key="p" :class="{ 'is-dragging': draggingProvider === p }">
+                    <button
+                      type="button"
+                      class="priority-drag-handle"
+                      :aria-label="`拖动调整 ${providerLabel(p)} 的优先级`"
+                      :aria-pressed="draggingProvider === p"
+                      :disabled="activePriority.length < 2"
+                      @pointerdown="startPriorityDrag($event, p)"
+                    ><span aria-hidden="true">⠿</span></button>
                     <span class="pri-idx">{{ i + 1 }}</span>
-                    <span class="pri-name">{{ providerLabel(p) }}</span>
+                    <span class="pri-name" :title="providerLabel(p)">{{ providerLabel(p) }}</span>
                     <span class="pri-actions">
-                      <el-button size="small" text :disabled="i === 0" @click="movePriority(i, -1)">
+                      <el-button size="small" text :disabled="i === 0" :aria-label="`上移 ${providerLabel(p)}`" @click="movePriority(i, -1)">
                         ↑
                       </el-button>
                       <el-button
                         size="small"
                         text
                         :disabled="i === activePriority.length - 1"
+                        :aria-label="`下移 ${providerLabel(p)}`"
                         @click="movePriority(i, 1)"
                       >
                         ↓
                       </el-button>
-                      <el-button size="small" text type="danger" @click="removePriority(i)">
+                      <el-button size="small" text type="danger" :aria-label="`移除优先源 ${providerLabel(p)}`" @click="removePriority(i)">
                         ×
                       </el-button>
                     </span>
                   </li>
                 </ul>
                 <span class="field-hint muted block">
-                  按列表顺序尝试，命中后停止；全部未命中后由 fallback
-                  决定是否尝试其余源。为空时使用下方单源，单源也为空时自动遍历适用源。
+                  优先按列表从上到下尝试；全部失败或无结果后，继续尝试其余可用源。拖动手柄可调整顺序，命中后停止。
                 </span>
               </div>
             </el-form-item>
 
-            <el-form-item label="兼容单源">
-              <el-select
-                v-model="activeProvider"
-                clearable
-                filterable
-                allow-create
-                default-first-option
-                :disabled="hasPriority"
-                placeholder="自动（优先级为空时生效）"
-                style="width: 100%"
-              >
-                <el-option label="自动" value="" />
-                <el-option
-                  v-for="p in allProviderOptions"
-                  :key="p"
-                  :label="providerLabel(p)"
-                  :value="p"
-                />
-              </el-select>
-              <span class="field-hint muted block">
-                优先级列表为空时生效；非空时刮削按优先级顺序尝试
-              </span>
-            </el-form-item>
-
-            <el-form-item label="失败时 fallback">
-              <el-switch v-model="activeFallback" :disabled="usesAutomaticSource" />
-              <span class="field-hint muted">{{
-                usesAutomaticSource
-                  ? '自动模式会遍历适用源；此开关仅在指定优先级或单源时生效'
-                  : '优先级或指定源全部未命中后，是否尝试其余源'
-              }}</span>
-            </el-form-item>
           </el-form>
         </section>
         <section
@@ -621,6 +606,10 @@ onMounted(() => {
           <el-form class="settings-form" label-position="top" @submit.prevent="save">
             <el-form-item label="自动刮削">
               <el-switch v-model="form.auto_scrape" />
+            </el-form-item>
+            <el-form-item label="并发刮削数量">
+              <el-input-number v-model="form.task_concurrency" :min="1" :max="8" aria-label="并发刮削数量" />
+              <span class="field-hint muted block">默认同时处理 3 部影片，每部影片按来源优先级依次查询。修改将在当前任务结束后生效。</span>
             </el-form-item>
             <el-form-item label="扫描扩展名">
               <el-input v-model="form.scan_extensions" />
@@ -1060,6 +1049,32 @@ onMounted(() => {
 .priority-list li:last-child {
   border-bottom: 0;
 }
+.priority-list li.is-dragging {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 var(--accent);
+}
+.priority-drag-handle {
+  display: grid;
+  place-items: center;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 24px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.priority-drag-handle:active {
+  color: var(--accent);
+  cursor: grabbing;
+}
+.priority-drag-handle:disabled {
+  opacity: 0.4;
+}
 .pri-idx {
   width: 23px;
   height: 23px;
@@ -1277,6 +1292,25 @@ onMounted(() => {
   }
 }
 @media (max-width: 700px) {
+  .priority-list li {
+    display: grid;
+    grid-template-columns: 44px 23px minmax(0, 1fr);
+    gap: 6px 8px;
+    padding: 8px;
+  }
+  .priority-drag-handle {
+    grid-row: 1 / 3;
+    height: 100%;
+  }
+  .pri-actions {
+    grid-column: 2 / -1;
+    justify-content: flex-end;
+  }
+  .pri-actions :deep(.el-button.is-text) {
+    min-width: 44px;
+    min-height: 44px;
+    margin-left: 0;
+  }
   .settings-layout {
     grid-template-columns: minmax(0, 1fr);
     gap: 19px;

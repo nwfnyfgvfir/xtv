@@ -443,7 +443,7 @@ onBeforeUnmount(stopSoftRefresh)
           /></el-button>
           <template #dropdown
             ><el-dropdown-menu
-              ><el-dropdown-item command="tools">扫描与识别</el-dropdown-item
+              ><el-dropdown-item command="tools">扫描设置</el-dropdown-item
               ><el-dropdown-item command="delete"
                 ><span class="danger-text">删除媒体库</span></el-dropdown-item
               ></el-dropdown-menu
@@ -500,7 +500,7 @@ onBeforeUnmount(stopSoftRefresh)
               >扫描目录</el-dropdown-item
             ><el-dropdown-item :disabled="scanningId != null" command="rescrape"
               >补全未刮削影片</el-dropdown-item
-            ><el-dropdown-item command="tools">扫描与识别</el-dropdown-item
+            ><el-dropdown-item command="tools">扫描设置</el-dropdown-item
             ><el-dropdown-item divided command="delete"
               ><span class="danger-text">删除媒体库</span></el-dropdown-item
             ></el-dropdown-menu

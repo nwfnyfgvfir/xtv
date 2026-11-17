@@ -35,10 +35,6 @@ def settle_seconds(lib: Library) -> int:
     return max(0, lib.file_settle_seconds if lib.file_settle_seconds is not None else get_settings().file_settle_seconds)
 
 
-def parent_depth(lib: Library) -> int:
-    return max(0, min(3, lib.parent_fallback_depth if lib.parent_fallback_depth is not None else get_settings().filename_parent_depth))
-
-
 def root_path(lib: Library) -> Path:
     path = Path(lib.path)
     return (path if path.is_absolute() else get_settings().media_root_path / path).resolve()
@@ -210,19 +206,13 @@ def check_file(db: Session, lib: Library, path: Path, *, now: datetime | None = 
     return FileCheck(state, reason, stat, target)
 
 
-def apply_recognition(item: MediaItem, lib: Library, path: Path) -> None:
-    from app.services.naming import recognize_path, RECOGNITION_VERSION
-    import json
+def apply_source_name(item: MediaItem, path: Path) -> None:
+    from app.services.naming import source_name, SOURCE_NAME_VERSION
 
-    parsed = recognize_path(path, root_path(lib), parent_depth(lib))
-    if not item.number_locked:
-        # Ambiguous candidates must not retain a stale guessed code.
-        if parsed.number or parsed.candidates:
-            if item.number != parsed.number:
-                item.scraped_at = None
-            item.number = parsed.number
-            item.number_source = parsed.source
-    item.recognition_notes = json.dumps(parsed.notes, ensure_ascii=False)
-    item.recognition_version = f"{RECOGNITION_VERSION}:{parent_depth(lib)}"
-    item.disc = parsed.disc
-    item.subtitle_flag = parsed.subtitle_flag
+    query = source_name(path.name)
+    if item.recognition_version == SOURCE_NAME_VERSION and item.number != query:
+        item.scraped_at = None
+    item.number = query
+    item.number_source = "filename"
+    item.recognition_notes = None
+    item.recognition_version = SOURCE_NAME_VERSION

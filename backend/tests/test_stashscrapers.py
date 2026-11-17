@@ -107,7 +107,7 @@ def seed(db, number="ABP-001"):
     library = Library(name="REST test", path="local", type="local")
     db.add(library)
     db.flush()
-    item = MediaItem(library_id=library.id, path="local/test.mp4", filename="test.mp4", number=number, title="Old title", source_type="local")
+    item = MediaItem(library_id=library.id, path="local/test.mp4", filename=f"{number or 'unknown'}.mp4", number=number, title="Old title", source_type="local")
     db.add(item)
     db.commit()
     return item
@@ -145,7 +145,7 @@ def test_catalog_filters_capabilities_and_preserves_directory_ids(rest_settings,
 def test_name_search_expands_exact_candidate_with_original_fragment_and_version(rest_settings, rest_http, database, monkeypatch):
     requests, replies = rest_http
     raw = {"title": "Search title", "urls": ["https://source.example/ABP-001"], "custom": {"selection": 7}}
-    replies.extend([catalog(), response(result("ABP-0012"), result(raw=raw)), response(result(
+    replies.extend([catalog(), response(result(raw=raw), result("ABP-0012")), response(result(
         title="日本語タイトル", details="日本語あらすじ", date="2024-07-10", duration=5401,
         images=[INLINE], studio={"name": "Studio"}, tags=[{"name": "Drama"}],
         performers=[{"name": "Actor", "urls": ["https://source.example/actor/1"], "images": [INLINE]}],
@@ -169,10 +169,11 @@ def test_name_search_expands_exact_candidate_with_original_fragment_and_version(
     assert len(requests) == 3
 
 
-def test_search_does_not_pick_first_unrelated_candidate(rest_settings, rest_http):
+def test_search_uses_provider_ranking_without_inferring_catalog_codes(rest_settings, rest_http):
     _, replies = rest_http
-    replies.extend([catalog(), response(result("ABP-0012"), result("OTHER-001"))])
-    assert asyncio.run(rest.StashScrapersClient().search_movie("ABP-001", "Folder/Source", False)) == []
+    replies.extend([catalog(), response(result('provider-code')), response(result('provider-code', title='Matched by source'))])
+    rows = asyncio.run(rest.StashScrapersClient().search_movie('original filename', 'Folder/Source', False))
+    assert rows[0]['title'] == 'Matched by source' and rows[0]['number'] == 'provider-code'
 
 
 def test_fragment_only_scraper_receives_catalog_filename(rest_settings, rest_http):
@@ -192,7 +193,7 @@ def test_url_only_scraper_does_not_search_and_can_fill_missing_number(rest_setti
     replies.extend([catalog(entry("Folder/Source", ("url",))), response(result())])
     out = api.post(f"/api/media/{item.id}/rescrape", json={"url": "https://source.example/ABP-001", "provider": "Folder/Source", "fallback": False})
     assert out.status_code == 200, out.text
-    assert out.json()["number"] == "ABP-001"
+    assert out.json()["number"] == "unknown"
     assert [request.url.path for request in requests] == ["/api/scrapers", "/api/detail"]
     assert json.loads(requests[1].content)["scraper_id"] == "Folder/Source"
 
@@ -391,11 +392,11 @@ def test_code_only_result_does_not_prevent_a_later_source_from_running(rest_sett
     assert rows[0]["provider"] == "stashscrapers:B"
 
 
-def test_manual_number_override_does_not_reuse_a_conflicting_filename(rest_settings, rest_http):
+def test_fragment_keeps_the_original_filename_without_number_inference(rest_settings, rest_http):
     requests, replies = rest_http
     replies.extend([catalog(entry(names=("fragment",))), response(result())])
     asyncio.run(rest.StashScrapersClient().search_movie("ABP-001", "Folder/Source", False, filename="ABP-002.mp4"))
-    assert json.loads(requests[1].content)["fragment"]["filename"] == "ABP-001.mp4"
+    assert json.loads(requests[1].content)["fragment"]["filename"] == "ABP-002.mp4"
 
 
 def test_no_priority_or_single_source_tries_eligible_sources_in_catalog_order(rest_settings, rest_http, database):
@@ -415,19 +416,18 @@ def test_no_priority_or_single_source_tries_eligible_sources_in_catalog_order(re
 
 
 @pytest.mark.parametrize("fallback", [False, True])
-def test_single_source_without_priority_obeys_fallback(rest_settings, rest_http, database, fallback):
+def test_legacy_single_source_and_fallback_no_longer_restrict_sources(rest_settings, rest_http, database, fallback):
     requests, replies = rest_http
     rest_settings.stashscrapers_scraper = "First"
     rest_settings.stashscrapers_fallback = fallback
     replies.extend([catalog(entry("First", ("fragment",)), entry("Second", ("fragment",))), response()])
-    if fallback:
-        replies.append(response(result()))
+    replies.append(response(result()))
     db, _ = database
     item = seed(db)
-    assert asyncio.run(scrape.scrape_media_item(db, item, force=True)) is fallback
-    expected = ["First", "Second"] if fallback else ["First"]
+    assert asyncio.run(scrape.scrape_media_item(db, item, force=True)) is True
+    expected = ["First", "Second"]
     assert [json.loads(req.content)["scraper_id"] for req in requests[1:]] == expected
-    assert bool(item.scraped_at) is fallback
+    assert bool(item.scraped_at) is True
 
 
 @pytest.mark.parametrize("url", [None, "https://source.example/ABP-001"])
@@ -450,3 +450,28 @@ def test_fc2_ppv_alias_matches_normalized_media_number(rest_settings, rest_http,
     item = seed(db, "FC2-123456")
     assert asyncio.run(scrape.scrape_media_item(db, item, force=True)) is True
     assert item.number == "FC2-123456" and item.provider == "stashscrapers:Folder/Source"
+
+
+def test_source_filename_and_fc2_ppv_are_sent_verbatim_and_never_replaced_by_source_code(rest_settings, rest_http, database):
+    requests, replies = rest_http
+    db, _ = database
+    item = seed(db, 'FC2-1066192')
+    item.filename = 'fc2_PPV_1066192 - 中文 1080p.mp4'
+    replies.extend([catalog(entry(names=('fragment',))), response(result(code='FC2-1066192'))])
+    assert asyncio.run(scrape.scrape_media_item(db, item, force=True)) is True
+    fragment = json.loads(requests[1].content)['fragment']
+    assert fragment['filename'] == item.filename
+    assert fragment['title'] == fragment['code'] == 'fc2_PPV_1066192 - 中文 1080p'
+    assert item.number == 'fc2_PPV_1066192 - 中文 1080p'
+
+
+def test_concurrency_setting_is_validated_and_persisted(rest_settings, database, api, monkeypatch):
+    db, factory = database
+    monkeypatch.setattr(settings_api, 'SessionLocal', factory)
+    monkeypatch.setattr(settings_api, '_stashscrapers_providers_with_status', AsyncMock(return_value=([], {}, None, False)))
+    response = api.put('/api/settings', json={'task_concurrency': 4})
+    assert response.status_code == 200 and response.json()['task_concurrency'] == 4
+    assert db.get(AppSetting, 'task_concurrency').value == '4'
+    assert rest_settings.task_concurrency == 4
+    assert api.put('/api/settings', json={'task_concurrency': 0}).status_code == 422
+    assert api.put('/api/settings', json={'task_concurrency': 9}).status_code == 422

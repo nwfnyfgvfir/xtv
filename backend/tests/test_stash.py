@@ -113,7 +113,7 @@ def seed_media(db, number="ABP-001"):
     db.add(library)
     db.flush()
     item = MediaItem(
-        library_id=library.id, filename="test.mp4", path="local/test.mp4",
+        library_id=library.id, filename=f"{number or 'unknown'}.mp4", path="local/test.mp4",
         number=number, source_type="local", subtitle_flag="C",
     )
     db.add(item)
@@ -149,7 +149,6 @@ def test_stash_name_search_expands_detail_saves_images_and_translates(stash_sett
     replies.extend([
         graphql(listScrapers=[scraper()]),
         graphql(scrapeSingleScene=[
-            {"title": "ABP-0010 unrelated", "code": "ABP-0010", "urls": ["https://source.example/wrong"]},
             {"title": "ABP-001 result", "urls": ["https://source.example/ABP-001"]},
         ]),
         graphql(scrapeSingleScene=[{
@@ -220,10 +219,10 @@ def test_stash_name_result_uses_url_when_query_fragment_is_unsupported(stash_set
     (["NAME"], {"title": "ABP-001 misleading title", "code": "ABP-002"}),
     (["FRAGMENT"], {"title": "Wrong scene", "code": "ABP-002"}),
 ])
-def test_stash_does_not_accept_a_different_catalog_number(stash_settings, stash_http, types, scene):
+def test_stash_defers_filename_matching_to_the_source(stash_settings, stash_http, types, scene):
     _, replies = stash_http
     replies.extend([graphql(listScrapers=[scraper(types=types)]), graphql(scrapeSingleScene=[scene])])
-    assert asyncio.run(stash.StashClient().search_movie("ABP-001", provider="JavBus", fallback=False)) == []
+    assert asyncio.run(stash.StashClient().search_movie("ABP-001", provider="JavBus", fallback=False))[0]["title"] == scene["title"]
 
 
 def test_invalid_source_url_does_not_change_media_number(stash_settings, database, api):
@@ -250,18 +249,16 @@ def test_stash_priority_continues_after_graphql_failure(stash_settings, stash_ht
     assert [json.loads(r.content)["variables"]["source"]["scraper_id"] for r in requests[1:]] == ["A", "B"]
 
 
-def test_stash_disabled_fallback_does_not_use_other_scrapers(stash_settings, stash_http, database):
+def test_stash_legacy_disabled_fallback_does_not_disable_remaining_sources(stash_settings, stash_http, database):
     requests, replies = stash_http
     db, _ = database
-    replies.extend([
-        graphql(listScrapers=[scraper("A"), scraper("B")]),
-        graphql(scrapeSingleScene=[]),
-    ])
-    stash_settings.stash_scraper = "A"
+    replies.extend([graphql(listScrapers=[scraper('A'), scraper('B')]),
+        graphql(scrapeSingleScene=[]), graphql(scrapeSingleScene=[{'title': 'Source result', 'code': 'ABP-001'}])])
+    stash_settings.stash_scraper, stash_settings.stash_fallback = 'A', False
+    stash_settings.stash_scraper_priority = '["A"]'
     item = seed_media(db)
-    assert asyncio.run(scrape.scrape_media_item(db, item)) is False
-    assert item.scraped_at is None
-    assert len(requests) == 2
+    assert asyncio.run(scrape.scrape_media_item(db, item)) is True
+    assert item.provider == 'stash:B' and len(requests) == 3
 
 
 def test_stash_url_only_scraper_without_number(stash_settings, stash_http, database, api):
@@ -274,7 +271,7 @@ def test_stash_url_only_scraper_without_number(stash_settings, stash_http, datab
     }))
     response = api.post(f"/api/media/{item.id}/rescrape", json={"url": "https://source.example/scene/2"})
     assert response.status_code == 200, response.text
-    assert response.json()["number"] == "ABP-002"
+    assert response.json()["number"] == "unknown"
     assert response.json()["provider"] == "stash:url"
     assert response.json()["cover_url"].startswith("/api/images/scraped/")
     assert len(requests) == 1
@@ -470,10 +467,10 @@ def test_stash_box_metadata_uses_stash_endpoint_and_existing_metadata_pipeline(s
 
 
 @pytest.mark.parametrize('code', ['ABP-002', 'ABP-0010'])
-def test_stash_box_search_rejects_a_conflicting_number(stash_settings, stash_http, code):
+def test_stash_box_matching_is_owned_by_the_source(stash_settings, stash_http, code):
     _, replies = stash_http
     replies.extend([configured_boxes(box()), graphql(scrapeSingleScene=[{'title': 'ABP-001 misleading title', 'code': code}])])
-    assert asyncio.run(stash.StashClient().search_movie('ABP-001', stash._box_id(BOX_ENDPOINT), False)) == []
+    assert asyncio.run(stash.StashClient().search_movie('ABP-001', stash._box_id(BOX_ENDPOINT), False))[0]['number'] == code
 
 
 def test_stash_box_participates_in_automatic_fallback(stash_settings, stash_http):
@@ -511,7 +508,7 @@ def test_box_scene_url_uses_scene_uuid_via_stash(stash_settings, stash_http, dat
         'title': 'Scene from box URL', 'code': 'ABP-002', 'remote_site_id': BOX_SCENE_ID,
     }])])
     response = api.post(f'/api/media/{item.id}/rescrape', json={'url': f'https://box.example/scenes/{BOX_SCENE_ID}'})
-    assert response.status_code == 200 and response.json()['number'] == 'ABP-002'
+    assert response.status_code == 200 and response.json()['number'] == 'unknown'
     assert response.json()['provider'].startswith('stash:stash-box:')
     assert json.loads(requests[-1].content)['variables'] == {'source': {'stash_box_endpoint': BOX_ENDPOINT}, 'input': {'query': BOX_SCENE_ID}}
 

@@ -95,7 +95,7 @@ async function toggleFav(e: Event) {
         <span class="hover-action"><AppIcon name="external" :size="16" />查看详情</span>
       </div>
       <div class="meta">
-        <span class="media-number">{{ item.number || '未识别番号' }}</span>
+        <span class="media-number" :title="item.filename">{{ item.number || item.filename }}</span>
         <h3 class="title" :title="title">{{ title }}</h3>
         <p class="sub">{{ metaText }}</p>
       </div>
@@ -131,26 +131,12 @@ async function toggleFav(e: Event) {
   border-radius: 10px;
   isolation: isolate;
 }
-.poster::after {
-  content: '';
-  position: absolute;
-  inset: 50% 0 0;
-  background: linear-gradient(transparent, #0b11175c);
-  pointer-events: none;
-}
 .poster > img {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-  object-fit: cover;
-  /* Scraped poster thumbnails often include a thin baked-in white border. */
-  transform: scale(1.04);
-  transform-origin: center;
-  transition: transform var(--dur-3) var(--ease-out);
-}
-.card-link:hover .poster > img {
-  transform: scale(1.07);
+  object-fit: contain;
 }
 .card-link:focus-visible {
   outline-offset: 5px;
@@ -272,6 +258,12 @@ async function toggleFav(e: Event) {
   padding: 13px 1px 0;
 }
 .media-number {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
   color: var(--text-soft);
   font-family: var(--font-mono);
   letter-spacing: 0.015em;

@@ -1,195 +1,63 @@
-from __future__ import annotations
-
 import asyncio
 from types import SimpleNamespace
-from typing import Any
 
-from app.services.metatube import MetaTubeError
+from app.services.metatube import MetaTubeClient, MetaTubeError
 from app.services.scrape import _pick_best, _priority_list_from_settings, _search_with_chain
 
 
-class FakeClient:
-    def __init__(self, responses: dict[tuple[str, bool], list[dict[str, Any]]]):
-        self.responses = responses
-        self.calls: list[tuple[str, str, bool]] = []
+class FakeClient(MetaTubeClient):
+    def __init__(self, responses, sources=('A', 'B', 'C', 'D')):
+        self.responses, self.sources, self.calls = responses, sources, []
 
-    async def search_movie(self, q: str, provider: str = "", fallback: bool = True):
-        self.calls.append((q, provider, fallback))
-        return list(self.responses.get((provider, fallback), []))
+    async def search_movie(self, query, provider='', fallback=True):
+        self.calls.append((query, provider, fallback))
+        value = self.responses.get(provider, [])
+        if isinstance(value, Exception):
+            raise value
+        return value
 
-
-class FlakyClient:
-    """Provider "A" raises; every other provider answers."""
-
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, str, bool]] = []
-
-    async def search_movie(self, q: str, provider: str = "", fallback: bool = True):
-        self.calls.append((q, provider, fallback))
-        if provider == "A":
-            raise MetaTubeError("provider A is down")
-        return [{"number": q, "id": "1", "provider": provider}]
+    async def list_providers(self):
+        return {'movie_providers': [{'id': source} for source in self.sources]}
 
 
-def test_priority_list_from_settings_json():
-    s = SimpleNamespace(metatube_provider_priority='["JavBus", "FANZA"]')
-    assert _priority_list_from_settings(s) == ["JavBus", "FANZA"]
+def test_priority_settings_preserve_order_and_deduplicate():
+    settings = SimpleNamespace(metatube_provider_priority='["B", "A", "B"]')
+    assert _priority_list_from_settings(settings) == ['B', 'A']
 
 
-def test_priority_list_from_settings_list():
-    s = SimpleNamespace(metatube_provider_priority=["A", "A", "B"])
-    assert _priority_list_from_settings(s) == ["A", "B"]
+def test_priority_stops_after_first_source_result():
+    client = FakeClient({'B': [{'provider': 'B', 'number': 'provider-code'}]})
+    rows = asyncio.run(_search_with_chain(client, 'original filename', chain=['A', 'B', 'C']))
+    assert rows[0]['provider'] == 'B'
+    assert client.calls == [('original filename', 'A', False), ('original filename', 'B', False)]
 
 
-def test_pick_best_exact_number():
-    results = [
-        {"number": "SSIS-001", "provider": "X"},
-        {"number": "ABC-123", "provider": "Y"},
-    ]
-    best = _pick_best(results, "ABC-123")
-    assert best and best["provider"] == "Y"
+def test_priority_sources_are_preferences_and_remaining_sources_are_always_tried():
+    client = FakeClient({'A': MetaTubeError('fixture failure'), 'D': [{'provider': 'D'}]})
+    rows = asyncio.run(_search_with_chain(client, 'FC2-PPV-1066192', chain=['C', 'A', 'B']))
+    assert rows[0]['provider'] == 'D'
+    assert [call[1] for call in client.calls] == ['C', 'A', 'B', 'D']
+    assert all(call[0] == 'FC2-PPV-1066192' and call[2] is False for call in client.calls)
 
 
-def test_chain_stops_on_first_hit():
-    client = FakeClient(
-        {
-            ("A", False): [],
-            ("B", False): [{"number": "SSIS-001", "id": "1", "provider": "B"}],
-            ("", True): [{"number": "SSIS-001", "id": "2", "provider": "Z"}],
-        }
-    )
-    results = asyncio.run(
-        _search_with_chain(
-            client,  # type: ignore[arg-type]
-            "SSIS-001",
-            chain=["A", "B", "C"],
-            use_fallback=True,
-            force_auto=False,
-        )
-    )
-    assert _pick_best(results, "SSIS-001")["provider"] == "B"
-    assert client.calls == [
-        ("SSIS-001", "A", False),
-        ("SSIS-001", "B", False),
-    ]
+def test_all_sources_can_fail_without_repeating_priority_sources():
+    client = FakeClient({}, sources=('A', 'B', 'C', 'D', 'E'))
+    assert asyncio.run(_search_with_chain(client, 'query', chain=['B', 'C', 'A'])) == []
+    assert [call[1] for call in client.calls] == ['B', 'C', 'A', 'D', 'E']
 
 
-def test_chain_fallback_when_all_miss():
-    client = FakeClient(
-        {
-            ("A", False): [],
-            ("B", False): [],
-            ("", True): [{"number": "SSIS-001", "id": "9", "provider": "AUTO"}],
-        }
-    )
-    results = asyncio.run(
-        _search_with_chain(
-            client,  # type: ignore[arg-type]
-            "SSIS-001",
-            chain=["A", "B"],
-            use_fallback=True,
-            force_auto=False,
-        )
-    )
-    assert _pick_best(results, "SSIS-001")["provider"] == "AUTO"
-    assert client.calls[-1] == ("SSIS-001", "", True)
+def test_empty_priority_uses_automatic_source_selection():
+    client = FakeClient({'': [{'provider': 'automatic'}]})
+    assert asyncio.run(_search_with_chain(client, 'query', chain=[]))[0]['provider'] == 'automatic'
+    assert client.calls == [('query', '', True)]
 
 
-def test_chain_no_fallback_when_disabled():
-    client = FakeClient({("A", False): []})
-    results = asyncio.run(
-        _search_with_chain(
-            client,  # type: ignore[arg-type]
-            "SSIS-001",
-            chain=["A"],
-            use_fallback=False,
-            force_auto=False,
-        )
-    )
-    assert results == []
-    assert client.calls == [("SSIS-001", "A", False)]
+def test_explicit_single_scene_source_remains_targeted():
+    client = FakeClient({'B': [{'provider': 'B'}]})
+    assert asyncio.run(_search_with_chain(client, 'query', chain=['A'], selected_only=True)) == []
+    assert client.calls == [('query', 'A', False)]
 
 
-def test_force_auto_ignores_chain():
-    client = FakeClient({("", True): [{"number": "X", "id": "1"}]})
-    asyncio.run(
-        _search_with_chain(
-            client,  # type: ignore[arg-type]
-            "X",
-            chain=["A", "B"],
-            use_fallback=True,
-            force_auto=True,
-        )
-    )
-    assert client.calls == [("X", "", True)]
-
-
-def test_empty_chain_auto():
-    client = FakeClient({("", True): [{"number": "X", "id": "1"}]})
-    asyncio.run(
-        _search_with_chain(
-            client,  # type: ignore[arg-type]
-            "X",
-            chain=[],
-            use_fallback=True,
-            force_auto=False,
-        )
-    )
-    assert client.calls == [("X", "", True)]
-
-
-def test_chain_survives_a_failing_provider():
-    """A provider that errors must not abort the rest of the priority chain.
-
-    Regression: an exception from the first provider used to propagate out of
-    the loop, so a priority list silently degraded to "try only provider #1".
-    """
-    client = FlakyClient()
-    results = asyncio.run(
-        _search_with_chain(
-            client,  # type: ignore[arg-type]
-            "SSIS-001",
-            chain=["A", "B", "C"],
-            use_fallback=False,
-            force_auto=False,
-        )
-    )
-    assert _pick_best(results, "SSIS-001")["provider"] == "B"
-    assert client.calls == [
-        ("SSIS-001", "A", False),
-        ("SSIS-001", "B", False),
-    ]
-
-
-def test_chain_returns_empty_when_every_provider_fails():
-    """All providers erroring is a miss, not a crash."""
-
-    class AllFail:
-        async def search_movie(self, q: str, provider: str = "", fallback: bool = True):
-            raise MetaTubeError(f"{provider} is down")
-
-    results = asyncio.run(
-        _search_with_chain(
-            AllFail(),  # type: ignore[arg-type]
-            "SSIS-001",
-            chain=["A", "B"],
-            use_fallback=False,
-            force_auto=False,
-        )
-    )
-    assert results == []
-    assert _pick_best(results, "SSIS-001") is None
-
-
-def test_conflicting_explicit_number_does_not_stop_priority_chain():
-    client = FakeClient({
-        ("A", False): [{"number": "SSIS-002", "id": "SSIS-001", "provider": "A"}],
-        ("B", False): [{"number": "SSIS-001", "id": "1", "provider": "B"}],
-    })
-    rows = asyncio.run(_search_with_chain(client, "SSIS-001", chain=["A", "B"], use_fallback=False, force_auto=False))
-    assert _pick_best(rows, "SSIS-001")["provider"] == "B"
-
-
-def test_fc2_ppv_alias_remains_an_exact_number_match():
-    row = {"number": "FC2-PPV-123456", "id": "opaque", "provider": "A"}
-    assert _pick_best([row], "FC2-123456") is row
+def test_provider_result_ranking_does_not_rewrite_source_filename():
+    rows = [{'number': 'FC2-1066192', 'provider': 'source'}]
+    assert _pick_best(rows, 'FC2-PPV-1066192') is rows[0]

@@ -116,7 +116,7 @@ def test_batch_checkpoint_and_retry_only_failed_with_original_policy(workspace, 
     api, _, lib_id, _, calls, settings = workspace
     first, second = add_media(workspace), add_media(workspace, "ABP-002")
     add_media(workspace, "ABP-003", scraped=True)
-    add_media(workspace, None)
+    unnamed = add_media(workspace, None)
     original = runner.scrape_media_item
 
     async def fail_second(db, item, **kwargs):
@@ -128,7 +128,7 @@ def test_batch_checkpoint_and_retry_only_failed_with_original_policy(workspace, 
     monkeypatch.setattr(runner, "scrape_media_item", fail_second)
     task = api.post(f"/api/libraries/{lib_id}/rescrape-pending").json()
     done = run(workspace, task)
-    assert (done["total"], done["processed"], done["succeeded"], done["failed"]) == (2, 2, 1, 1)
+    assert (done["total"], done["processed"], done["succeeded"], done["failed"]) == (3, 3, 2, 1)
     assert done["retryable"] and done["status"] == "done"
     failures = api.get(f"/api/tasks/{task['job_id']}/items?status=failed").json()
     assert [row["media_id"] for row in failures] == [second]
@@ -138,7 +138,7 @@ def test_batch_checkpoint_and_retry_only_failed_with_original_policy(workspace, 
     assert retry["job_id"] != task["job_id"] and retry["parent_id"] == task["job_id"]
     retried = run(workspace, retry)
     assert retried["total"] == retried["scraped"] == 1 and retried["failed"] == 0
-    assert [item_id for item_id, _ in calls] == [first, second, second]
+    assert [item_id for item_id, _ in calls] == [first, second, unnamed, second]
     assert calls[-1][1]["settings_override"].scrape_source == "stashscrapers"
     assert api.get(f"/api/tasks/{task['job_id']}").json()["failed"] == 1
     assert not api.get(f"/api/tasks/{task['job_id']}").json()["retryable"]
@@ -268,8 +268,8 @@ def test_single_rescrape_keeps_overrides_and_runs_as_background_job(workspace):
     done = run(workspace, task)
     assert done["scraped"] == 1 and done["status"] == "done"
     assert calls[0][1]["force"] is True and calls[0][1]["provider_override"] == "B"
-    assert calls[0][1]["fallback_override"] is False
-    assert api.get(f"/api/media/{media_id}").json()["number"] == "ABP-002"
+    assert "fallback_override" not in calls[0][1]
+    assert api.get(f"/api/media/{media_id}").json()["number"] == "ABP-001"
 
 
 def test_single_rescrape_does_not_scan_library_or_touch_other_files(workspace, monkeypatch):

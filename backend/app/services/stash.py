@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-import re
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID
@@ -110,18 +109,6 @@ def _same_box(url: str, endpoint: str) -> bool:
         return origin(left) == origin(right) and left.path.startswith(base + '/scenes/')
     except ValueError:
         return False
-
-
-def _matches_number(scene: dict[str, Any], query: str) -> bool:
-    number = re.sub(r"[^a-z0-9]", "", query.lower())
-    code = re.sub(r"[^a-z0-9]", "", str(scene.get("number") or "").lower())
-    if not number:
-        return False
-    if code:
-        return code == number
-    tokens = re.findall(r"[a-z]+|[0-9]+", query.lower())
-    pattern = r"(?<![a-z0-9])" + r"[-_\s]*".join(map(re.escape, tokens)) + r"(?![a-z0-9])"
-    return any(re.search(pattern, str(value).lower()) for value in [scene.get("title"), *scene.get("_urls", [])] if value)
 
 
 class StashClient:
@@ -293,12 +280,8 @@ class StashClient:
             raise StashError("Stash returned invalid scene results")
         scenes = [scene for row in rows if (scene := self._normalize_scene(row, scraper["id"], query))]
         if "NAME" in scraper["types"]:
-            # Never mark an unrelated name-search result as the requested catalog number.
-            scenes = [scene for scene in scenes if _matches_number(scene, query)]
             for scene in scenes:
                 scene["_needs_detail"] = bool(scene["_urls"]) and scraper.get('kind') != 'stash-box'
-        else:
-            scenes = [scene for scene in scenes if not scene.get("number") or _matches_number(scene, query)]
         return scenes
 
     async def search_movie(self, q: str, provider: str = "", fallback: bool = True) -> list[dict[str, Any]]:
@@ -369,7 +352,7 @@ class StashClient:
                 if isinstance(rows, list):
                     for row in rows:
                         candidate = self._normalize_scene(row, scene["_scraper_id"], scene["_search_query"])
-                        if candidate and (not candidate.get("number") or _matches_number(candidate, scene["_search_query"])):
+                        if candidate:
                             detail = candidate
                             break
             except StashError:
@@ -378,7 +361,7 @@ class StashClient:
                 try:
                     data = await self._query(_URL_QUERY, {"url": scene["_urls"][0]})
                     candidate = self._normalize_scene(data.get("scrapeSceneURL"), scene["_scraper_id"], scene["_search_query"])
-                    if candidate and (not candidate.get("number") or _matches_number(candidate, scene["_search_query"])):
+                    if candidate:
                         detail = candidate
                 except StashError:
                     pass

@@ -8,33 +8,8 @@ from watchdog.events import FileCreatedEvent, DirModifiedEvent, FileMovedEvent
 
 from app.models import BackgroundJob, BackgroundJobItem, FileObservation, MediaItem, Library, utcnow
 from app.services import file_readiness as ready, auto_scan, scanner
-from app.services.naming import extract_number, recognize_path
+from app.services.naming import source_name
 from test_persistent_tasks import workspace, add_media, run
-
-
-@pytest.mark.parametrize('filename,number', [
-    ('prefix_SSIS-001.mp4', 'SSIS-001'), ('SSIS-001中文字幕.mp4', 'SSIS-001'),
-    ('ＳＳＩＳ－００１.mp4', 'SSIS-001'), ('SSIS–001.mp4', 'SSIS-001'),
-    ('SSIS.001.mp4', 'SSIS-001'), ('abc123.example@SSIS-001.mp4', 'SSIS-001'),
-    ('中文标题SSIS001中字.mp4', 'SSIS-001'), ('010124.001.mp4', '010124-001'),
-])
-def test_normalized_filename_variants(filename, number):
-    assert extract_number(filename).number == number
-
-
-def test_ambiguous_filename_does_not_guess_or_fall_back(tmp_path):
-    result = recognize_path(tmp_path / 'SSIS-003' / 'SSIS-001-SSIS-002.mp4', tmp_path)
-    assert result.number is None and len(result.candidates) == 2 and result.notes
-
-
-def test_parent_fallback_is_bounded_and_reports_conflict(tmp_path):
-    result = recognize_path(tmp_path / 'SSIS-001' / 'CD1.mp4', tmp_path)
-    assert result.number == 'SSIS-001' and result.source == 'parent' and result.disc == 'cd1'
-    assert recognize_path(tmp_path / 'CD1.mp4', tmp_path).number is None
-    assert recognize_path(tmp_path / 'SSIS-001合集' / 'movie.mp4', tmp_path).number is None
-    assert recognize_path(tmp_path / 'SSIS-001' / 'movie.mp4', tmp_path, 0).number is None
-    conflict = recognize_path(tmp_path / 'SSIS-001' / 'SSIS-002.mp4', tmp_path)
-    assert conflict.number == 'SSIS-002' and '冲突' in conflict.notes[0]
 
 
 @pytest.mark.parametrize('name', ['ABP-001.mp4.part', 'ABP-001.part.mp4', 'ABP-001.tmp.mp4',
@@ -130,20 +105,27 @@ def test_existing_suspects_are_preserved_and_preview_is_read_only(workspace):
     assert (root / 'ABP-001.part.mp4').read_bytes() == before and not calls
 
 
-def test_manual_lock_survives_scan_and_rename_unlock_allows_recognition(workspace):
-    api, factory, lib_id, _, _, settings = workspace
+def test_source_filename_replaces_legacy_lock_and_parent_fallback(workspace):
+    api, factory, lib_id, root, _, settings = workspace
     settings.auto_scrape = False
-    media_id = add_media(workspace)
-    response = api.patch(f'/api/media/{media_id}/number', json={'number': 'SSIS-900', 'locked': True})
-    assert response.status_code == 200 and response.json()['number_locked']
-    run(workspace, api.post(f'/api/libraries/{lib_id}/scan').json())
+    directory = root / 'PARENT-001'
+    directory.mkdir()
+    path = directory / 'FC2-PPV-1066192.mp4'
+    path.write_bytes(b'fixture')
     with factory() as db:
-        assert db.get(MediaItem, media_id).number == 'SSIS-900'
-        assert scanner.rename_media_item(db, lib_id, media_id, 'ABP-002.mp4')['ok']
-        assert db.get(MediaItem, media_id).number == 'SSIS-900'
-    api.patch(f'/api/media/{media_id}/number', json={'number': 'SSIS-900', 'locked': False}).raise_for_status()
+        media = MediaItem(library_id=lib_id, path=str(path), filename=path.name,
+            number='FC2-1066192', number_locked=True, source_type='local',
+            title='Existing metadata', scraped_at=utcnow(), recognition_version='names-v2:2')
+        db.add(media)
+        db.commit()
+        media_id = media.id
     run(workspace, api.post(f'/api/libraries/{lib_id}/scan').json())
-    assert api.get(f'/api/media/{media_id}').json()['number'] == 'ABP-002'
+    data = api.get(f'/api/media/{media_id}').json()
+    assert data['number'] == 'FC2-PPV-1066192' and data['title'] == 'Existing metadata'
+    assert data['scraped_at'] and 'number_locked' not in data
+    with factory() as db:
+        assert scanner.rename_media_item(db, lib_id, media_id, 'new_name.mp4')['ok']
+        assert db.get(MediaItem, media_id).number == 'new_name'
 
 
 def test_unchanged_files_skip_index_writes_and_parser_calls(workspace, monkeypatch):
@@ -227,16 +209,17 @@ def test_due_readiness_recheck_is_targeted(workspace):
         assert json.loads(task.params_json)['inputs'] == {'paths': [str(path)]}
 
 
-def test_recognition_preview_does_not_change_library(workspace):
+def test_recognition_and_manual_lock_endpoints_are_removed(workspace):
     api, factory, lib_id, _, _, _ = workspace
-    response = api.post(f'/api/libraries/{lib_id}/recognize', json={'filename': 'movie.mp4', 'directory': 'SSIS-001'})
-    assert response.status_code == 200 and response.json()['number'] == 'SSIS-001'
+    media_id = add_media(workspace)
+    assert api.get(f'/api/media/{media_id}/recognition').status_code == 404
+    assert api.patch(f'/api/media/{media_id}/number', json={'number': 'changed', 'locked': True}).status_code == 404
+    assert api.post(f'/api/libraries/{lib_id}/recognize', json={'filename': 'movie.mp4'}).status_code == 404
     with factory() as db:
-        assert db.query(MediaItem).count() == 0 and db.query(FileObservation).count() == 0
-    assert api.post(f'/api/libraries/{lib_id}/recognize', json={'filename': '../escape.mp4'}).status_code == 400
+        assert db.get(MediaItem, media_id).number == 'ABP-001'
 
 
-def test_changed_number_marks_metadata_pending_without_erasing_it(workspace):
+def test_legacy_identification_upgrade_preserves_metadata(workspace):
     api, factory, lib_id, _, _, settings = workspace
     settings.auto_scrape = False
     media_id = add_media(workspace, scraped=True)
@@ -246,14 +229,8 @@ def test_changed_number_marks_metadata_pending_without_erasing_it(workspace):
         db.commit()
     run(workspace, api.post(f'/api/libraries/{lib_id}/scan').json())
     data = api.get(f'/api/media/{media_id}').json()
-    assert data['number'] == 'ABP-001' and data['scraped_at'] is None
+    assert data['number'] == 'ABP-001' and data['scraped_at']
     assert data['title'] == 'Previously scraped title'
-    with factory() as db:
-        db.get(MediaItem, media_id).scraped_at = utcnow()
-        db.commit()
-    saved = api.patch(f'/api/media/{media_id}/number', json={'number': 'SSIS-001', 'locked': True})
-    assert saved.json()['scraped_at'] is None
-    assert api.post(f'/api/media/{media_id}/rescrape-task', json={'number': 'ABP-001 SSIS-002'}).status_code == 422
 
 
 def test_queued_scrape_rechecks_file_readiness(workspace):

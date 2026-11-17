@@ -29,6 +29,7 @@ _MAX_PROVIDER_NAME_LEN = 64
 _MAX_STASH_SCRAPER_ID_LEN = 256
 
 OVERRIDE_KEYS = {
+    "task_concurrency",
     "stashscrapers_base_url",
     "stashscrapers_token",
     "stashscrapers_scraper",
@@ -127,6 +128,11 @@ def apply_persisted_overrides() -> None:
 
 
 def _apply_overrides_to_runtime(db_map: dict[str, str]) -> None:
+    if "task_concurrency" in db_map:
+        try:
+            get_settings().task_concurrency = max(1, min(8, int(db_map["task_concurrency"])))
+        except ValueError:
+            pass
     s = get_settings()
     if db_map.get("scrape_source") in {"metatube", "stash", "stashscrapers"}:
         s.scrape_source = db_map["scrape_source"]
@@ -355,6 +361,7 @@ async def get_app_settings(
     else:
         movie_providers, providers_error, from_cache = await _providers_with_status(db)
     return SettingsOut(
+        task_concurrency=s.task_concurrency,
         scrape_source=source,
         stashscrapers_base_url=s.stashscrapers_base_url,
         stashscrapers_token_set=bool(s.stashscrapers_token.strip()),
@@ -441,6 +448,9 @@ async def update_app_settings(
             db.add(row)
     db.commit()
     _apply_overrides_to_runtime(_db_map(db))
+    if 'task_concurrency' in data:
+        from app.services.task_store import wakeup
+        wakeup.set()
     return await get_app_settings(user, db)
 
 

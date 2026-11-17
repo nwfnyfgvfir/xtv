@@ -12,10 +12,10 @@ from app.models import Library, MediaItem
 from app.services.actors import delete_orphan_actors
 from app.services.jobs import ScanJob, job_store
 from app.services.library_revision import bump_revision
-from app.services.naming import extract_number
+from app.services.naming import source_name
 from app.services.scrape import scrape_media_item
 from app.services.strm import read_strm_target
-from app.services.file_readiness import check_file, FileDeferred, FileCheck, ignored_reason, apply_recognition
+from app.services.file_readiness import check_file, FileDeferred, FileCheck, ignored_reason, apply_source_name
 
 logger = logging.getLogger(__name__)
 
@@ -368,7 +368,7 @@ def _ingest_file(db: Session, lib: Library, path: Path, job: ScanJob, auto_scrap
         .filter(MediaItem.library_id == lib.id, MediaItem.path == abs_path)
         .one_or_none()
     )
-    parsed = extract_number(path.name)
+    query = source_name(path.name)
     size = check.stat.st_size
 
     source_type = "local"
@@ -382,12 +382,10 @@ def _ingest_file(db: Session, lib: Library, path: Path, job: ScanJob, auto_scrap
             library_id=lib.id,
             path=abs_path,
             filename=path.name,
-            number=parsed.number,
-            title=parsed.number or path.stem,
+            number=query,
+            title=query,
             source_type=source_type,
             strm_target=strm_target,
-            disc=parsed.disc,
-            subtitle_flag=parsed.subtitle_flag,
             file_size=size,
         )
         db.add(item)
@@ -400,11 +398,11 @@ def _ingest_file(db: Session, lib: Library, path: Path, job: ScanJob, auto_scrap
         item.source_type = source_type
         item.strm_target = strm_target
         if not item.title:
-            item.title = parsed.number or path.stem
+            item.title = query
         db.add(item)
         db.flush()
 
-    apply_recognition(item, lib, path)
+    apply_source_name(item, path)
     item.file_mtime_ns = str(check.stat.st_mtime_ns)
     if not item.title:
         item.title = item.number or path.stem
@@ -558,7 +556,7 @@ def rename_media_item(db: Session, library_id: int, media_id: int, new_filename:
         item.filename = new_path.name
         item.path = str(new_path.resolve())
         # Re-extract number/disc/subtitle flags from the new name when possible.
-        apply_recognition(item, lib, new_path)
+        apply_source_name(item, new_path)
         item.file_mtime_ns = str(new_path.stat().st_mtime_ns)
         db.add(item)
         db.commit()

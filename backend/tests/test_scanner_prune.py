@@ -91,8 +91,8 @@ def test_ingest_reparses_existing_date_filename_and_counts_only_successful_scrap
             db.flush()
             job = ScanJob(job_id="date-rescan")
             item = scanner._ingest_file(db, lib, path, job, auto_scrape=True)
-            assert item.id == existing.id and item.number == "010124-001"
-            assert calls == [("010124-001", False)]
+            assert item.id == existing.id and item.number == "010124_001"
+            assert calls == [("010124_001", False)]
             assert job.created == 0 and job.scraped == int(success)
     finally:
         engine.dispose()

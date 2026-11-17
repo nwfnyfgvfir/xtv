@@ -1,72 +1,23 @@
-from app.services.naming import extract_number, normalize_number
+import pytest
+
+from app.services.naming import source_name
 
 
-def test_standard():
-    p = extract_number("SSIS-001.mp4")
-    assert p.number == "SSIS-001"
-
-
-def test_standard_lower():
-    p = extract_number("ssis-001.mkv")
-    assert p.number == "SSIS-001"
-
-
-def test_with_c_subtitle():
-    p = extract_number("ABC-330-C.mp4")
-    assert p.number == "ABC-330"
-    assert p.subtitle_flag == "C"
-
-
-def test_multi_disc():
-    p = extract_number("ABC-330-cd1.mp4")
-    assert p.number == "ABC-330"
-    assert p.disc == "cd1"
-
-
-def test_fc2():
-    p = extract_number("FC2-PPV-1234567.mp4")
-    assert p.number == "FC2-1234567"
-
-
-def test_heyzo():
-    p = extract_number("HEYZO-1234.mp4")
-    assert p.number == "HEYZO-1234"
-
-
-def test_quality_noise():
-    p = extract_number("SSIS-001-1080p-x264.mp4")
-    assert p.number == "SSIS-001"
-
-
-def test_no_match():
-    p = extract_number("random_video.mp4")
-    assert p.number is None
-
-
-def test_normalize_number_empty():
-    assert normalize_number(None) is None
-    assert normalize_number("") is None
-    assert normalize_number("   ") is None
-
-
-def test_normalize_number_standard():
-    assert normalize_number("ssis-001") == "SSIS-001"
-    assert normalize_number("SSIS_001") == "SSIS-001"
-    assert normalize_number(" ssis 001 ") == "SSIS-001"
-
-
-def test_normalize_number_fc2():
-    assert normalize_number("FC2-PPV-1234567") == "FC2-1234567"
-
-
-def test_normalize_number_fallback_and_truncate():
-    assert normalize_number("weird--code") == "WEIRD-CODE"
-    long = "A" * 80
-    assert normalize_number(long) == "A" * 64
-
-
-def test_numeric_date_catalog_filenames():
-    assert extract_number("010124_001.mp4").number == "010124-001"
-    assert extract_number("010124-01-C.mkv").number == "010124-01"
-    assert extract_number("010124.001.mp4").number == "010124-001"
-    assert normalize_number("010124.001") == "010124-001"
+@pytest.mark.parametrize('filename, expected', [
+    ('FC2-PPV-1066192.mp4', 'FC2-PPV-1066192'),
+    ('fc2_ppv_1066192.mkv', 'fc2_ppv_1066192'),
+    ('FC2-1066192.ts', 'FC2-1066192'),
+    ('ＳＳＩＳ－００１.mp4', 'ＳＳＩＳ－００１'),
+    ('SSIS–001.mp4', 'SSIS–001'),
+    ('SSIS.001.mp4', 'SSIS.001'),
+    ('site.example@SSIS-001-1080p-x264.mp4', 'site.example@SSIS-001-1080p-x264'),
+    ('ABC-330-C.mp4', 'ABC-330-C'),
+    ('ABC-330-cd1.mp4', 'ABC-330-cd1'),
+    ('中文标题SSIS001中字.strm', '中文标题SSIS001中字'),
+    ('SSIS-001 SSIS-002.mp4', 'SSIS-001 SSIS-002'),
+    ('random_video.mp4', 'random_video'),
+    ('010124_001.mp4', '010124_001'),
+    ('A' * 200 + '.mp4', 'A' * 200),
+])
+def test_source_filename_is_passed_through_without_catalog_recognition(filename, expected):
+    assert source_name(filename) == expected

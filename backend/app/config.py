@@ -59,7 +59,7 @@ class Settings(BaseSettings):
     scan_extensions: str = "mp4,mkv,avi,wmv,m2ts,ts,mov,strm"
     auto_scrape: bool = True
     file_settle_seconds: int = 60
-    filename_parent_depth: int = 2
+    task_concurrency: int = 3
     scan_poll_interval_seconds: int = 120
     scan_event_debounce_seconds: int = 15
     download_ignore_dirs: str = ".incomplete,incomplete,.download,download_tmp,.tmp,tmp,.cache,@eaDir,#recycle,$RECYCLE.BIN"

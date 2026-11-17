@@ -119,7 +119,7 @@ def test_complete_ts_with_parent_code_is_kept(workspace):
     assert done['created'] == done['scraped'] == 1
     with factory() as db:
         item = db.query(MediaItem).one()
-        assert item.number == 'SSIS-001' and item.number_source == 'parent'
+        assert item.number == 'recording' and item.number_source == 'filename'
 
 
 def test_ordinary_m3u8_playlist_does_not_turn_full_ts_movies_into_hls_segments(workspace):

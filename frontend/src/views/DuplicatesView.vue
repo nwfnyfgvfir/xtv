@@ -186,7 +186,7 @@ onMounted(() => {
       <div>
         <h1 class="page-title">重复影片</h1>
         <p class="muted intro">
-          按番号聚合（忽略大小写；-C / 多碟也算重复）。共
+          按文件标识聚合（忽略大小写）。共
           <strong>{{ total }}</strong> 组
         </p>
       </div>

@@ -111,7 +111,8 @@ class MediaItem(Base):
     library_id: Mapped[int] = mapped_column(ForeignKey("libraries.id", ondelete="CASCADE"), nullable=False, index=True)
     path: Mapped[str] = mapped_column(String(2048), nullable=False)
     filename: Mapped[str] = mapped_column(String(512), nullable=False)
-    number: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    number: Mapped[str | None] = mapped_column(String(512), nullable=True, index=True)
+    # Legacy columns remain readable; locks and parent recognition no longer affect queries.
     number_locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     number_source: Mapped[str | None] = mapped_column(String(24))
     recognition_notes: Mapped[str | None] = mapped_column(Text)

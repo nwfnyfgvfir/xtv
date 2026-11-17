@@ -6,6 +6,7 @@ import logging
 import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from pathlib import Path
 
 from sqlalchemy import or_
@@ -20,11 +21,10 @@ from app.services.ts_files import TsGuard
 from app.services.actors import delete_orphan_actors
 from app.services.jobs import ScanJob
 from app.services.library_revision import bump_revision
-from app.services.naming import normalize_number
 from app.services.scanner import _ingest_file, _is_media_file, resolve_library_path
 from app.services.scrape import scrape_media_item
-from app.services.file_readiness import check_file, FileDeferred, iter_files, ignored_reason, parent_depth
-from app.services.naming import RECOGNITION_VERSION
+from app.services.file_readiness import check_file, FileDeferred, iter_files, ignored_reason
+from app.services.naming import SOURCE_NAME_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -200,10 +200,10 @@ def _manifest(factory, job_id: str, stop: threading.Event | None) -> None:
                     job.waiting += check.state in {"waiting", "unreadable"}
                     continue
                 media = known.get(absolute)
-                same = media and media.file_size == check.stat.st_size and media.file_mtime_ns == str(check.stat.st_mtime_ns) and media.recognition_version == f"{RECOGNITION_VERSION}:{parent_depth(lib)}"
+                same = media and media.file_size == check.stat.st_size and media.file_mtime_ns == str(check.stat.st_mtime_ns) and media.recognition_version == SOURCE_NAME_VERSION
                 if not same:
                     store.add_item(db, job, "index", "index:" + absolute, path.name, path=absolute)
-                elif settings.auto_scrape and media.number and not media.scraped_at:
+                elif settings.auto_scrape and not media.scraped_at:
                     store.add_item(db, job, "scrape", f"scrape:{media.id}", media.filename, media_id=media.id)
             missing = []
             for absolute, media in known.items():
@@ -234,7 +234,7 @@ def _manifest(factory, job_id: str, stop: threading.Event | None) -> None:
                     row.state, row.reason, row.next_check_at = check.state, check.reason, None
         elif job.kind == "rescrape_pending":
             rows = db.query(MediaItem.id, MediaItem.filename).filter(
-                MediaItem.library_id == lib.id, MediaItem.number.isnot(None), MediaItem.scraped_at.is_(None),
+                MediaItem.library_id == lib.id, MediaItem.scraped_at.is_(None),
             ).order_by(MediaItem.id).all()
             for idx, (media_id, filename) in enumerate(rows):
                 checkpoint()
@@ -270,7 +270,7 @@ def _followup(db, job: BackgroundJob, checkpoint=None) -> None:
         store.add_item(db, job, "prune", "prune", "核对已移除的文件")
     if params["settings"]["auto_scrape"]:
         query = db.query(MediaItem).filter(MediaItem.library_id == job.library_id,
-            MediaItem.number.isnot(None), MediaItem.scraped_at.is_(None))
+            MediaItem.scraped_at.is_(None))
         successful_ids = db.query(BackgroundJobItem.media_id).filter_by(
             job_id=job.job_id, phase="index", status="succeeded")
         query = query.filter(MediaItem.id.in_(successful_ids))
@@ -366,20 +366,11 @@ def _step(factory, job_id: str, item_id: int, stop) -> None:
                     store.finish_item(db, job, item, "skipped", error="影片已完成刮削")
                     return
                 inputs = params["inputs"] if forced else {}
-                if inputs.get("number"):
-                    if media.number != normalize_number(inputs["number"]):
-                        media.scraped_at = None
-                    media.number = normalize_number(inputs["number"])
-                    media.number_source = "manual"
-                    media.recognition_version = None
-                    db.commit()
-                if "number_locked" in inputs:
-                    media.number_locked = inputs["number_locked"]
-                    media.recognition_version = None
-                    db.commit()
+                # Old queued overrides and locks no longer replace the source filename.
+                db.commit()
                 settings = get_settings().model_copy(update=params["settings"])
                 ok = asyncio.run(_scrape_interruptible(factory, job_id, stop, scrape_media_item(db, media, force=forced,
-                    provider_override=inputs.get("provider"), fallback_override=inputs.get("fallback"),
+                    provider_override=inputs.get("provider"),
                     url_override=inputs.get("url"), settings_override=settings)))
                 # scrape_media_item may commit/rollback its own session; refresh job state.
                 db.refresh(job)
@@ -455,7 +446,24 @@ def _index_batch(factory, job_id: str, stop) -> None:
             raise interruption
 
 
-def execute_job(job_id: str, factory=None, stop: threading.Event | None = None) -> None:
+def _parallel_steps(factory, job_id, item_ids, stop, pool):
+    futures = {pool.submit(_step, factory, job_id, item_id, stop) for item_id in item_ids}
+    pending = set(futures)
+    try:
+        while pending:
+            _check_stop(factory, job_id, stop)
+            done, pending = wait(pending, timeout=0.1, return_when=FIRST_COMPLETED)
+            for future in done:
+                future.result()
+    finally:
+        # Never finalize a cancelled job while its running items can still commit.
+        for future in pending:
+            future.cancel()
+        wait([future for future in futures if not future.cancelled()])
+
+
+def execute_job(job_id: str, factory=None, stop: threading.Event | None = None,
+                *, step_pool=None, concurrency: int = 1) -> None:
     factory = factory or SessionLocal
     with factory() as db:
         claimed = db.query(BackgroundJob).filter_by(job_id=job_id, status="pending").update(
@@ -483,8 +491,12 @@ def execute_job(job_id: str, factory=None, stop: threading.Event | None = None) 
                     db.commit()
                     return
                 item_id = next_id[0]
-                index_step = db.get(BackgroundJobItem, item_id).phase == "index"
-            if index_step:
+                phase = db.get(BackgroundJobItem, item_id).phase
+                parallel_ids = [row[0] for row in db.query(BackgroundJobItem.id).filter_by(
+                    job_id=job_id, status='pending', phase='scrape').order_by(BackgroundJobItem.id).limit(concurrency)] if phase == 'scrape' and step_pool else []
+            if parallel_ids:
+                _parallel_steps(factory, job_id, parallel_ids, stop, step_pool)
+            elif phase == "index":
                 _index_batch(factory, job_id, stop)
             else:
                 _step(factory, job_id, item_id, stop)
@@ -574,6 +586,9 @@ class TaskRunner:
 
     def _loop(self) -> None:
         lock = None
+        job_pool = step_pool = None
+        active = {}
+        concurrency = 0
         try:
             while not self.stop_event.is_set() and lock is None:
                 lock = self._lock()
@@ -586,18 +601,43 @@ class TaskRunner:
             while not self.stop_event.is_set():
                 try:
                     store.wakeup.clear()
+                    for future in list(active):
+                        if future.done():
+                            active.pop(future)
+                            future.result()
+                    desired = max(1, min(8, get_settings().task_concurrency))
+                    if desired != concurrency and not active:
+                        if job_pool:
+                            job_pool.shutdown(wait=True)
+                            step_pool.shutdown(wait=True)
+                        concurrency = desired
+                        job_pool = ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix='metadata-job')
+                        step_pool = ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix='metadata-item')
                     with SessionLocal() as db:
-                        row = db.query(BackgroundJob.job_id).filter_by(status="pending").order_by(BackgroundJob.created_at, BackgroundJob.job_id).first()
-                    if row:
-                        execute_job(row[0], stop=self.stop_event)
-                    else:
-                        store.wakeup.wait(30)
+                        rows = db.query(BackgroundJob.job_id, BackgroundJob.library_id, BackgroundJob.kind).filter_by(status="pending").order_by(BackgroundJob.created_at, BackgroundJob.job_id).all()
+                    if desired == concurrency:
+                        for row in rows:
+                            if len(active) >= concurrency or self.stop_event.is_set():
+                                break
+                            if any(current.job_id == row.job_id or current.library_id == row.library_id and
+                                   (current.kind != 'rescrape' or row.kind != 'rescrape') for current in active.values()):
+                                continue
+                            future = job_pool.submit(execute_job, row.job_id, stop=self.stop_event,
+                                step_pool=step_pool, concurrency=concurrency)
+                            active[future] = row
+                            future.add_done_callback(lambda _: store.wakeup.set())
+                    store.wakeup.wait(0.2 if active else 30)
                 except Exception:
                     logger.exception("Task worker will retry after a database error")
                     self.stop_event.wait(1)
         except Exception:
             logger.exception("Persistent task worker stopped unexpectedly")
         finally:
+            self.stop_event.set()
+            if job_pool:
+                job_pool.shutdown(wait=True, cancel_futures=True)
+            if step_pool:
+                step_pool.shutdown(wait=True, cancel_futures=True)
             self.is_owner.clear()
             if lock is not None:
                 lock.close()

@@ -15,7 +15,6 @@ import type {
   Progress,
   ScanJob,
   BackgroundTask,
-  RecognitionResult,
   WaitingFile,
   CleanupPreview,
   Settings,
@@ -92,24 +91,10 @@ export const rescrapeMedia = (
   id: number,
   body?: {
     provider?: string
-    fallback?: boolean
-    number?: string
     url?: string
-    number_locked?: boolean
   },
 ) => client.post<BackgroundTask>(`/media/${id}/rescrape-task`, body || {}).then((r) => r.data)
 
-export const updateMediaNumber = (id: number, number: string, locked: boolean) =>
-  client.patch<MediaDetail>(`/media/${id}/number`, { number, locked }).then((r) => r.data)
-export const getRecognition = (id: number) =>
-  client.get<RecognitionResult>(`/media/${id}/recognition`).then((r) => r.data)
-export const previewRecognition = (id: number, filename: string, directory: string) =>
-  client
-    .post<RecognitionResult>(`/libraries/${id}/recognize`, {
-      filename,
-      directory,
-    })
-    .then((r) => r.data)
 export const getWaitingFiles = (id: number, offset = 0) =>
   client
     .get<{ total: number; items: WaitingFile[] }>(`/libraries/${id}/waiting`, {

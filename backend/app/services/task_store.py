@@ -29,12 +29,7 @@ def source_snapshot() -> dict[str, Any]:
     settings = get_settings()
     # Connection credentials stay in settings, never in task rows or responses.
     fields = ["scrape_source", "auto_scrape", "scan_extensions"]
-    for prefix, provider, priority in (
-        ("metatube", "provider", "provider_priority"),
-        ("stash", "scraper", "scraper_priority"),
-        ("stashscrapers", "scraper", "scraper_priority"),
-    ):
-        fields.extend(f"{prefix}_{key}" for key in (provider, priority, "fallback"))
+    fields.extend(("metatube_provider_priority", "stash_scraper_priority", "stashscrapers_scraper_priority"))
     return {key: getattr(settings, key) for key in fields}
 
 
@@ -57,7 +52,8 @@ def task_out(db: Session, job: BackgroundJob) -> TaskOut:
         "created_at", "updated_at", "finished_at",
     )}
     target_exists = job.library_id is not None and (job.kind != "rescrape" or db.get(MediaItem, job.media_id) is not None)
-    return TaskOut(**fields, errors=[f"{item.label}: {item.error}" for item in errors],
+    return TaskOut(**fields, running_items=db.query(BackgroundJobItem).filter_by(job_id=job.job_id, status='running', phase='scrape').count(),
+        errors=[f"{item.label}: {item.error}" for item in errors],
         retryable=target_exists and job.status in TERMINAL and job.failed > 0 and db.query(BackgroundJob.job_id).filter_by(parent_id=job.job_id).first() is None,
         resumable=target_exists and (job.status in {"interrupted", "cancelled"} or job.status == "error" and job.failed == 0))
 
@@ -200,11 +196,12 @@ def finish_item(db: Session, job: BackgroundJob, item: BackgroundJobItem,
                 status: str, result: dict[str, int] | None = None, error: str | None = None, *, commit: bool = True) -> None:
     item.status, item.error = status, error
     item.result_json = json.dumps(result or {})
-    job.processed += 1
-    setattr(job, status, getattr(job, status) + 1)
-    for key, value in (result or {}).items():
-        setattr(job, key, getattr(job, key) + value)
-    job.updated_at = utcnow()
+    db.flush()
+    increments = {"processed": 1, status: 1, **(result or {})}
+    updates = {key: getattr(BackgroundJob, key) + value for key, value in increments.items()}
+    updates['updated_at'] = utcnow()
+    db.query(BackgroundJob).filter_by(job_id=job.job_id).update(updates, synchronize_session=False)
+    db.expire(job, [*increments, 'updated_at'])
     if commit:
         db.commit()
 

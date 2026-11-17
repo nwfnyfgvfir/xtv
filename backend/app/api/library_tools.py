@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import asdict
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -13,8 +12,7 @@ from app.db import get_db
 from app.deps import require_auth
 from app.models import Library, MediaItem, FileObservation
 from app.schemas import TaskOut
-from app.services.file_readiness import check_file, root_path, parent_depth
-from app.services.naming import recognize_path
+from app.services.file_readiness import check_file, root_path
 from app.services import task_store
 
 router = APIRouter(dependencies=[Depends(require_auth), Depends(prevent_caching)])
@@ -25,21 +23,6 @@ def library(db, library_id):
     if lib is None:
         raise HTTPException(404, "library not found")
     return lib
-
-
-class RecognitionIn(BaseModel):
-    filename: str = Field(min_length=1, max_length=512)
-    directory: str = Field(default="", max_length=1024)
-
-
-@router.post("/{library_id}/recognize")
-def preview_recognition(library_id: int, body: RecognitionIn, db: Session = Depends(get_db)):
-    lib = library(db, library_id)
-    root = root_path(lib)
-    path = (root / body.directory / body.filename).resolve()
-    if not path.is_relative_to(root) or Path(body.filename).name != body.filename:
-        raise HTTPException(400, "路径必须位于媒体库内，文件名不能包含目录")
-    return asdict(recognize_path(path, root, parent_depth(lib)))
 
 
 @router.get("/{library_id}/cleanup-preview")

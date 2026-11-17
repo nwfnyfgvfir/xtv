@@ -10,8 +10,6 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urlsplit
 
-from app.services.naming import extract_number
-
 _NUMERIC = re.compile(r"^\d{1,16}(?:[-_]\d{1,16})*$")
 _FRAGMENT = re.compile(r"(?i)^((?:seg(?:ment)?|chunk|frag(?:ment)?|part|index|media|hls)[._-]?)\d+(?:[._-]\d+)*$")
 _HASH = re.compile(r"(?i)^[a-f0-9]{24,64}$")
@@ -30,7 +28,7 @@ def fragment_family(name: str) -> str | None:
         return 'hash'
     if match := _TRAILING.fullmatch(stem):
         # ABP-001_00001 is a potential fragment; ABP-00001 is a movie code.
-        if extract_number(match[1], stem_only=True).number:
+        if re.search(r"\d[._-]$", match[1]):
             return match[1].casefold()
     return None
 
