@@ -412,6 +412,11 @@ def _index_batch(factory, job_id: str, stop) -> None:
             item.status, item.started_at = "running", utcnow()
         job.phase, job.message = "index", "正在增量索引文件"
         db.commit()
+        # sqlite3's legacy mode does not BEGIN before SAVEPOINT. Reserve the
+        # writer before taking a read snapshot, and keep released savepoints
+        # inside the batch transaction so media and progress commit together.
+        if db.get_bind().dialect.name == "sqlite":
+            db.connection().exec_driver_sql("BEGIN IMMEDIATE")
         started = time.monotonic()
         for item in rows:
             stats, error, outcome = {}, None, "succeeded"

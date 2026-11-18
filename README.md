@@ -169,6 +169,8 @@ curl -sS http://127.0.0.1:8000/api/health
 
 创建时保存刮削后端、源优先级、扫描扩展名及本次重刮来源；执行、继续和重试沿用该策略。服务连接地址与凭证使用执行时的设置，凭证不会复制到任务记录或任务接口。活动任务按操作类型和资源去重；参数不同的重复请求返回 `409`，便于先取消旧任务再提交。多个应用进程通过数据库旁的文件锁共用一个任务调度器。默认全局最多并发刮削 3 部影片；同一批影片及不同任务可同时处理，每部影片内部仍按来源优先级顺序查询。在设置页“媒体库 → 并发刮削数量”可调整为 1–8，改动在当前任务结束后生效，也可用 `TASK_CONCURRENCY` 配置默认值。扫描的文件索引、核对与同媒体库的批量操作仍按顺序执行，避免并发清理或重复处理同一影片。
 
+SQLite 文件索引批次在进入嵌套事务前使用 `BEGIN IMMEDIATE` 申请写锁，避免并发写入使读取快照无法升级为写事务。媒体索引和对应任务进度在同一批次内提交或回滚，进度写入失败时不会留下已提前提交的媒体记录。该事务仅覆盖文件索引批次；刮削、演员查询和翻译的网络请求继续并发执行。
+
 接口：`POST /api/libraries/{id}/scan`、`POST /api/libraries/{id}/rescrape-pending`、`POST /api/media/{id}/rescrape-task` 均返回 `202` 和任务信息。`GET /api/tasks` 查询历史或活动任务，`GET /api/tasks/{id}` 查询进度，`GET /api/tasks/{id}/items?status=failed` 分页查看失败项；对 `/api/tasks/{id}/cancel`、`resume`、`retry` 发送 `POST` 操作任务。`GET /api/scan/jobs/{id}` 保留兼容查询，旧同步单片接口 `/api/media/{id}/rescrape` 已标记弃用。
 
 `DELETE /api/tasks/{id}` 删除单条已结束记录，`DELETE /api/tasks/history` 清空已结束任务；删除活动任务返回 `409`，这些接口沿用管理员鉴权和禁止缓存规则。
