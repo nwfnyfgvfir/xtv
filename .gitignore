@@ -37,3 +37,4 @@ Thumbs.db
 *.sqlite3-shm
 *.tasks.lock
 *.tasks.cancel
+backend/tests/

@@ -81,7 +81,9 @@ const sourceModeHint = computed(() =>
       ? '先按所选后端的优先级尝试，全部未命中后继续该后端其余可用刮削器。'
       : scrapeProvider.value === ''
         ? '自动尝试所选后端的适用刮削器，命中后停止；仅 URL 的源需填写来源地址。'
-        : '仅本次使用所选来源，文件名原样交给来源查询。',
+        : useStash.value
+          ? '仅本次使用所选刮削器；Stash 查询移除末尾 C/CH 字幕后缀，中字标记保留。'
+          : '仅本次使用所选来源，文件名原样交给来源查询。',
 )
 const providerLabels = ref<Record<string, string>>({})
 const providerLabelsBySource = ref<Partial<Record<ScrapeSource, Record<string, string>>>>({})
@@ -592,7 +594,7 @@ watch(() => props.id, load)
                 /></label>
                 <div class="management-field">
                   <span>查询文件名</span><code class="source-filename">{{ item.filename }}</code>
-                  <span class="field-hint muted">直接使用原文件名去掉扩展名后的文本查询，由刮削源匹配。</span>
+                  <span class="field-hint muted">默认按原文件名去掉扩展名查询。Stash 查询会移除末尾 C/CH 字幕后缀；文件名、编号与中文字幕标记保留。</span>
                 </div>
                 <div class="maintenance-actions">
                   <el-button

@@ -14,7 +14,7 @@ from app.services.actors import merge_actors, normalize_actor_name, pick_canonic
 from app.services.metatube import MetaTubeClient, MetaTubeError, parse_movie_provider_names
 from app.services.stash import StashClient, StashError
 from app.services.stashscrapers import StashScrapersClient, StashScrapersError
-from app.services.naming import source_name, subtitle_flag
+from app.services.naming import source_name, subtitle_flag, strip_chinese_subtitle_suffix
 from app.services.image_backups import queue_images
 
 logger = logging.getLogger(__name__)
@@ -201,7 +201,8 @@ async def _lookup_movie(settings: Settings, query: str, filename: str,
     else:
         results = await _search_with_chain(client, query, chain=chain, filename=filename,
             selected_only=bool(provider_override))
-    best = _pick_best(results, query)
+    match_query = strip_chinese_subtitle_suffix(query) if isinstance(client, StashClient) and not url_override else query
+    best = _pick_best(results, match_query)
     if not best:
         return None
     provider, provider_id = str(best.get("provider") or ""), str(best.get("id") or "")

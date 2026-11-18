@@ -10,6 +10,7 @@ from uuid import UUID
 import httpx
 
 from app.config import Settings, get_settings
+from app.services.naming import strip_chinese_subtitle_suffix
 from app.services.images import first_scraped_image, store_scraped_image
 
 logger = logging.getLogger(__name__)
@@ -289,6 +290,10 @@ class StashClient:
         return scenes
 
     async def search_movie(self, q: str, provider: str = "", fallback: bool = True) -> list[dict[str, Any]]:
+        original = q
+        q = strip_chinese_subtitle_suffix(q)
+        if q != original:
+            logger.info("Stash subtitle query original=%s query=%s", original, q)
         scrapers = await self.list_scrapers()
         selected = [s for s in scrapers if s["id"] == provider or s["name"] == provider] if provider else []
         if provider and not selected and not fallback:
