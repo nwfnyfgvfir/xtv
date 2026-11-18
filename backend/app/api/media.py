@@ -30,7 +30,6 @@ from app.services.duplicates import list_duplicate_groups
 from app.services.image_delivery import attach_media_images, actor_image_urls
 from app.services.media_delete import delete_media_item
 from app.services.naming import source_name
-from app.services.file_readiness import check_file
 from app.services.scanner import rename_media_item
 from app.services.scrape import apply_translations, scrape_media_item
 from app.services.sorting import media_order_by
@@ -310,12 +309,6 @@ async def rescrape_media(
             valid_url = False
         if not valid_url:
             raise HTTPException(400, "invalid source URL")
-    lib = db.get(Library, item.library_id)
-    if Path(item.path).exists():
-        readiness = check_file(db, lib, Path(item.path))
-        db.commit()
-        if readiness.state != "ready":
-            raise HTTPException(409, readiness.reason)
     ok = await scrape_media_item(
         db,
         item,

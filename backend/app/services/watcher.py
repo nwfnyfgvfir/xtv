@@ -1,6 +1,6 @@
 """Compatibility entry points for the incremental automatic scanner."""
 from app.services.auto_scan import manager, media_event_path
-from app.services.file_readiness import root_path as resolve_library_path
+from app.services.scan_files import root_path as resolve_library_path
 
 
 def start_watcher():

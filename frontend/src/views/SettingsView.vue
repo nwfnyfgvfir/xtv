@@ -722,6 +722,7 @@ onMounted(() => {
             </el-form-item>
             <el-form-item label="扫描扩展名">
               <el-input v-model="form.scan_extensions" />
+              <span class="field-hint muted block">逗号分隔；不扫描 .ts 文件。</span>
             </el-form-item>
           </el-form>
           <h3>媒体库顺序</h3>

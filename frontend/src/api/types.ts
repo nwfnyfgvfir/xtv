@@ -6,12 +6,6 @@ export interface Library {
   type: string
   enabled: boolean
   auto_scan_enabled: boolean
-  ts_policy: 'auto' | 'complete'
-  file_settle_seconds: number | null
-  ignore_dirs: string | null
-  effective_settle_seconds: number
-  effective_ignore_dirs: string
-  waiting_files: number
   watch_mode?: string | null
   watch_error?: string | null
   media_count?: number
@@ -211,7 +205,6 @@ export interface ScanJob {
 export interface BackgroundTask extends ScanJob {
   running_items?: number
   kind: 'scan' | 'rescrape_pending' | 'rescrape'
-  waiting: number
   media_id: number | null
   media_label: string | null
   library_name: string
@@ -229,24 +222,6 @@ export interface BackgroundTask extends ScanJob {
   created_at: string
   updated_at: string
   finished_at: string | null
-}
-
-export interface WaitingFile {
-  path: string
-  filename: string
-  state: string
-  reason: string
-}
-export interface CleanupItem extends WaitingFile {
-  id: number
-  number: string | null
-}
-export interface CleanupPreview {
-  items: CleanupItem[]
-  scanned: number
-  total_indexed: number
-  next_cursor: number | null
-  read_only: boolean
 }
 
 export interface TaskItem {

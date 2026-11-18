@@ -141,9 +141,6 @@ watch(
     <p v-if="compact && !showDetails" class="task-history-summary">
       {{ task.processed ? `已处理 ${task.processed} 项 · 失败 ${task.failed}` : '未处理任何文件' }}
     </p>
-    <p v-if="task.waiting && (!compact || showDetails)" class="task-message">
-      待就绪或待确认 {{ task.waiting }} 项，可在媒体库“扫描设置”中查看。
-    </p>
     <p v-if="task.kind === 'scan' && (!compact || showDetails)" class="task-message">
       已扫描 {{ task.scanned }} · 新增 {{ task.created }} · 移除 {{ task.removed }} · 已刮削
       {{ task.scraped }}

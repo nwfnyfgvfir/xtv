@@ -12,9 +12,6 @@ class LibraryCreate(BaseModel):
     type: Literal["local", "strm", "mixed"] = "mixed"
     enabled: bool = True
     auto_scan_enabled: bool = True
-    ts_policy: Literal["auto", "complete"] = "auto"
-    file_settle_seconds: int | None = Field(default=None, ge=0, le=3600)
-    ignore_dirs: str | None = Field(default=None, max_length=2048)
 
 
 class LibraryUpdate(BaseModel):
@@ -23,9 +20,6 @@ class LibraryUpdate(BaseModel):
     type: Literal["local", "strm", "mixed"] | None = None
     enabled: bool | None = None
     auto_scan_enabled: bool | None = None
-    ts_policy: Literal["auto", "complete"] | None = None
-    file_settle_seconds: int | None = Field(default=None, ge=0, le=3600)
-    ignore_dirs: str | None = Field(default=None, max_length=2048)
 
 
 class LibraryOrder(BaseModel):
@@ -42,14 +36,8 @@ class LibraryOut(BaseModel):
     type: str
     enabled: bool
     auto_scan_enabled: bool = True
-    ts_policy: str = "auto"
-    file_settle_seconds: int | None = None
-    ignore_dirs: str | None = None
-    waiting_files: int = 0
     watch_mode: str | None = None
     watch_error: str | None = None
-    effective_settle_seconds: int = 60
-    effective_ignore_dirs: str = ""
     media_count: int = 0
     # In-process LibraryChanged generation (bumped on ingest/remove/scrape).
     content_revision: int = 0
@@ -322,7 +310,6 @@ class ScanJobOut(BaseModel):
 class TaskOut(ScanJobOut):
     running_items: int = 0
     kind: str
-    waiting: int = 0
 
     media_id: int | None = None
     media_label: str | None = None

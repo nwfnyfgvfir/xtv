@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -15,7 +16,7 @@ from app.services.library_revision import bump_revision
 from app.services.naming import source_name, subtitle_flag
 from app.services.scrape import scrape_media_item
 from app.services.strm import read_strm_target
-from app.services.file_readiness import check_file, FileDeferred, FileCheck, ignored_reason, apply_source_name
+from app.services.scan_files import iter_files, scan_scope_reason, apply_source_name
 
 logger = logging.getLogger(__name__)
 
@@ -29,15 +30,13 @@ def resolve_library_path(lib: Library) -> Path:
 
 
 def _is_media_file(path: Path, exts: set[str]) -> bool:
+    ext = path.suffix.lower().lstrip(".")
+    if not ext or ext not in exts:
+        return False
     if not path.is_file():
         return False
 
-    # Always skip common download temporary files (e.g. yt-dlp output)
-    if ignored_reason(path, path.parent):
-        return False
-
-    ext = path.suffix.lower().lstrip(".")
-    return bool(ext) and ext in exts
+    return True
 
 
 def _normalize_abs(path: Path | str) -> str:
@@ -61,7 +60,7 @@ def scan_library_sync(db: Session, lib: Library, job: ScanJob | None = None) -> 
 
     exts = settings.extension_set
     seen_paths: set[str] = set()
-    for path in root.rglob("*"):
+    for path in iter_files(root, None):
         if not _is_media_file(path, exts):
             continue
         ext = path.suffix.lower().lstrip(".")
@@ -71,8 +70,6 @@ def scan_library_sync(db: Session, lib: Library, job: ScanJob | None = None) -> 
             item = _ingest_file(db, lib, path, job, auto_scrape=False)
             seen_paths.add(item.path)
             job.scanned += 1
-        except FileDeferred:
-            seen_paths.add(str(path.resolve()))
         except Exception as exc:  # noqa: BLE001
             logger.exception("ingest failed %s", path)
             job.errors.append(f"{path.name}: {exc}")
@@ -80,7 +77,9 @@ def scan_library_sync(db: Session, lib: Library, job: ScanJob | None = None) -> 
     # Remove DB rows for files that disappeared from disk.
     existing = db.query(MediaItem).filter(MediaItem.library_id == lib.id).all()
     for item in existing:
-        if item.path not in seen_paths and not ignored_reason(Path(item.path), root, lib):
+        if Path(item.path).suffix.casefold() == ".ts":
+            continue
+        if item.path not in seen_paths and not scan_scope_reason(Path(item.path), root):
             db.delete(item)
             job.removed += 1
 
@@ -105,6 +104,8 @@ def scan_library_sync(db: Session, lib: Library, job: ScanJob | None = None) -> 
         total_scrape = len(items)
         scraped_before = job.scraped
         for idx, item in enumerate(items, start=1):
+            if scan_scope_reason(Path(item.path), root) or not _is_media_file(Path(item.path), exts):
+                continue
             try:
                 job.message = f"scraping {idx}/{total_scrape}: {item.number}"
                 ok = asyncio.run(scrape_media_item(db, item, force=False))
@@ -127,20 +128,17 @@ def scan_library_sync(db: Session, lib: Library, job: ScanJob | None = None) -> 
 def ingest_path(library_id: int, path: str | Path, *, scrape: bool | None = None) -> dict:
     """Ingest a single media file into the library (Jellyfin-style path refresh)."""
     settings = get_settings()
-    p = Path(path)
+    p = Path(os.path.abspath(path))
     result = {"ok": False, "created": 0, "scanned": 0, "scraped": 0, "message": ""}
-    if not p.exists() or not p.is_file():
-        result["message"] = "not a file"
-        return result
-    if not _is_media_file(p, settings.extension_set):
-        result["message"] = "not media"
-        return result
 
     db = SessionLocal()
     try:
         lib = db.get(Library, library_id)
         if not lib:
             result["message"] = "library not found"
+            return result
+        if scan_scope_reason(p, resolve_library_path(lib)) or not _is_media_file(p, settings.extension_set):
+            result["message"] = "not a root-level media file"
             return result
         job = ScanJob(job_id="path", library_id=library_id)
         do_scrape = settings.auto_scrape if scrape is None else scrape
@@ -167,15 +165,19 @@ def ingest_path(library_id: int, path: str | Path, *, scrape: bool | None = None
 
 def remove_path(library_id: int, path: str | Path) -> dict:
     """Remove DB row for a path that no longer exists on disk."""
-    abs_path = _normalize_abs(path)
+    target = Path(os.path.abspath(path))
     result = {"ok": False, "removed": 0, "message": ""}
-    # If file still exists, do not remove.
-    if Path(abs_path).exists():
-        result["message"] = "still exists"
-        return result
 
     db = SessionLocal()
     try:
+        lib = db.get(Library, library_id)
+        if not lib or scan_scope_reason(target, resolve_library_path(lib)) or target.suffix.casefold() == '.ts':
+            result["message"] = "not a scanned root-level path"
+            return result
+        abs_path = _normalize_abs(target)
+        if Path(abs_path).exists():
+            result["message"] = "still exists"
+            return result
         q = db.query(MediaItem).filter(MediaItem.library_id == library_id, MediaItem.path == abs_path)
         n = q.delete(synchronize_session=False)
         # Also try unresolved / alternate path forms
@@ -203,8 +205,7 @@ def remove_path(library_id: int, path: str | Path) -> dict:
 
 def refresh_paths(library_id: int, paths: list[str] | set[str]) -> dict:
     """
-    Targeted refresh for a small set of paths (files and/or directories).
-    Directory paths: rglob media under them and prune DB rows under that prefix.
+    Refresh root-level files, or the library root, without visiting subdirectories.
     """
     settings = get_settings()
     exts = settings.extension_set
@@ -227,7 +228,6 @@ def refresh_paths(library_id: int, paths: list[str] | set[str]) -> dict:
             summary["errors"].append("library not found")
             return summary
         root = resolve_library_path(lib)
-        root_s = str(root)
         job = ScanJob(job_id="paths", library_id=library_id)
 
         file_targets: list[Path] = []
@@ -235,20 +235,12 @@ def refresh_paths(library_id: int, paths: list[str] | set[str]) -> dict:
         missing: list[str] = []
 
         for raw in paths:
-            p = Path(raw)
-            try:
-                p = p.resolve()
-            except Exception:  # noqa: BLE001
-                p = Path(raw)
-            # Only touch paths inside the library root.
-            try:
-                p.relative_to(root)
-            except ValueError:
-                # Allow if raw string still under root_s prefix (Windows case quirks)
-                if not str(p).lower().startswith(root_s.lower()):
-                    continue
+            p = Path(os.path.abspath(raw))
+            if scan_scope_reason(p, root) or p.suffix.casefold() == '.ts':
+                continue
             if p.exists() and p.is_dir():
-                dir_targets.append(p)
+                if p == root:
+                    dir_targets.append(p)
             elif p.exists() and p.is_file():
                 if _is_media_file(p, exts):
                     file_targets.append(p)
@@ -264,11 +256,11 @@ def refresh_paths(library_id: int, paths: list[str] | set[str]) -> dict:
                 logger.exception("refresh ingest failed %s", p)
                 summary["errors"].append(f"{p.name}: {exc}")
 
-        # Directory subtrees: ingest + prefix prune
+        # Enumerate the root only; preserve records outside the current scan scope.
         for d in dir_targets:
             seen: set[str] = set()
             try:
-                for path in d.rglob("*"):
+                for path in iter_files(root, [str(d)]):
                     if not _is_media_file(path, exts):
                         continue
                     try:
@@ -286,6 +278,8 @@ def refresh_paths(library_id: int, paths: list[str] | set[str]) -> dict:
                     .all()
                 )
                 for item in rows:
+                    if scan_scope_reason(Path(item.path), root) or Path(item.path).suffix.casefold() == '.ts':
+                        continue
                     if item.path not in seen:
                         # Only prune if truly under this dir and missing on disk
                         if not Path(item.path).exists():
@@ -331,6 +325,8 @@ def refresh_paths(library_id: int, paths: list[str] | set[str]) -> dict:
                 .all()
             )
             for item in items:
+                if scan_scope_reason(Path(item.path), root) or not _is_media_file(Path(item.path), exts):
+                    continue
                 try:
                     ok = asyncio.run(scrape_media_item(db, item, force=False))
                     if ok:
@@ -358,23 +354,27 @@ def refresh_paths(library_id: int, paths: list[str] | set[str]) -> dict:
         db.close()
 
 
-def _ingest_file(db: Session, lib: Library, path: Path, job: ScanJob, auto_scrape: bool, check: FileCheck | None = None) -> MediaItem:
-    check = check or check_file(db, lib, path)
-    if check.state != "ready":
-        raise FileDeferred(check)
-    abs_path = str(path.resolve())
+def _ingest_file(db: Session, lib: Library, path: Path, job: ScanJob, auto_scrape: bool) -> MediaItem:
+    root = resolve_library_path(lib)
+    resolved = path.resolve()
+    if path.parent != root or resolved.parent != root:
+        raise ValueError("仅处理媒体库根目录中的文件")
+    if path.suffix.lower().lstrip('.') not in get_settings().extension_set:
+        raise ValueError("不在扫描扩展名白名单中")
+    stat = path.stat()
+    abs_path = str(resolved)
     existing = (
         db.query(MediaItem)
         .filter(MediaItem.library_id == lib.id, MediaItem.path == abs_path)
         .one_or_none()
     )
     query = source_name(path.name)
-    size = check.stat.st_size
+    size = stat.st_size
 
     source_type = "local"
     strm_target = None
     if path.suffix.lower() == ".strm":
-        strm_target = check.strm_target
+        strm_target = read_strm_target(path)
         source_type = "strm"
 
     if existing is None:
@@ -403,7 +403,7 @@ def _ingest_file(db: Session, lib: Library, path: Path, job: ScanJob, auto_scrap
         db.flush()
 
     apply_source_name(item, path)
-    item.file_mtime_ns = str(check.stat.st_mtime_ns)
+    item.file_mtime_ns = str(stat.st_mtime_ns)
     if not item.title:
         item.title = item.number or path.stem
     if auto_scrape and item.number and not item.scraped_at:

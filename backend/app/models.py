@@ -107,10 +107,12 @@ class Library(Base):
     auto_scan_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     # Compatibility only: automatic monitoring always uses native events.
     scan_mode: Mapped[str] = mapped_column(String(16), default="native", nullable=False)
+    # Retired storage column; scanners no longer read this policy.
     ts_policy: Mapped[str] = mapped_column(String(16), default="auto", nullable=False)
     # Legacy scheduling columns are retained for upgrades; no periodic full scan uses them.
     full_scan_interval_seconds: Mapped[int] = mapped_column(Integer, default=86400, nullable=False)
     next_full_scan_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Retired scan settings remain storage-only; scans use root-level files directly.
     file_settle_seconds: Mapped[int | None] = mapped_column(Integer)
     parent_fallback_depth: Mapped[int | None] = mapped_column(Integer)
     ignore_dirs: Mapped[str | None] = mapped_column(Text)

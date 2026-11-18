@@ -48,7 +48,7 @@ def task_out(db: Session, job: BackgroundJob) -> TaskOut:
     fields = {key: getattr(job, key) for key in (
         "job_id", "kind", "status", "library_id", "library_name", "media_id", "media_label", "parent_id",
         "phase", "current", "total", "processed", "succeeded", "failed", "skipped",
-        "scanned", "created", "scraped", "removed", "waiting", "message", "cancel_requested",
+        "scanned", "created", "scraped", "removed", "message", "cancel_requested",
         "created_at", "updated_at", "finished_at",
     )}
     target_exists = job.library_id is not None and (job.kind != "rescrape" or db.get(MediaItem, job.media_id) is not None)
@@ -192,7 +192,6 @@ def recount(db: Session, job: BackgroundJob) -> None:
         if key == "scanned" and job.kind == "scan" and not json.loads(job.params_json).get("retry_only"):
             continue
         setattr(job, key, sum(json.loads(item.result_json or "{}").get(key, 0) for item in rows if item.status == "succeeded"))
-    job.waiting = (0 if json.loads(job.params_json).get("retry_only") else json.loads(job.scan_manifest_json or "{}").get("waiting", 0)) + sum(json.loads(item.result_json or "{}").get("waiting", 0) for item in rows)
 
 
 def finish_item(db: Session, job: BackgroundJob, item: BackgroundJobItem,

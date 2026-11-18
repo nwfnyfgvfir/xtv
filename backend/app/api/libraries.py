@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import require_auth
-from app.models import Library, MediaItem, FileObservation
+from app.models import Library, MediaItem
 from app.schemas import BrowseDirEntry, BrowseDirsOut, LibraryCreate, LibraryOrder, LibraryOut, LibraryUpdate, TaskOut
 from app.services.actors import delete_orphan_actors
 from app.services.fs_browse import BrowseError, list_subdirectories
@@ -16,7 +16,6 @@ from app.services import task_store
 from app.api.tasks import conflict
 from app.services.library_revision import get_revision
 from app.services.watcher import reload_watches, watcher_status
-from app.services.file_readiness import settle_seconds, ignored_dirs
 
 router = APIRouter()
 
@@ -29,9 +28,6 @@ def _library_out(db: Session, lib: Library) -> LibraryOut:
         data.watch_mode, data.watch_error = state['mode'], state['error']
     data.media_count = int(count)
     data.content_revision = get_revision(lib.id)
-    data.effective_settle_seconds = settle_seconds(lib)
-    data.effective_ignore_dirs = ",".join(sorted(ignored_dirs(lib)))
-    data.waiting_files = db.query(func.count(FileObservation.id)).filter(FileObservation.library_id == lib.id, FileObservation.state.in_(("waiting", "unreadable"))).scalar() or 0
     return data
 
 
@@ -104,7 +100,7 @@ def update_library(
     if not lib:
         raise HTTPException(404, "library not found")
     data = body.model_dump(exclude_unset=True)
-    for key in ("name", "path", "type", "enabled", "auto_scan_enabled", "ts_policy"):
+    for key in ("name", "path", "type", "enabled", "auto_scan_enabled"):
         if key in data and data[key] is None:
             raise HTTPException(422, f"{key} cannot be null")
     if "path" in data and data["path"] != lib.path and task_store.active_for_library(db, library_id):

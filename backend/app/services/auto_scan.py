@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 from dataclasses import dataclass
@@ -12,8 +13,8 @@ from watchdog.observers.polling import PollingObserver
 
 from app.config import get_settings
 from app.db import SessionLocal
-from app.models import Library, FileObservation, utcnow
-from app.services.file_readiness import ignored_reason, ignored_directory, root_path, control_target
+from app.models import Library
+from app.services.scan_files import scan_scope_reason, root_path
 from app.services.task_store import enqueue, active_for_library, TaskConflict
 
 logger = logging.getLogger(__name__)
@@ -29,9 +30,7 @@ def coalesce_paths(paths: set[str]) -> list[str]:
 
 def media_event_path(path: str) -> bool:
     target = Path(path)
-    if control_target(target):
-        return True
-    return target.suffix.lower().lstrip(".") in get_settings().extension_set and not ignored_reason(target, target.parent)
+    return target.suffix.lower().lstrip(".") in get_settings().extension_set
 
 
 class Handler(FileSystemEventHandler):
@@ -39,13 +38,13 @@ class Handler(FileSystemEventHandler):
         self.manager, self.library_id = manager, library_id
 
     def on_any_event(self, event):
-        if event.event_type in {"opened", "closed_no_write"} or event.is_directory and event.event_type == "modified":
+        if event.is_directory or event.event_type in {"opened", "closed_no_write"}:
             return
         paths = []
         for raw in (getattr(event, "src_path", None), getattr(event, "dest_path", None)):
-            if raw and (event.is_directory or media_event_path(str(raw))):
+            if raw and media_event_path(str(raw)):
                 path = Path(str(raw))
-                paths.append(str(control_target(path) or path))
+                paths.append(str(path))
         if paths:
             self.manager.schedule(self.library_id, paths)
 
@@ -73,7 +72,6 @@ class AutoScanner:
         self.thread = None
         self.dirty = True
         self.next_config = 0.0
-        self.next_readiness = 0.0
 
     def start(self):
         if self.thread and self.thread.is_alive():
@@ -97,7 +95,7 @@ class AutoScanner:
         state = self.states.get(library_id)
         if state:
             root = root_path(state.library)
-            paths = [raw for raw in paths if not ignored_reason(Path(raw), root, state.library) and not ignored_directory(Path(raw).name, state.library)]
+            paths = [raw for raw in paths if not scan_scope_reason(Path(os.path.abspath(raw)), root)]
         if not paths:
             return
         with self.lock:
@@ -117,7 +115,7 @@ class AutoScanner:
             if library_id not in wanted:
                 self._unwatch(library_id)
         for library_id, lib in wanted.items():
-            key = (lib.path, lib.ignore_dirs, lib.file_settle_seconds, lib.ts_policy)
+            key = (lib.path,)
             old = self.states.get(library_id)
             if old and old.fingerprint == key and not (self.dirty and old.actual_mode == 'unavailable'):
                 old.library = lib
@@ -130,7 +128,7 @@ class AutoScanner:
                 observer = Observer()
                 if isinstance(observer, PollingObserver):
                     raise OSError('The operating system has no native file-event backend')
-                observer.schedule(Handler(self, library_id), str(root_path(lib)), recursive=True)
+                observer.schedule(Handler(self, library_id), str(root_path(lib)), recursive=False)
                 observer.start()
                 state.observer, state.actual_mode = observer, "native"
             except Exception:
@@ -164,20 +162,6 @@ class AutoScanner:
                 state.actual_mode = 'unavailable'
                 state.last_error = '文件事件监听已停止，请检查后重新保存扫描设置；期间可手动扫描'
                 logger.error('File event monitor stopped for library=%s', library_id)
-        if now >= self.next_readiness and self.states:
-            with self.factory() as db:
-                due = db.query(FileObservation).filter(FileObservation.library_id.in_(list(self.states)),
-                    FileObservation.state.in_(("waiting", "unreadable")), FileObservation.next_check_at <= utcnow()).all()
-                for observation in due:
-                    lib = self.states[observation.library_id].library
-                    reason = ignored_reason(Path(observation.path), root_path(lib), lib)
-                    if reason or Path(observation.path).suffix.lower().lstrip('.') not in get_settings().extension_set:
-                        observation.state, observation.next_check_at = "ignored", None
-                        observation.reason = reason or "不在扫描扩展名白名单中"
-                    else:
-                        self.schedule(observation.library_id, [observation.path], immediate=True, now=now)
-                db.commit()
-            self.next_readiness = now + 30
         with self.lock:
             ready = [(library_id, set(paths), self.generations.get(library_id, 0)) for library_id, paths in self.pending.items() if self.deadlines.get(library_id, now + 1) <= now]
         for library_id, paths, generation in ready:

@@ -58,12 +58,10 @@ class Settings(BaseSettings):
     cors_origins: str = "http://127.0.0.1:5173,http://localhost:5173"
     host: str = "0.0.0.0"
     port: int = 8000
-    scan_extensions: str = "mp4,mkv,avi,wmv,m2ts,ts,mov,strm"
+    scan_extensions: str = "mp4,mkv,avi,wmv,m2ts,mov,strm"
     auto_scrape: bool = True
-    file_settle_seconds: int = 60
     task_concurrency: int = 3
     scan_event_debounce_seconds: int = 15
-    download_ignore_dirs: str = ".incomplete,incomplete,.download,download_tmp,.tmp,tmp,.cache,@eaDir,#recycle,$RECYCLE.BIN"
     auto_translate: bool = True
     translate_provider: str = "google"  # google | bing | deepl | ai
     # Google gtx only: optional HTTP(S)/SOCKS proxy; toggle off → direct
@@ -141,7 +139,7 @@ class Settings(BaseSettings):
 
     @property
     def extension_set(self) -> set[str]:
-        return {e.strip().lower().lstrip(".") for e in self.scan_extensions.split(",") if e.strip()}
+        return {e.strip().lower().lstrip(".") for e in self.scan_extensions.split(",") if e.strip()} - {"ts"}
 
     @property
     def auth_enabled(self) -> bool:

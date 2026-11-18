@@ -526,10 +526,6 @@ onBeforeUnmount(stopSoftRefresh)
       /></el-select>
     </div>
 
-    <div v-if="currentLibrary?.waiting_files" class="waiting-notice">
-      <span>待就绪或待确认 {{ currentLibrary.waiting_files }} 项</span
-      ><el-button text @click="showTools = true">查看等待与扫描策略</el-button>
-    </div>
     <LibraryToolsDialog v-model="showTools" :library="currentLibrary" @saved="loadLibraries" />
     <el-dialog v-model="showLibraryOrder" title="媒体库排序" width="min(560px, 94vw)">
       <LibraryOrderList v-if="showLibraryOrder" @saved="libraries = $event" />
@@ -600,19 +596,6 @@ onBeforeUnmount(stopSoftRefresh)
   color: var(--danger);
   font-size: 12px;
   line-height: 1.7;
-}
-.waiting-notice {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 10px;
-  padding: 14px;
-  margin-bottom: 20px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  font-size: 12px;
-  color: var(--muted);
 }
 .description-dot {
   margin: 0 10px;

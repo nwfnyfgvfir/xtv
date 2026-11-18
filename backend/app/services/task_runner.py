@@ -14,16 +14,15 @@ from sqlalchemy.engine import make_url
 
 from app.config import get_settings
 from app.db import SessionLocal
-from app.models import BackgroundJob, BackgroundJobItem, Library, MediaItem, FileObservation, utcnow
+from app.models import BackgroundJob, BackgroundJobItem, Library, MediaItem, utcnow
 from app.services import task_store as store
 from app.services import task_control
-from app.services.ts_files import TsGuard
 from app.services.actors import delete_orphan_actors
 from app.services.jobs import ScanJob
 from app.services.library_revision import bump_revision
 from app.services.scanner import _ingest_file, _is_media_file, resolve_library_path
 from app.services.scrape import scrape_media_item
-from app.services.file_readiness import check_file, FileDeferred, iter_files, ignored_reason
+from app.services.scan_files import iter_files, scan_scope_reason
 from app.services.naming import SOURCE_NAME_VERSION, subtitle_flag
 
 logger = logging.getLogger(__name__)
@@ -98,7 +97,6 @@ def _manifest(factory, job_id: str, stop: threading.Event | None) -> None:
                 db.commit()
                 last_commit = time.monotonic()
                 check_stop(force=True)
-        guard = TsGuard(checkpoint)
         job = db.get(BackgroundJob, job_id)
         if job.manifest_ready:
             return
@@ -107,7 +105,7 @@ def _manifest(factory, job_id: str, stop: threading.Event | None) -> None:
             raise ValueError("媒体库已不存在")
         # Incomplete discovery has no executed items; safely rebuild it after resume.
         db.query(BackgroundJobItem).filter_by(job_id=job_id).delete()
-        job.total, job.scanned, job.waiting = 0, 0, 0
+        job.total, job.scanned = 0, 0
         job.phase, job.message = "discovering", "正在建立任务清单"
         db.commit()
         if job.kind == "scan":
@@ -116,55 +114,22 @@ def _manifest(factory, job_id: str, stop: threading.Event | None) -> None:
                 raise ValueError(f"媒体库目录不可访问：{root}")
             raw_paths = json.loads(job.params_json)["inputs"].get("paths")
             settings = get_settings().model_copy(update=json.loads(job.params_json)["settings"])
-            deferred_dirs, deferred_paths = set(), set()
-            def deferred(path, reason):
-                if path.parent in deferred_dirs:
-                    return
-                deferred_dirs.add(path.parent)
-                row = db.query(FileObservation).filter_by(library_id=lib.id, path=str(path)).one_or_none()
-                if row is None:
-                    row = db.query(FileObservation).filter(FileObservation.library_id == lib.id,
-                        FileObservation.reason.like('同目录%TS 疑似分片%'),
-                        FileObservation.path.startswith(str(path.parent) + os.sep, autoescape=True)).first()
-                    if row and Path(row.path).parent != path.parent:
-                        row = None
-                if row is None:
-                    row = FileObservation(library_id=lib.id, path=str(path))
-                    db.add(row)
-                row.state, row.reason, row.next_check_at = 'waiting', reason, None
-                deferred_paths.add(row.path)
-                job.waiting += 1
             paths = None
             if raw_paths is not None:
-                paths, parents = [], {}
+                paths = []
                 for raw in raw_paths:
                     checkpoint()
                     target = Path(os.path.abspath(raw))
-                    if ignored_reason(target, root, lib):
+                    if target.suffix.casefold() == ".ts" or scan_scope_reason(target, root):
                         continue
-                    if target.suffix.casefold() == '.ts':
-                        if target.parent not in parents:
-                            parents[target.parent] = target.parent.resolve()
-                        target = parents[target.parent] / target.name
-                        if not target.is_relative_to(root):
-                            continue
-                        if verdict := guard.classify(target, lib):
-                            if verdict[0] == 'waiting':
-                                deferred(target, verdict[1])
-                            continue
                     paths.append(str(target))
                 # Filtering all event paths must never turn an empty batch into
                 # an unintended full-library scan.
                 if not paths:
-                    job.scan_manifest_json = json.dumps({'missing': [], 'root_dev': root.stat().st_dev, 'waiting': job.waiting})
+                    job.scan_manifest_json = json.dumps({'missing': [], 'root_dev': root.stat().st_dev})
                     job.manifest_ready = True
                     db.commit()
                     return
-            for scope in paths or []:
-                checkpoint()
-                target = Path(scope)
-                if not target.exists():
-                    check_file(db, lib, target)
             scopes = set()
             for scope in paths or []:
                 checkpoint()
@@ -187,22 +152,25 @@ def _manifest(factory, job_id: str, stop: threading.Event | None) -> None:
                 if in_scope(Path(media.path)):
                     known[media.path] = media
             seen = set()
-            for idx, path in enumerate(iter_files(root, paths, lib, checkpoint=checkpoint, guard=guard, on_deferred=deferred)):
+            for idx, path in enumerate(iter_files(root, paths, checkpoint=checkpoint)):
                 if idx % 128 == 0:
                     db.commit()
                     _check_stop(factory, job_id, stop)
+                if scan_scope_reason(path, root) or path.suffix.lower().lstrip(".") not in settings.extension_set:
+                    continue
                 absolute = str(path.resolve())
                 seen.add(absolute)
-                if ignored_reason(path, root, lib) or path.suffix.lower().lstrip(".") not in settings.extension_set:
-                    continue
                 job.scanned += 1
-                check = check_file(db, lib, path, guard=guard)
-                if check.state != "ready":
-                    job.waiting += check.state in {"waiting", "unreadable"}
+                try:
+                    stat = path.stat()
+                except FileNotFoundError:
+                    continue
+                except OSError:
+                    store.add_item(db, job, "index", "index:" + absolute, path.name, path=absolute)
                     continue
                 media = known.get(absolute)
                 inferred_subtitle = subtitle_flag(path.name)
-                same = media and media.file_size == check.stat.st_size and media.file_mtime_ns == str(check.stat.st_mtime_ns) and media.recognition_version == SOURCE_NAME_VERSION and (not inferred_subtitle or media.subtitle_flag == inferred_subtitle)
+                same = media and media.file_size == stat.st_size and media.file_mtime_ns == str(stat.st_mtime_ns) and media.recognition_version == SOURCE_NAME_VERSION and (not inferred_subtitle or media.subtitle_flag == inferred_subtitle)
                 if not same:
                     store.add_item(db, job, "index", "index:" + absolute, path.name, path=absolute)
                 elif settings.auto_scrape and not media.scraped_at:
@@ -211,29 +179,12 @@ def _manifest(factory, job_id: str, stop: threading.Event | None) -> None:
             for absolute, media in known.items():
                 checkpoint()
                 path = Path(absolute)
-                if ignored_reason(path, root, lib) or guard.classify(path, lib):
+                # Retiring a format must not erase its existing library entries.
+                if path.suffix.casefold() == ".ts" or scan_scope_reason(path, root):
                     continue
                 if absolute not in seen or path.suffix.lower().lstrip(".") not in settings.extension_set:
                     missing.append({"id": media.id, "path": absolute})
-            job.scan_manifest_json = json.dumps({"missing": missing, "root_dev": root.stat().st_dev, "waiting": job.waiting})
-            # Retire group warnings after files disappear or the user confirms
-            # complete recordings, instead of leaving a permanent waiting row.
-            for row in db.query(FileObservation).filter(FileObservation.library_id == lib.id,
-                    FileObservation.state == 'waiting', FileObservation.next_check_at.is_(None),
-                    FileObservation.reason.like('同目录%TS 疑似分片%')):
-                checkpoint()
-                if row.path in deferred_paths or not in_scope(Path(row.path)):
-                    continue
-                excluded = ignored_reason(Path(row.path), root, lib)
-                if excluded or Path(row.path).parent in deferred_dirs:
-                    row.state, row.reason, row.next_check_at = 'ignored', excluded or '同目录已有待确认记录', None
-                    continue
-                verdict = guard.classify(Path(row.path), lib)
-                if verdict and verdict[0] == 'waiting':
-                    continue
-                check = check_file(db, lib, Path(row.path), guard=guard)
-                if check.state in {'ignored', 'unsupported'}:
-                    row.state, row.reason, row.next_check_at = check.state, check.reason, None
+            job.scan_manifest_json = json.dumps({"missing": missing, "root_dev": root.stat().st_dev})
         elif job.kind == "rescrape_pending":
             rows = db.query(MediaItem.id, MediaItem.filename).filter(
                 MediaItem.library_id == lib.id, MediaItem.scraped_at.is_(None),
@@ -291,7 +242,6 @@ def _followup(db, job: BackgroundJob, checkpoint=None) -> None:
 
 def _prune(db, job, item, factory, stop) -> None:
     check_stop = StopCheck(factory, job.job_id, stop)
-    guard = TsGuard(check_stop)
     lib = db.get(Library, job.library_id)
     if lib is None or not resolve_library_path(lib).is_dir():
         raise ValueError("媒体库目录不可访问，已保留索引")
@@ -309,7 +259,7 @@ def _prune(db, job, item, factory, stop) -> None:
         if media is None or media.library_id != lib.id or media.path != entry["path"]:
             continue
         media_path = Path(media.path)
-        if ignored_reason(media_path, resolve_library_path(lib), lib) or guard.classify(media_path, lib):
+        if media_path.suffix.casefold() == ".ts" or scan_scope_reason(media_path, resolve_library_path(lib)):
             continue
         try:
             missing = not media_path.exists()
@@ -340,6 +290,10 @@ def _step(factory, job_id: str, item_id: int, stop) -> None:
             if lib is None:
                 raise ValueError("媒体库已不存在")
             if item.phase == "index":
+                reason = scan_scope_reason(Path(item.path), resolve_library_path(lib))
+                if reason or Path(item.path).suffix.lower().lstrip('.') not in get_settings().extension_set:
+                    store.finish_item(db, job, item, "skipped", error=reason or "不在扫描扩展名白名单中")
+                    return
                 if not Path(item.path).is_file():
                     store.finish_item(db, job, item, "skipped", error="文件已移除")
                     return
@@ -360,9 +314,9 @@ def _step(factory, job_id: str, item_id: int, stop) -> None:
                     return
                 params = json.loads(job.params_json)
                 forced = job.kind == "rescrape"
-                readiness = check_file(db, lib, Path(media.path), guard=TsGuard(StopCheck(factory, job_id, stop)))
-                if readiness.state != "ready":
-                    store.finish_item(db, job, item, "skipped", {"waiting": int(readiness.state in {"waiting", "unreadable"})}, error=readiness.reason)
+                reason = scan_scope_reason(Path(media.path), resolve_library_path(lib))
+                if reason or not _is_media_file(Path(media.path), get_settings().extension_set):
+                    store.finish_item(db, job, item, "skipped", error=reason or "文件已移除或扩展名不受支持")
                     return
                 if not forced and media.scraped_at:
                     store.finish_item(db, job, item, "skipped", error="影片已完成刮削")
@@ -383,8 +337,6 @@ def _step(factory, job_id: str, item_id: int, stop) -> None:
                     bump_revision(lib.id)
                 else:
                     store.finish_item(db, job, item, "failed", error="未找到匹配元数据或刮削源执行失败，请检查来源配置与后端日志")
-        except FileDeferred as exc:
-            store.finish_item(db, job, item, "skipped", {"waiting": int(exc.check.state in {"waiting", "unreadable"})}, error=str(exc))
         except TaskStopped:
             db.rollback()
             raise
@@ -401,7 +353,6 @@ def _index_batch(factory, job_id: str, stop) -> None:
     """Bounded index-only transaction; network scraping keeps per-item checkpoints."""
     with factory() as db:
         check_stop = StopCheck(factory, job_id, stop)
-        guard = TsGuard(check_stop)
         interruption = None
         job = db.get(BackgroundJob, job_id)
         lib = db.get(Library, job.library_id)
@@ -423,18 +374,18 @@ def _index_batch(factory, job_id: str, stop) -> None:
             try:
                 check_stop()
                 with db.begin_nested():
-                    check = check_file(db, lib, Path(item.path), guard=guard)
-                    check_stop()
-                    if check.state != "ready":
-                        outcome, error = "skipped", check.reason
-                        stats = {"waiting": int(check.state in {"waiting", "unreadable"})}
+                    path = Path(item.path)
+                    reason = scan_scope_reason(path, resolve_library_path(lib))
+                    if reason or not _is_media_file(path, get_settings().extension_set):
+                        outcome, error = "skipped", reason or "文件已移除或扩展名不受支持"
                     else:
                         counts = ScanJob(job_id=job_id)
-                        media = _ingest_file(db, lib, Path(item.path), counts, auto_scrape=False, check=check)
+                        media = _ingest_file(db, lib, path, counts, auto_scrape=False)
                         item.media_id = media.id
                         stats = {"created": counts.created}
                         if json.loads(job.params_json).get("retry_only"):
                             stats["scanned"] = 1
+                    check_stop()
             except TaskStopped as exc:
                 interruption = exc
                 break
@@ -495,7 +446,7 @@ def execute_job(job_id: str, factory=None, stop: threading.Event | None = None,
                         raise TaskStopped(True)
                     job.status = "error" if job.failed and not job.succeeded else "done"
                     job.active_key, job.current, job.finished_at = None, None, utcnow()
-                    job.message = f"处理完成：成功 {job.succeeded}，失败 {job.failed}，跳过 {job.skipped}，等待就绪 {job.waiting}"
+                    job.message = f"处理完成：成功 {job.succeeded}，失败 {job.failed}，跳过 {job.skipped}"
                     db.commit()
                     return
                 item_id = next_id[0]
