@@ -153,6 +153,7 @@ export type ActorSort = 'media_count_desc' | 'debut_asc' | 'debut_desc'
 export interface Settings {
   task_concurrency?: number
   scrape_source?: ScrapeSource
+  scrape_source_priority?: ScrapeSource[]
   stashscrapers_base_url?: string
   stashscrapers_token_set?: boolean
   stashscrapers_scraper?: string

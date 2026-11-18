@@ -37,6 +37,7 @@ OVERRIDE_KEYS = {
     "stashscrapers_scraper_priority",
     "stashscrapers_fallback",
     "scrape_source",
+    "scrape_source_priority",
     "stash_base_url",
     "stash_api_key",
     "stash_scraper",
@@ -138,6 +139,8 @@ def _apply_overrides_to_runtime(db_map: dict[str, str]) -> None:
     s = get_settings()
     if db_map.get("scrape_source") in {"metatube", "stash", "stashscrapers"}:
         s.scrape_source = db_map["scrape_source"]
+    if "scrape_source_priority" in db_map:
+        s.scrape_source_priority = db_map["scrape_source_priority"] or ""
     for key in ("stashscrapers_base_url", "stashscrapers_token", "stashscrapers_scraper", "stashscrapers_scraper_priority"):
         if key in db_map:
             setattr(s, key, db_map[key] or "")
@@ -358,6 +361,8 @@ async def get_app_settings(
     return SettingsOut(
         task_concurrency=s.task_concurrency,
         scrape_source=source,
+        scrape_source_priority=[name for name in parse_priority_list(s.scrape_source_priority)
+            if name in {"metatube", "stash", "stashscrapers"}],
         stashscrapers_base_url=s.stashscrapers_base_url,
         stashscrapers_token_set=bool(s.stashscrapers_token.strip()),
         stashscrapers_scraper=s.stashscrapers_scraper,
@@ -429,7 +434,7 @@ async def update_app_settings(
     for key, value in data.items():
         if value is None:
             continue
-        if key in {"metatube_provider_priority", "stash_scraper_priority", "stashscrapers_scraper_priority"}:
+        if key in {"scrape_source_priority", "metatube_provider_priority", "stash_scraper_priority", "stashscrapers_scraper_priority"}:
             max_length = _MAX_PROVIDER_NAME_LEN if key == "metatube_provider_priority" else _MAX_STASH_SCRAPER_ID_LEN
             store_val = json.dumps(
                 _sanitize_priority(value if isinstance(value, list) else [], max_name_len=max_length),

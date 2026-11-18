@@ -14,7 +14,7 @@ from app.services.actors import merge_actors, normalize_actor_name, pick_canonic
 from app.services.metatube import MetaTubeClient, MetaTubeError, parse_movie_provider_names
 from app.services.stash import StashClient, StashError
 from app.services.stashscrapers import StashScrapersClient, StashScrapersError
-from app.services.naming import source_name
+from app.services.naming import source_name, subtitle_flag
 from app.services.image_backups import queue_images
 
 logger = logging.getLogger(__name__)
@@ -151,6 +151,71 @@ def _actor_list(detail: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+def _source_chain(settings: Settings | Any, *, selected_only: bool = False) -> list[str]:
+    if selected_only:
+        return [settings.scrape_source]
+    raw = getattr(settings, "scrape_source_priority", "") or ""
+    try:
+        values = raw if isinstance(raw, list) else json.loads(raw) if raw else []
+    except (ValueError, TypeError):
+        values = []
+    if not isinstance(values, list):
+        values = []
+    chain = list(dict.fromkeys(value for value in values
+        if isinstance(value, str) and value in {"metatube", "stash", "stashscrapers"}))
+    return chain or [settings.scrape_source]
+
+
+async def _lookup_movie(settings: Settings, query: str, filename: str,
+                        provider_override: str | None, url_override: str | None
+                        ) -> tuple[MetaTubeClient | StashClient | StashScrapersClient,
+                                   dict[str, Any], dict[str, Any]] | None:
+    if settings.scrape_source == "stashscrapers":
+        client = StashScrapersClient(settings)
+    elif settings.scrape_source == "stash":
+        client = StashClient(settings)
+    else:
+        client = MetaTubeClient(settings)
+    if isinstance(client, MetaTubeClient) and not client.token:
+        logger.warning("MetaTube token empty; skip scrape for %s", query)
+        return None
+    priority = _priority_list_from_settings(settings)
+    chain = priority if provider_override is None else [provider_override] if provider_override else []
+    if isinstance(client, StashScrapersClient) and url_override:
+        results = []
+        for selected in chain or [""]:
+            try:
+                results = await client.scrape_url(url_override, provider=selected, fallback=False)
+            except StashScrapersError as exc:
+                if client._fatal(exc):
+                    raise
+            if results:
+                break
+        if not results and chain and not provider_override:
+            results = await client.scrape_url(url_override)
+    elif isinstance(client, StashClient) and url_override:
+        if provider_override and provider_override.startswith('stash-box:'):
+            results = await client.scrape_url(url_override, provider=provider_override)
+        else:
+            results = await client.scrape_url(url_override)
+    else:
+        results = await _search_with_chain(client, query, chain=chain, filename=filename,
+            selected_only=bool(provider_override))
+    best = _pick_best(results, query)
+    if not best:
+        return None
+    provider, provider_id = str(best.get("provider") or ""), str(best.get("id") or "")
+    if provider and provider_id:
+        try:
+            detail = await client.get_movie(provider, provider_id, lazy=True)
+        except (MetaTubeError, StashError, StashScrapersError) as exc:
+            logger.warning("get_movie failed %s/%s: %s", provider, provider_id, exc)
+            detail = best
+    else:
+        detail = best
+    return client, best, detail
+
+
 async def scrape_media_item(
     db: Session,
     item: MediaItem,
@@ -158,6 +223,7 @@ async def scrape_media_item(
     provider_override: str | None = None,
     url_override: str | None = None,
     settings_override: Settings | None = None,
+    source_override: str | None = None,
 ) -> bool:
     """Scrape metadata for a media item. Returns True if updated."""
     query = source_name(item.filename)
@@ -168,64 +234,27 @@ async def scrape_media_item(
 
     try:
         settings = settings_override or get_settings()
-        use_stash = settings.scrape_source == "stash"
-        use_standalone = settings.scrape_source == "stashscrapers"
-        if use_standalone:
-            client = StashScrapersClient(settings)
-        elif use_stash:
-            client = StashClient(settings)
+        if source_override:
+            settings = settings.model_copy(update={"scrape_source": source_override})
+        for source in _source_chain(settings,
+                selected_only=bool(source_override or provider_override is not None or url_override)):
+            active_settings = settings.model_copy(update={"scrape_source": source})
+            logger.info("scrape filename=%s backend=%s", query, source)
+            try:
+                match = await _lookup_movie(active_settings, query, item.filename, provider_override, url_override)
+            except (MetaTubeError, StashError, StashScrapersError) as exc:
+                logger.warning("scrape backend=%s failed: %s", source, exc)
+                continue
+            if match is not None:
+                client, best, detail = match
+                settings = active_settings
+                logger.info("scrape filename=%s backend=%s matched; stop backend chain", query, source)
+                break
+            logger.info("scrape filename=%s backend=%s returned no result", query, source)
         else:
-            client = MetaTubeClient(settings)
-        if isinstance(client, MetaTubeClient) and not client.token:
-            logger.warning("MetaTube token empty; skip scrape for %s", item.number)
             return False
-        priority = _priority_list_from_settings(settings)
-        if provider_override is None:
-            chain = priority
-        else:
-            chain = [provider_override] if provider_override else []
-
-        if isinstance(client, StashScrapersClient) and url_override:
-            results = []
-            for selected in chain or [""]:
-                try:
-                    results = await client.scrape_url(url_override, provider=selected, fallback=False)
-                except StashScrapersError as exc:
-                    if client._fatal(exc):
-                        raise
-                if results:
-                    break
-            if not results and chain and not provider_override:
-                results = await client.scrape_url(url_override)
-        elif isinstance(client, StashClient) and url_override:
-            if provider_override and provider_override.startswith('stash-box:'):
-                results = await client.scrape_url(url_override, provider=provider_override)
-            else:
-                results = await client.scrape_url(url_override)
-        else:
-            results = await _search_with_chain(
-                client,
-                query,
-                chain=chain,
-                filename=item.filename,
-                selected_only=bool(provider_override),
-            )
-        best = _pick_best(results, query)
-        if not best:
-            logger.info("No %s result for %s", settings.scrape_source, item.number)
-            return False
-
         provider = str(best.get("provider") or "")
         provider_id = str(best.get("id") or "")
-        detail: dict[str, Any] = {}
-        if provider and provider_id:
-            try:
-                detail = await client.get_movie(provider, provider_id, lazy=True)
-            except (MetaTubeError, StashError, StashScrapersError) as exc:
-                logger.warning("get_movie failed %s/%s: %s", provider, provider_id, exc)
-                detail = best
-        else:
-            detail = best
 
         actors_data = _actor_list(detail)
         for data in actors_data:
@@ -249,6 +278,7 @@ async def scrape_media_item(
         item.title = src_title
         item.plot = src_plot
         item.number = query
+        item.subtitle_flag = subtitle_flag(item.filename) or item.subtitle_flag
         item.provider = provider or item.provider
         item.provider_id = provider_id or item.provider_id
 

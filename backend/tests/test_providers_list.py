@@ -129,3 +129,24 @@ def test_provider_catalog_rejects_unknown_backend(provider_api):
     api, _, calls, _ = provider_api
     assert api.get("/api/settings/providers", params={"source": "unknown"}).status_code == 422
     assert not calls
+
+
+def test_backend_priority_setting_roundtrips_and_can_be_cleared(provider_api):
+    api, settings, _, factory = provider_api
+    order = ['stashscrapers', 'metatube', 'stash']
+    response = api.put('/api/settings', json={'scrape_source_priority': order})
+    assert response.status_code == 200, response.text
+    assert response.json()['scrape_source_priority'] == order
+    assert settings.scrape_source == 'stash'
+    with factory() as db:
+        assert json.loads(db.get(AppSetting, 'scrape_source_priority').value) == order
+    settings.scrape_source_priority = ''
+    assert api.get('/api/settings').json()['scrape_source_priority'] == order
+    assert api.put('/api/settings', json={'scrape_source_priority': []}).json()['scrape_source_priority'] == []
+    assert api.put('/api/settings', json={'scrape_source_priority': ['unknown']}).status_code == 422
+
+
+def test_backend_priority_setting_deduplicates_without_reordering(provider_api):
+    api, _, _, _ = provider_api
+    response = api.put('/api/settings', json={'scrape_source_priority': ['stash', 'metatube', 'stash']})
+    assert response.json()['scrape_source_priority'] == ['stash', 'metatube']

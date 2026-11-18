@@ -52,15 +52,24 @@ const providersLoading = ref(true)
 const providersError = ref('')
 const scrapeSettings = ref<Settings | null>(null)
 const FOLLOW_SOURCE_PRIORITY = '__source_priority__'
+const FOLLOW_GLOBAL_BACKENDS = '__global_backends__'
 const scrapeProvider = ref(FOLLOW_SOURCE_PRIORITY)
 const scrapeUrl = ref('')
-const scrapeSource = ref<ScrapeSource>('metatube')
+const scrapeSource = ref<ScrapeSource | typeof FOLLOW_GLOBAL_BACKENDS>(FOLLOW_GLOBAL_BACKENDS)
+const followsGlobalBackends = computed(() => scrapeSource.value === FOLLOW_GLOBAL_BACKENDS)
+const selectedBackend = computed(() => followsGlobalBackends.value
+  ? normalizeScrapeSource(scrapeSettings.value?.scrape_source) : scrapeSource.value as ScrapeSource)
+const globalBackendHint = computed(() => {
+  const order = scrapeSettings.value?.scrape_source_priority?.length
+    ? scrapeSettings.value.scrape_source_priority : [selectedBackend.value]
+  return `按 ${order.map(source => scrapeSources[source].label).join(' → ')} 的顺序尝试，命中即停止。`
+})
 const sourceOptions = Object.entries(scrapeSources).map(([value, fields]) => ({
   value,
   label: fields.label,
 }))
-const useStash = computed(() => scrapeSource.value === 'stash')
-const supportsSourceUrl = computed(() => scrapeSource.value !== 'metatube')
+const useStash = computed(() => selectedBackend.value === 'stash')
+const supportsSourceUrl = computed(() => !followsGlobalBackends.value && selectedBackend.value !== 'metatube')
 const sourceUrlPlaceholder = computed(() =>
   useStash.value ? '支持 Stash-box 场景链接或站点影片链接' : '可选，按所选刮削器或来源地址匹配',
 )
@@ -141,14 +150,13 @@ async function loadProviders() {
   providers.value = []
   providerLabels.value = {}
   try {
-    let source = scrapeSource.value
+    let source = selectedBackend.value
     let catalog: Awaited<ReturnType<typeof getMovieProviders>>
     if (!scrapeSettings.value) {
       const settings = await getSettings()
       if (request !== providersRequest) return
       scrapeSettings.value = settings
       source = normalizeScrapeSource(settings.scrape_source)
-      scrapeSource.value = source
       catalog = {
         movie_providers: settings.movie_providers,
         movie_provider_labels: settings.movie_provider_labels,
@@ -156,6 +164,7 @@ async function loadProviders() {
         from_cache: settings.movie_providers_from_cache,
       }
     } else {
+      if (followsGlobalBackends.value) return
       catalog = await getMovieProviders(source)
       if (request !== providersRequest) return
     }
@@ -206,9 +215,9 @@ async function onRescrape() {
   scrapeSubmitting.value = true
   try {
     const task = await rescrapeMedia(Number(props.id), {
-      scrape_source: scrapeSource.value,
+      scrape_source: followsGlobalBackends.value ? undefined : selectedBackend.value,
       // Omission follows this backend's priorities; explicit "" uses all its scrapers.
-      provider: followsSourcePriority.value ? undefined : scrapeProvider.value,
+      provider: followsGlobalBackends.value || followsSourcePriority.value ? undefined : scrapeProvider.value,
       url: url || undefined,
     })
     acceptTask(task)
@@ -537,6 +546,7 @@ watch(() => props.id, load)
                     :disabled="scrapeLoading || !scrapeSettings"
                     @change="onScrapeSourceChange"
                   >
+                    <el-option label="跟随全局后端顺序" :value="FOLLOW_GLOBAL_BACKENDS" />
                     <el-option
                       v-for="source in sourceOptions"
                       :key="source.value"
@@ -544,9 +554,9 @@ watch(() => props.id, load)
                       :value="source.value"
                     />
                   </el-select>
-                  <span class="field-hint muted">仅用于本次重新刮削。</span>
+                  <span class="field-hint muted">{{ followsGlobalBackends ? globalBackendHint : '仅用于本次重新刮削，只尝试所选后端。' }}</span>
                 </div>
-                <div class="management-field">
+                <div v-if="!followsGlobalBackends" class="management-field">
                   <span>刮削器</span
                   ><el-select
                     v-model="scrapeProvider"
@@ -567,7 +577,7 @@ watch(() => props.id, load)
                   /></el-select>
                   <span class="field-hint muted">{{ sourceModeHint }}</span>
                 </div>
-                <div v-if="providersError" class="provider-feedback" role="status">
+                <div v-if="providersError && (!followsGlobalBackends || !scrapeSettings)" class="provider-feedback" role="status">
                   <span>{{ providersError }}</span>
                   <el-button link :loading="providersLoading" @click="loadProviders">重试</el-button>
                 </div>

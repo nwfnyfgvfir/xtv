@@ -49,6 +49,37 @@ def test_process_files_do_not_enter_library(workspace, name):
         assert db.query(MediaItem).count() == 0
 
 
+def test_rescan_refreshes_missing_subtitle_flag_on_unchanged_scraped_media(workspace):
+    api, factory, lib_id, _, calls, settings = workspace
+    settings.auto_scrape = False
+    media_id = add_media(workspace, 'ABC-123-ch', scraped=True)
+    url = f'/api/libraries/{lib_id}/scan'
+    run(workspace, api.post(url).json())
+    with factory() as db:
+        item = db.get(MediaItem, media_id)
+        assert item.subtitle_flag == 'C'
+        scraped_at = item.scraped_at
+        item.subtitle_flag = None
+        db.commit()
+    done = run(workspace, api.post(url).json())
+    assert done['created'] == done['scraped'] == 0 and not calls
+    with factory() as db:
+        item = db.get(MediaItem, media_id)
+        assert item.subtitle_flag == 'C' and item.scraped_at == scraped_at
+        assert item.number == 'ABC-123-ch' and item.filename == 'ABC-123-ch.mp4'
+
+
+def test_rename_refreshes_subtitle_flag(workspace):
+    _, factory, lib_id, _, _, settings = workspace
+    settings.file_settle_seconds = 0
+    media_id = add_media(workspace, 'ABC-123')
+    with factory() as db:
+        assert scanner.rename_media_item(db, lib_id, media_id, 'ABC-123C.mp4')['ok']
+        assert db.get(MediaItem, media_id).subtitle_flag == 'C'
+        assert scanner.rename_media_item(db, lib_id, media_id, 'ABC-123-CD1.mp4')['ok']
+        assert db.get(MediaItem, media_id).subtitle_flag is None
+
+
 def test_stability_requires_time_and_detects_same_size_rewrites(workspace):
     _, factory, lib_id, root, _, _ = workspace
     path = root / 'ABP-001.mp4'

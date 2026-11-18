@@ -12,7 +12,7 @@ from app.models import Library, MediaItem
 from app.services.actors import delete_orphan_actors
 from app.services.jobs import ScanJob, job_store
 from app.services.library_revision import bump_revision
-from app.services.naming import source_name
+from app.services.naming import source_name, subtitle_flag
 from app.services.scrape import scrape_media_item
 from app.services.strm import read_strm_target
 from app.services.file_readiness import check_file, FileDeferred, FileCheck, ignored_reason, apply_source_name
@@ -557,6 +557,8 @@ def rename_media_item(db: Session, library_id: int, media_id: int, new_filename:
         item.path = str(new_path.resolve())
         # Re-extract number/disc/subtitle flags from the new name when possible.
         apply_source_name(item, new_path)
+        if subtitle_flag(old_path.name) and not subtitle_flag(new_path.name):
+            item.subtitle_flag = None
         item.file_mtime_ns = str(new_path.stat().st_mtime_ns)
         db.add(item)
         db.commit()

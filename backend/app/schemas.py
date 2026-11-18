@@ -221,6 +221,7 @@ class ProgressOut(BaseModel):
 class SettingsOut(BaseModel):
     task_concurrency: int = 3
     scrape_source: Literal["metatube", "stash", "stashscrapers"] = "metatube"
+    scrape_source_priority: list[Literal["metatube", "stash", "stashscrapers"]] = []
     stashscrapers_base_url: str = ""
     stashscrapers_token_set: bool = False
     stashscrapers_scraper: str = ""
@@ -266,6 +267,7 @@ class SettingsOut(BaseModel):
 class SettingsUpdate(BaseModel):
     task_concurrency: int | None = Field(default=None, ge=1, le=8)
     scrape_source: Literal["metatube", "stash", "stashscrapers"] | None = None
+    scrape_source_priority: list[Literal["metatube", "stash", "stashscrapers"]] | None = Field(default=None, max_length=3)
     stashscrapers_base_url: str | None = None
     stashscrapers_token: str | None = None
     stashscrapers_scraper: str | None = None

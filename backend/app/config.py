@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     metatube_provider_priority: str = ""  # JSON array string e.g. '["JavBus","FANZA"]'
     metatube_fallback: bool = True
     scrape_source: str = "metatube"  # metatube | stash | stashscrapers
+    scrape_source_priority: str = ""  # JSON array; empty uses scrape_source only
     stash_base_url: str = ""
     stash_api_key: str = ""
     stash_scraper: str = ""  # empty = auto

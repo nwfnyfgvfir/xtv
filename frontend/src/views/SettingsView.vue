@@ -18,6 +18,7 @@ const health = ref<Health | null>(null)
 const form = ref({
   task_concurrency: 3,
   scrape_source: 'metatube' as ScrapeSource,
+  scrape_source_priority: [] as ScrapeSource[],
   stashscrapers_base_url: '',
   stashscrapers_token: '',
   stashscrapers_scraper_priority: [] as string[],
@@ -81,6 +82,15 @@ const priorityPick = ref<string[]>([])
 const isStash = computed(() => form.value.scrape_source === 'stash')
 const isStashScrapers = computed(() => form.value.scrape_source === 'stashscrapers')
 const activeSourceFields = computed(() => scrapeSources[form.value.scrape_source])
+const backendOptions = Object.entries(scrapeSources).map(([value, fields]) => ({ value, label: fields.label }))
+
+function moveBackendPriority(index: number, delta: number) {
+  const next = [...form.value.scrape_source_priority]
+  const target = index + delta
+  if (target < 0 || target >= next.length) return
+  ;[next[index], next[target]] = [next[target]!, next[index]!]
+  form.value.scrape_source_priority = next
+}
 const activePriority = computed({
   get: () => form.value[activeSourceFields.value.priority],
   set: (value: string[]) => {
@@ -216,6 +226,7 @@ function normalizeProvider(mode: string | undefined): TranslateProvider {
 function applySettingsToForm(s: Settings) {
   form.value.task_concurrency = s.task_concurrency ?? 3
   form.value.scrape_source = normalizeScrapeSource(s.scrape_source)
+  form.value.scrape_source_priority = [...(s.scrape_source_priority || [])]
   form.value.stashscrapers_base_url = s.stashscrapers_base_url || ''
   form.value.stashscrapers_token = ''
   form.value.stashscrapers_scraper_priority = [...(s.stashscrapers_scraper_priority || [])]
@@ -393,6 +404,7 @@ async function save() {
   try {
     const body: Record<string, unknown> = {
       scrape_source: form.value.scrape_source,
+      scrape_source_priority: form.value.scrape_source_priority,
       stashscrapers_base_url: form.value.stashscrapers_base_url.trim(),
       stashscrapers_scraper_priority: form.value.stashscrapers_scraper_priority,
       stash_base_url: form.value.stash_base_url.trim(),
@@ -581,9 +593,37 @@ onMounted(() => {
               </el-form-item>
             </template>
 
-            <el-form-item label="源列表">
+            <el-form-item label="刮削后端优先级" class="span-full">
+              <div class="priority-block">
+                <el-select v-model="form.scrape_source_priority" multiple
+                  placeholder="留空仅使用当前默认后端" aria-label="刮削后端优先级" style="width: 100%">
+                  <el-option v-for="backend in backendOptions" :key="backend.value"
+                    :label="backend.label" :value="backend.value" />
+                </el-select>
+                <ul v-if="form.scrape_source_priority.length" class="priority-list backend-priority-list">
+                  <li v-for="(source, index) in form.scrape_source_priority" :key="source">
+                    <span class="pri-idx">{{ index + 1 }}</span>
+                    <span class="pri-name">{{ scrapeSources[source].label }}</span>
+                    <span class="pri-actions">
+                      <el-button size="small" text :disabled="index === 0"
+                        :aria-label="`上移后端 ${scrapeSources[source].label}`"
+                        @click="moveBackendPriority(index, -1)">↑</el-button>
+                      <el-button size="small" text :disabled="index === form.scrape_source_priority.length - 1"
+                        :aria-label="`下移后端 ${scrapeSources[source].label}`"
+                        @click="moveBackendPriority(index, 1)">↓</el-button>
+                    </span>
+                  </li>
+                </ul>
+                <span class="field-hint muted block">
+                  按列表顺序尝试已配置的后端；该后端的适用刮削器全部未命中或执行失败后，继续下一个后端，命中即停止。
+                  仅尝试列表中的后端；留空时只使用上方选择的默认后端。详情页明确指定后端或刮削器时，仅使用指定选择。
+                </span>
+              </div>
+            </el-form-item>
+
+            <el-form-item label="刮削器列表">
               <div class="providers-meta">
-                <span class="muted">共 {{ providerCount }} 个源</span>
+                <span class="muted">共 {{ providerCount }} 个刮削器</span>
                 <el-button :loading="providersRefreshing" @click="refreshProviders">
                   刷新源列表
                 </el-button>
@@ -600,7 +640,7 @@ onMounted(() => {
               </p>
             </el-form-item>
 
-            <el-form-item label="刮削源优先级" class="span-full">
+            <el-form-item label="刮削器优先级" class="span-full">
               <div class="priority-block">
                 <el-select
                   :model-value="priorityPick"
@@ -1397,6 +1437,12 @@ onMounted(() => {
     min-width: 44px;
     min-height: 44px;
     margin-left: 0;
+  }
+  .backend-priority-list li {
+    grid-template-columns: 23px minmax(0, 1fr) auto;
+  }
+  .backend-priority-list .pri-actions {
+    grid-column: auto;
   }
   .settings-layout {
     grid-template-columns: minmax(0, 1fr);

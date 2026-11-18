@@ -2,7 +2,7 @@ import asyncio
 from types import SimpleNamespace
 
 from app.services.metatube import MetaTubeClient, MetaTubeError
-from app.services.scrape import _pick_best, _priority_list_from_settings, _search_with_chain
+from app.services.scrape import _pick_best, _priority_list_from_settings, _search_with_chain, _source_chain
 
 
 class FakeClient(MetaTubeClient):
@@ -61,3 +61,13 @@ def test_explicit_single_scene_source_remains_targeted():
 def test_provider_result_ranking_does_not_rewrite_source_filename():
     rows = [{'number': 'FC2-1066192', 'provider': 'source'}]
     assert _pick_best(rows, 'FC2-PPV-1066192') is rows[0]
+
+
+def test_backend_priority_preserves_order_and_selected_backend_stays_targeted():
+    settings = SimpleNamespace(scrape_source='metatube',
+        scrape_source_priority='["stash", "stashscrapers", "stash", "unknown"]')
+    assert _source_chain(settings) == ['stash', 'stashscrapers']
+    assert _source_chain(settings, selected_only=True) == ['metatube']
+    for value in ('', '[]', '{}', 'invalid', None):
+        settings.scrape_source_priority = value
+        assert _source_chain(settings) == ['metatube']

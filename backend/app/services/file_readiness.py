@@ -207,12 +207,13 @@ def check_file(db: Session, lib: Library, path: Path, *, now: datetime | None = 
 
 
 def apply_source_name(item: MediaItem, path: Path) -> None:
-    from app.services.naming import source_name, SOURCE_NAME_VERSION
+    from app.services.naming import source_name, subtitle_flag, SOURCE_NAME_VERSION
 
     query = source_name(path.name)
     if item.recognition_version == SOURCE_NAME_VERSION and item.number != query:
         item.scraped_at = None
     item.number = query
+    item.subtitle_flag = subtitle_flag(path.name) or item.subtitle_flag
     item.number_source = "filename"
     item.recognition_notes = None
     item.recognition_version = SOURCE_NAME_VERSION

@@ -84,6 +84,9 @@ async function onRescrapeImage() {
   imgLoading.value = true
   try {
     actor.value = await rescrapeActorImage(actor.value.id)
+    if (actor.value.id !== Number(props.id)) {
+      await router.replace({ name: 'actor-detail', params: { id: actor.value.id }, query: route.query })
+    }
     ElMessage.success('头像已更新')
   } catch (e: unknown) {
     ElMessage.error(getErrorMessage(e, '头像刮削失败'))

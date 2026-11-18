@@ -323,6 +323,7 @@ async def rescrape_media(
         provider_override=body.provider,
         url_override=source_url or None,
         settings_override=settings,
+        source_override=body.scrape_source,
     )
     db.refresh(item)
     if not ok:

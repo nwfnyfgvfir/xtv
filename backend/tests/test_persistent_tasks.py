@@ -319,6 +319,17 @@ def test_single_rescrape_backend_is_preserved_on_resume_and_retry(workspace, mon
     assert settings.scrape_source == "metatube"
 
 
+def test_backend_order_is_snapshotted_for_queued_scan(workspace):
+    api, _, lib_id, _, calls, settings = workspace
+    settings.scrape_source_priority = '["metatube","stash"]'
+    add_media(workspace)
+    task = api.post(f'/api/libraries/{lib_id}/rescrape-pending').json()
+    settings.scrape_source_priority = '["stashscrapers"]'
+    assert run(workspace, task)['scraped'] == 1
+    assert calls[-1][1]['settings_override'].scrape_source_priority == '["metatube","stash"]'
+    assert calls[-1][1]['source_override'] is None
+
+
 @pytest.mark.parametrize("global_source, selected, status", [
     ("metatube", "stash", 202), ("metatube", "stashscrapers", 202),
     ("stash", "metatube", 400), ("stash", None, 202), ("metatube", None, 400),

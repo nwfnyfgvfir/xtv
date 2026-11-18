@@ -11,7 +11,8 @@ from app.deps import require_auth
 from app.models import Actor, ActorFavorite, MediaActor, MediaItem
 from app.schemas import ActorDetail, ActorListItem, MediaListItem, PaginatedActors, PaginatedMedia
 from app.services.image_delivery import attach_media_images, actor_image_urls
-from app.services.scrape import enrich_actor_image
+from app.services.scrape import enrich_actor_image, _set_actor_provider_safe
+from app.services.image_backups import queue_images
 from app.services.sorting import actor_order_by, media_order_by
 
 router = APIRouter(prefix="/actors", tags=["actors"])
@@ -164,14 +165,19 @@ async def rescrape_actor_image(
     actor = db.get(Actor, actor_id)
     if not actor:
         raise HTTPException(404, "actor not found")
-    # force re-fetch
-    actor.image_url = None
-    db.add(actor)
+    candidate = Actor(name=actor.name, provider=actor.provider, provider_id=actor.provider_id)
+    # Finish the read transaction; fetch remotely before acquiring a write lock.
     db.commit()
-    ok = await enrich_actor_image(db, actor)
-    db.refresh(actor)
-    if not ok and not actor.image_url:
+    if not await enrich_actor_image(None, candidate):
         raise HTTPException(502, "actor image not found")
+    actor = db.query(Actor).filter_by(id=actor_id).one_or_none()
+    if actor is None:
+        raise HTTPException(404, "actor not found")
+    actor = _set_actor_provider_safe(db, actor, candidate.provider, candidate.provider_id)
+    actor.image_url = candidate.image_url
+    queue_images(db, [actor.image_url])
+    db.commit()
+    db.refresh(actor)
     return _actor_detail(db, actor)
 
 

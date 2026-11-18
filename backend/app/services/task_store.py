@@ -28,7 +28,7 @@ class TaskConflict(Exception):
 def source_snapshot() -> dict[str, Any]:
     settings = get_settings()
     # Connection credentials stay in settings, never in task rows or responses.
-    fields = ["scrape_source", "auto_scrape", "scan_extensions"]
+    fields = ["scrape_source", "scrape_source_priority", "auto_scrape", "scan_extensions"]
     fields.extend(("metatube_provider_priority", "stash_scraper_priority", "stashscrapers_scraper_priority"))
     return {key: getattr(settings, key) for key in fields}
 

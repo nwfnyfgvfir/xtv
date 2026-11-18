@@ -24,7 +24,7 @@ from app.services.library_revision import bump_revision
 from app.services.scanner import _ingest_file, _is_media_file, resolve_library_path
 from app.services.scrape import scrape_media_item
 from app.services.file_readiness import check_file, FileDeferred, iter_files, ignored_reason
-from app.services.naming import SOURCE_NAME_VERSION
+from app.services.naming import SOURCE_NAME_VERSION, subtitle_flag
 
 logger = logging.getLogger(__name__)
 
@@ -170,7 +170,8 @@ def _manifest(factory, job_id: str, stop: threading.Event | None) -> None:
                 checkpoint()
                 scopes.add(Path(scope).resolve())
             query = db.query(MediaItem.id, MediaItem.path, MediaItem.filename, MediaItem.file_size,
-                MediaItem.file_mtime_ns, MediaItem.recognition_version, MediaItem.number, MediaItem.scraped_at).filter(MediaItem.library_id == lib.id)
+                MediaItem.file_mtime_ns, MediaItem.recognition_version, MediaItem.number, MediaItem.scraped_at,
+                MediaItem.subtitle_flag).filter(MediaItem.library_id == lib.id)
             # Common file events fetch only their own index rows. Large bursts use
             # one query and bounded ancestor checks instead of huge SQLite OR trees.
             if scopes and root not in scopes and len(scopes) <= 100:
@@ -200,7 +201,8 @@ def _manifest(factory, job_id: str, stop: threading.Event | None) -> None:
                     job.waiting += check.state in {"waiting", "unreadable"}
                     continue
                 media = known.get(absolute)
-                same = media and media.file_size == check.stat.st_size and media.file_mtime_ns == str(check.stat.st_mtime_ns) and media.recognition_version == SOURCE_NAME_VERSION
+                inferred_subtitle = subtitle_flag(path.name)
+                same = media and media.file_size == check.stat.st_size and media.file_mtime_ns == str(check.stat.st_mtime_ns) and media.recognition_version == SOURCE_NAME_VERSION and (not inferred_subtitle or media.subtitle_flag == inferred_subtitle)
                 if not same:
                     store.add_item(db, job, "index", "index:" + absolute, path.name, path=absolute)
                 elif settings.auto_scrape and not media.scraped_at:
@@ -371,6 +373,7 @@ def _step(factory, job_id: str, item_id: int, stop) -> None:
                 settings = get_settings().model_copy(update=params["settings"])
                 ok = asyncio.run(_scrape_interruptible(factory, job_id, stop, scrape_media_item(db, media, force=forced,
                     provider_override=inputs.get("provider"),
+                    source_override=inputs.get("scrape_source"),
                     url_override=inputs.get("url"), settings_override=settings)))
                 # scrape_media_item may commit/rollback its own session; refresh job state.
                 db.refresh(job)
