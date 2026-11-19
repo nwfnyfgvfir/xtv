@@ -125,7 +125,7 @@ class MediaListQuery(BaseModel):
 
 
 class RescrapeIn(BaseModel):
-    scrape_source: Literal["metatube", "stash", "stashscrapers"] | None = None
+    scrape_source: Literal["metatube", "stash"] | None = None
     provider: str | None = None
     url: str | None = Field(default=None, max_length=2048)
 
@@ -208,13 +208,8 @@ class ProgressOut(BaseModel):
 
 class SettingsOut(BaseModel):
     task_concurrency: int = 3
-    scrape_source: Literal["metatube", "stash", "stashscrapers"] = "metatube"
-    scrape_source_priority: list[Literal["metatube", "stash", "stashscrapers"]] = []
-    stashscrapers_base_url: str = ""
-    stashscrapers_token_set: bool = False
-    stashscrapers_scraper: str = ""
-    stashscrapers_scraper_priority: list[str] = []
-    stashscrapers_fallback: bool = True
+    scrape_source: Literal["metatube", "stash"] = "metatube"
+    scrape_source_priority: list[Literal["metatube", "stash"]] = []
     stash_base_url: str = ""
     stash_api_key_set: bool = False
     stash_scraper: str = ""
@@ -254,13 +249,8 @@ class SettingsOut(BaseModel):
 
 class SettingsUpdate(BaseModel):
     task_concurrency: int | None = Field(default=None, ge=1, le=8)
-    scrape_source: Literal["metatube", "stash", "stashscrapers"] | None = None
-    scrape_source_priority: list[Literal["metatube", "stash", "stashscrapers"]] | None = Field(default=None, max_length=3)
-    stashscrapers_base_url: str | None = None
-    stashscrapers_token: str | None = None
-    stashscrapers_scraper: str | None = None
-    stashscrapers_scraper_priority: list[str] | None = None
-    stashscrapers_fallback: bool | None = None
+    scrape_source: Literal["metatube", "stash"] | None = None
+    scrape_source_priority: list[Literal["metatube", "stash"]] | None = Field(default=None, max_length=3)
     stash_base_url: str | None = None
     stash_api_key: str | None = None
     stash_scraper: str | None = None
@@ -289,6 +279,21 @@ class SettingsUpdate(BaseModel):
     image_site_base_url: str | None = None
     scan_extensions: str | None = None
     extra: dict[str, str] | None = None
+
+
+class ScraperTestIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    source: Literal["metatube", "stash"]
+    query: str = Field(min_length=1, max_length=2048)
+    provider: str | None = Field(default=None, max_length=256)
+
+
+class ScraperTestOut(BaseModel):
+    matched: bool
+    source: Literal["metatube", "stash"]
+    elapsed_ms: int
+    result: dict[str, Any] | None = None
 
 
 class RenameIn(BaseModel):
@@ -344,8 +349,7 @@ class HealthOut(BaseModel):
     version: str = "dev"
     metatube: dict[str, Any] | None = None
     stash: dict[str, Any] | None = None
-    stashscrapers: dict[str, Any] | None = None
-    scrape_source: Literal["metatube", "stash", "stashscrapers"] = "metatube"
+    scrape_source: Literal["metatube", "stash"] = "metatube"
     auth_enabled: bool = False
     watcher: dict[str, Any] | None = None
 

@@ -79,7 +79,7 @@ async def _scrape_interruptible(factory, job_id, stop, coroutine):
 def _safe_error(exc: Exception) -> str:
     value = str(exc)[:1000]
     settings = get_settings()
-    for key in ("metatube_token", "stash_api_key", "stashscrapers_token", "translate_ai_api_key", "translate_deepl_api_key"):
+    for key in ("metatube_token", "stash_api_key", "translate_ai_api_key", "translate_deepl_api_key"):
         secret = getattr(settings, key, "")
         if secret:
             value = value.replace(secret, "[redacted]")

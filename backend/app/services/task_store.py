@@ -29,8 +29,19 @@ def source_snapshot() -> dict[str, Any]:
     settings = get_settings()
     # Connection credentials stay in settings, never in task rows or responses.
     fields = ["scrape_source", "scrape_source_priority", "auto_scrape", "scan_extensions"]
-    fields.extend(("metatube_provider_priority", "stash_scraper_priority", "stashscrapers_scraper_priority"))
-    return {key: getattr(settings, key) for key in fields}
+    fields.extend(("metatube_provider_priority", "stash_scraper_priority"))
+    snapshot = {key: getattr(settings, key) for key in fields}
+    snapshot["scrape_source"] = settings.scrape_source if settings.scrape_source in {"metatube", "stash"} else "metatube"
+    try:
+        priority = json.loads(settings.scrape_source_priority) if settings.scrape_source_priority else []
+    except (TypeError, ValueError):
+        priority = []
+    snapshot["scrape_source_priority"] = json.dumps(
+        list(dict.fromkeys(source for source in priority if source in {"metatube", "stash"})),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ) if isinstance(priority, list) else ""
+    return snapshot
 
 
 def resource_key(kind: str, library_id: int | None, media_id: int | None) -> str:

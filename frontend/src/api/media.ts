@@ -17,6 +17,7 @@ import type {
   BackgroundTask,
   Settings,
   ScrapeSource,
+  ScraperTestResult,
 } from './types'
 
 export const getHealth = () => client.get<Health>('/health').then((r) => r.data)
@@ -165,6 +166,12 @@ export const getMovieProviders = (source?: ScrapeSource) =>
       error?: string | null
     }>('/settings/providers', { params: { source } })
     .then((r) => r.data)
+
+export const testScraper = (body: {
+  source: ScrapeSource
+  query: string
+  provider?: string
+}) => client.post<ScraperTestResult>('/settings/test-scraper', body).then((r) => r.data)
 
 export const renameMedia = (id: number, body: { new_filename: string }) =>
   client.put<MediaDetail>(`/media/${id}/rename`, body).then((r) => r.data)

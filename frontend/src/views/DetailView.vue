@@ -90,8 +90,10 @@ const providerLabelsBySource = ref<Partial<Record<ScrapeSource, Record<string, s
 const mediaProviderLabel = computed(() => {
   const provider = item.value?.provider
   if (!provider) return '尚未刮削'
-  const source: ScrapeSource = provider.startsWith('stashscrapers:')
-    ? 'stashscrapers' : provider.startsWith('stash:') ? 'stash' : 'metatube'
+  if (provider.includes(':') && !provider.startsWith('stash:')) {
+    return `已移除来源 · ${provider.slice(provider.indexOf(':') + 1)}`
+  }
+  const source: ScrapeSource = provider.startsWith('stash:') ? 'stash' : 'metatube'
   const id = source === 'metatube' ? provider : provider.slice(source.length + 1)
   const label = providerLabelsBySource.value[source]?.[id]
     || (id.startsWith('stash-box:') ? 'Stash-box' : id)

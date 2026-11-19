@@ -135,7 +135,7 @@ export interface Progress {
 }
 
 export type ImageProxyMode = 'site' | 'external'
-export type ScrapeSource = 'metatube' | 'stash' | 'stashscrapers'
+export type ScrapeSource = 'metatube' | 'stash'
 
 export type TranslateProvider = 'google' | 'bing' | 'deepl' | 'ai'
 
@@ -148,11 +148,6 @@ export interface Settings {
   task_concurrency?: number
   scrape_source?: ScrapeSource
   scrape_source_priority?: ScrapeSource[]
-  stashscrapers_base_url?: string
-  stashscrapers_token_set?: boolean
-  stashscrapers_scraper?: string
-  stashscrapers_scraper_priority?: string[]
-  stashscrapers_fallback?: boolean
   stash_base_url?: string
   stash_api_key_set?: boolean
   stash_scraper?: string
@@ -237,7 +232,6 @@ export interface Health {
   status: string
   metatube?: { ok?: boolean; data?: unknown; error?: string } | null
   stash?: { ok?: boolean; data?: unknown; error?: string } | null
-  stashscrapers?: { ok?: boolean; data?: unknown; error?: string } | null
   scrape_source?: ScrapeSource
   auth_enabled?: boolean
   watcher?: {
@@ -245,6 +239,26 @@ export interface Health {
     watched_library_ids?: number[]
     pending_scans?: number[]
     libraries?: { id: number; name?: string; mode: string; error: string | null }[]
+  } | null
+}
+
+export interface ScraperTestResult {
+  matched: boolean
+  source: ScrapeSource
+  elapsed_ms: number
+  result?: {
+    title?: string | null
+    number?: string | null
+    provider?: string | null
+    provider_id?: string | null
+    release_date?: string | null
+    studio?: string | null
+    runtime?: number | string | null
+    score?: number | string | null
+    summary?: string | null
+    cover_url?: string | null
+    actors?: string[]
+    tags?: string[]
   } | null
 }
 

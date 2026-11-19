@@ -276,7 +276,7 @@ def remote_proxy_url(url: str, template: str, *, provider: str | None = None,
         return None
     tpl = template.strip()
     if (('{provider}' in tpl and not provider) or ('{id}' in tpl and not provider_id)
-            or (provider and provider.startswith(('stash:', 'stashscrapers:')) and ('{provider}' in tpl or '{id}' in tpl))):
+            or (provider and provider.startswith('stash:') and ('{provider}' in tpl or '{id}' in tpl))):
         return url
     values = {'url': url, 'provider': provider or '', 'id': provider_id or '', 'quality': str(quality)}
     return re.sub(r'\{(url|provider|id|quality)\}',

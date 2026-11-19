@@ -257,8 +257,8 @@ def enqueue_rescrape(media_id: int, _: Annotated[dict, Depends(require_auth)],
     inputs = body.model_dump(exclude_none=True)
     url = (body.url or "").strip()
     if url:
-        if (body.scrape_source or get_settings().scrape_source) not in {"stash", "stashscrapers"}:
-            raise HTTPException(400, "source URL scraping requires Stash or StashScrapers")
+        if (body.scrape_source or get_settings().scrape_source) != "stash":
+            raise HTTPException(400, "source URL scraping requires Stash")
         try:
             parts = urlsplit(url)
             if parts.scheme not in {"http", "https"} or not parts.hostname:
@@ -300,8 +300,8 @@ async def rescrape_media(
     if source_url:
         from urllib.parse import urlsplit
 
-        if settings.scrape_source not in {"stash", "stashscrapers"}:
-            raise HTTPException(400, "source URL scraping requires Stash or StashScrapers")
+        if settings.scrape_source != "stash":
+            raise HTTPException(400, "source URL scraping requires Stash")
         try:
             parsed = urlsplit(source_url)
             valid_url = parsed.scheme in {"http", "https"} and bool(parsed.hostname)

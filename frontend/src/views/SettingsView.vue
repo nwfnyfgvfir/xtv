@@ -2,8 +2,8 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { getHealth, getImageBackupStatus, getMovieProviders, getSettings, updateSettings } from '@/api/media'
-import type { Health, ImageProxyMode, ScrapeSource, Settings, TranslateProvider } from '@/api/types'
+import { getHealth, getImageBackupStatus, getMovieProviders, getSettings, testScraper, updateSettings } from '@/api/media'
+import type { Health, ImageProxyMode, ScrapeSource, ScraperTestResult, Settings, TranslateProvider } from '@/api/types'
 import { getErrorMessage } from '@/utils/errors'
 import { APP_VERSION } from '@/utils/version'
 import AppIcon from '@/components/AppIcon.vue'
@@ -19,9 +19,6 @@ const form = ref({
   task_concurrency: 3,
   scrape_source: 'metatube' as ScrapeSource,
   scrape_source_priority: [] as ScrapeSource[],
-  stashscrapers_base_url: '',
-  stashscrapers_token: '',
-  stashscrapers_scraper_priority: [] as string[],
   stash_base_url: '',
   stash_api_key: '',
   stash_scraper_priority: [] as string[],
@@ -80,9 +77,12 @@ const isDirty = computed(
 )
 const priorityPick = ref<string[]>([])
 const isStash = computed(() => form.value.scrape_source === 'stash')
-const isStashScrapers = computed(() => form.value.scrape_source === 'stashscrapers')
 const activeSourceFields = computed(() => scrapeSources[form.value.scrape_source])
 const backendOptions = Object.entries(scrapeSources).map(([value, fields]) => ({ value, label: fields.label }))
+const scraperTestQuery = ref('')
+const scraperTestProvider = ref('')
+const scraperTesting = ref(false)
+const scraperTestResult = ref<ScraperTestResult | null>(null)
 
 function moveBackendPriority(index: number, delta: number) {
   const next = [...form.value.scrape_source_priority]
@@ -109,6 +109,8 @@ watch(
   () => form.value.scrape_source,
   () => {
     priorityPick.value = [...activePriority.value]
+    scraperTestProvider.value = ''
+    scraperTestResult.value = null
   },
 )
 
@@ -227,9 +229,6 @@ function applySettingsToForm(s: Settings) {
   form.value.task_concurrency = s.task_concurrency ?? 3
   form.value.scrape_source = normalizeScrapeSource(s.scrape_source)
   form.value.scrape_source_priority = [...(s.scrape_source_priority || [])]
-  form.value.stashscrapers_base_url = s.stashscrapers_base_url || ''
-  form.value.stashscrapers_token = ''
-  form.value.stashscrapers_scraper_priority = [...(s.stashscrapers_scraper_priority || [])]
   form.value.stash_base_url = s.stash_base_url || ''
   form.value.stash_api_key = ''
   form.value.stash_scraper_priority = [...(s.stash_scraper_priority || [])]
@@ -310,6 +309,30 @@ async function refreshProviders() {
   }
 }
 
+async function runScraperTest() {
+  const query = scraperTestQuery.value.trim()
+  if (!query) {
+    ElMessage.warning('请输入用于测试的番号、标题或来源 URL')
+    return
+  }
+  if (isDirty.value) {
+    ElMessage.warning('测试使用已保存的服务地址与凭证，未保存的连接修改不会生效')
+  }
+  scraperTesting.value = true
+  scraperTestResult.value = null
+  try {
+    scraperTestResult.value = await testScraper({
+      source: form.value.scrape_source,
+      query,
+      provider: scraperTestProvider.value || undefined,
+    })
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '刮削器测试失败'))
+  } finally {
+    scraperTesting.value = false
+  }
+}
+
 function onPriorityPickChange(vals: string[]) {
   const prev = activePriority.value
   const next: string[] = []
@@ -381,11 +404,6 @@ async function save() {
     ElMessage.warning(imageSiteBaseError.value || imageProxyError.value)
     return
   }
-  if (isStashScrapers.value && !form.value.stashscrapers_base_url.trim()) {
-    activeSection.value = 'metadata'
-    ElMessage.warning('请填写 StashScrapers 服务地址')
-    return
-  }
   if (isStash.value && !form.value.stash_base_url.trim()) {
     activeSection.value = 'metadata'
     ElMessage.warning('请填写 Stash 服务地址')
@@ -405,8 +423,6 @@ async function save() {
     const body: Record<string, unknown> = {
       scrape_source: form.value.scrape_source,
       scrape_source_priority: form.value.scrape_source_priority,
-      stashscrapers_base_url: form.value.stashscrapers_base_url.trim(),
-      stashscrapers_scraper_priority: form.value.stashscrapers_scraper_priority,
       stash_base_url: form.value.stash_base_url.trim(),
       stash_scraper_priority: form.value.stash_scraper_priority,
       metatube_base_url: form.value.metatube_base_url,
@@ -429,8 +445,6 @@ async function save() {
       metatube_provider_priority: form.value.metatube_provider_priority,
     }
     if (form.value.metatube_token) body.metatube_token = form.value.metatube_token
-    if (form.value.stashscrapers_token.trim())
-      body.stashscrapers_token = form.value.stashscrapers_token.trim()
     if (form.value.stash_api_key.trim()) body.stash_api_key = form.value.stash_api_key.trim()
     if (form.value.translate_deepl_api_key) {
       body.translate_deepl_api_key = form.value.translate_deepl_api_key
@@ -525,38 +539,9 @@ onMounted(() => {
               <el-select v-model="form.scrape_source" style="width: 100%">
                 <el-option label="MetaTube" value="metatube" />
                 <el-option label="Stash（社区刮削器 / Stash-box）" value="stash" />
-                <el-option label="拾录 / StashScrapers（独立刮削服务）" value="stashscrapers" />
               </el-select>
             </el-form-item>
-            <template v-if="isStashScrapers">
-              <el-form-item label="StashScrapers 服务地址">
-                <el-input
-                  v-model="form.stashscrapers_base_url"
-                  placeholder="http://stashscrapers:8080"
-                />
-                <span class="field-hint muted block"
-                  >填写拾录服务的根地址，也支持以 /api 结尾的地址</span
-                >
-              </el-form-item>
-              <el-form-item label="StashScrapers Bearer Token">
-                <el-input
-                  v-model="form.stashscrapers_token"
-                  type="password"
-                  show-password
-                  placeholder="留空则不修改"
-                />
-                <span class="field-hint muted block"
-                  >{{ settings?.stashscrapers_token_set ? '已配置' : '未配置' }} · 填写服务的
-                  STASHSCRAPERS_TOKEN；未开启鉴权可留空</span
-                >
-              </el-form-item>
-              <p class="field-hint muted span-full">
-                使用独立的拾录服务，无需运行完整
-                Stash。先在拾录中安装规则并启用所需刮削器，再保存连接配置、刷新源列表。仅列出已启用且具有可用影片动作的源；仅
-                URL 的源需在详情页填写来源 URL。规则每日更新由拾录服务管理。
-              </p>
-            </template>
-            <template v-else-if="isStash">
+            <template v-if="isStash">
               <el-form-item label="Stash 服务地址">
                 <el-input v-model="form.stash_base_url" placeholder="http://stash:9999" />
                 <span class="field-hint muted block">填写服务根地址或完整的 /graphql 地址</span>
@@ -698,6 +683,66 @@ onMounted(() => {
                 </span>
               </div>
             </el-form-item>
+
+            <section class="scraper-test span-full" aria-labelledby="scraper-test-heading">
+              <header class="scraper-test-heading">
+                <div>
+                  <h3 id="scraper-test-heading">测试刮削器</h3>
+                  <p>执行一次真实查询并预览返回结果，不会修改媒体库。服务地址和凭证使用已保存的配置。</p>
+                </div>
+              </header>
+              <div class="scraper-test-fields">
+                <el-select
+                  v-model="scraperTestProvider"
+                  clearable
+                  filterable
+                  placeholder="按当前优先级或自动选择"
+                  aria-label="测试刮削器"
+                >
+                  <el-option label="按当前优先级或自动选择" value="" />
+                  <el-option
+                    v-for="provider in allProviderOptions"
+                    :key="`test-${provider}`"
+                    :label="providerLabel(provider)"
+                    :value="provider"
+                  />
+                </el-select>
+                <el-input
+                  v-model="scraperTestQuery"
+                  clearable
+                  maxlength="2048"
+                  :placeholder="isStash ? '输入番号、标题或来源 URL' : '输入番号或标题，例如 SSIS-001'"
+                  aria-label="刮削器测试查询"
+                  @keydown.enter.prevent="runScraperTest"
+                />
+                <el-button type="primary" :loading="scraperTesting" @click="runScraperTest">
+                  <AppIcon name="search" :size="14" />开始测试
+                </el-button>
+              </div>
+              <div
+                v-if="scraperTestResult"
+                class="scraper-test-result"
+                :class="{ matched: scraperTestResult.matched, missed: !scraperTestResult.matched }"
+                role="status"
+              >
+                <div class="scraper-test-status">
+                  <strong>{{ scraperTestResult.matched ? '匹配成功' : '未找到匹配结果' }}</strong>
+                  <span>{{ scrapeSources[scraperTestResult.source].label }} · {{ scraperTestResult.elapsed_ms }} ms</span>
+                </div>
+                <dl v-if="scraperTestResult.result" class="scraper-test-facts">
+                  <div><dt>标题</dt><dd>{{ scraperTestResult.result.title || '—' }}</dd></div>
+                  <div><dt>番号</dt><dd>{{ scraperTestResult.result.number || '—' }}</dd></div>
+                  <div><dt>来源</dt><dd>{{ scraperTestResult.result.provider || '—' }}</dd></div>
+                  <div><dt>发行日期</dt><dd>{{ scraperTestResult.result.release_date || '—' }}</dd></div>
+                  <div class="wide"><dt>演员</dt><dd>{{ scraperTestResult.result.actors?.join('、') || '—' }}</dd></div>
+                </dl>
+                <details v-if="scraperTestResult.result" class="scraper-test-json">
+                  <summary>查看完整返回</summary>
+                  <pre>{{ JSON.stringify(scraperTestResult.result, null, 2) }}</pre>
+                </details>
+                <p v-else>连接与查询已完成，但当前输入没有命中；可更换刮削器或查询内容后重试。</p>
+              </div>
+            </section>
 
           </el-form>
         </section>
@@ -1235,6 +1280,108 @@ onMounted(() => {
 .pri-actions :deep(.el-button.is-disabled) {
   opacity: 0.35;
 }
+.scraper-test {
+  padding-top: 24px;
+  border-top: 1px solid var(--border-subtle);
+}
+.scraper-test-heading h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.scraper-test-heading p {
+  margin: 6px 0 0;
+  color: var(--faint);
+  font-size: 11px;
+  line-height: 1.8;
+}
+.scraper-test-fields {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.8fr) minmax(240px, 1.4fr) auto;
+  gap: 10px;
+  margin-top: 15px;
+}
+.scraper-test-fields :deep(.el-select),
+.scraper-test-fields :deep(.el-input) {
+  width: 100%;
+}
+.scraper-test-result {
+  margin-top: 14px;
+  padding: 15px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.scraper-test-result.matched {
+  border-color: var(--accent-line);
+}
+.scraper-test-result.missed {
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--border-subtle));
+}
+.scraper-test-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.scraper-test-status strong {
+  color: var(--text-soft);
+  font-size: 12px;
+}
+.scraper-test-result.matched .scraper-test-status strong {
+  color: var(--ok);
+}
+.scraper-test-status span,
+.scraper-test-result > p {
+  color: var(--faint);
+  font-size: 10px;
+}
+.scraper-test-result > p {
+  margin: 11px 0 0;
+  line-height: 1.8;
+}
+.scraper-test-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 18px;
+  margin: 15px 0 0;
+}
+.scraper-test-facts > div {
+  min-width: 0;
+}
+.scraper-test-facts .wide {
+  grid-column: 1 / -1;
+}
+.scraper-test-facts dt {
+  color: var(--faint);
+  font-size: 10px;
+}
+.scraper-test-facts dd {
+  margin: 3px 0 0;
+  color: var(--text-soft);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.scraper-test-json {
+  margin-top: 13px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.scraper-test-json summary {
+  cursor: pointer;
+}
+.scraper-test-json pre {
+  max-height: 320px;
+  overflow: auto;
+  margin: 10px 0 0;
+  padding: 12px;
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  color: var(--faint);
+  font-size: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .directory-info {
   display: flex;
   gap: 12px;
@@ -1412,6 +1559,9 @@ onMounted(() => {
   }
   .settings-form {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .scraper-test-fields {
+    grid-template-columns: 1fr;
   }
 }
 @media (max-width: 860px) {
